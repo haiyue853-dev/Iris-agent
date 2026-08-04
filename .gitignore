@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.worktrees/
+.env
+data/
+web/node_modules/
+web-react/node_modules/
+web-react/dist/
+diagrams/drafts/
+diagrams/exports/
+workspace/

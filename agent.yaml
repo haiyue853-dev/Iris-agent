@@ -1,0 +1,25 @@
+name: iris-agent
+display_name: Iris Agent
+version: 0.1.0
+
+llm:
+  provider: openai_compatible
+  model: deepseek-chat
+  base_url: https://api.deepseek.com/v1
+  temperature: 0.2
+  timeout_seconds: 60
+
+agent:
+  system_prompt: 你是 Iris Agent，一个智能助手。始终使用中文与用户交流。
+  max_tool_rounds: 8
+
+sessions:
+  directory: data/sessions
+
+tools:
+  enabled:
+    - current_time
+    - list_directory
+    - read_file
+  workspace_root: workspace
+  max_read_chars: 20000
