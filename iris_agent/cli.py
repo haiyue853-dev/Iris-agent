@@ -5,7 +5,9 @@ from iris_agent.bootstrap import build_application
 
 def main() -> None:
     load_dotenv()
-    service, sessions, _ = build_application()
+    application = build_application()
+    service = application.agent
+    sessions = application.sessions
     session = sessions.create("CLI 会话")
     print("Iris Agent（输入 quit 退出，new 新建会话）")
     while True:

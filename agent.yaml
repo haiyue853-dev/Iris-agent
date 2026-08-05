@@ -16,6 +16,12 @@ agent:
 sessions:
   directory: data/sessions
 
+reports:
+  directory: data/reports
+  max_input_chars: 50000
+  max_revision_chars: 2000
+  max_versions: 20
+
 tools:
   enabled:
     - current_time

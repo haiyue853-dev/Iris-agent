@@ -6,8 +6,8 @@ from iris_agent.api.app import create_app
 from iris_agent.bootstrap import build_application
 
 load_dotenv()
-service, sessions, settings = build_application()
-app = create_app(service, sessions)
+application = build_application()
+app = create_app(application.agent, application.sessions, application.reports)
 
 
 if __name__ == "__main__":
