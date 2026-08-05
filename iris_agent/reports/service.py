@@ -194,6 +194,19 @@ class DailyReportService:
             blocks.append(f"## {title}\n{lines}")
         return "\n\n".join(blocks) + "\n"
 
+    def list_reports(self) -> list[DailyReport]:
+        return self.repository.list()
+
+    def get_report(self, report_date: str) -> DailyReport:
+        return self.repository.get(report_date)
+
+    def get_version(self, report_date: str, version: int) -> ReportVersion:
+        report = self.repository.get(report_date)
+        selected = next((item for item in report.versions if item.number == version), None)
+        if selected is None:
+            raise ReportNotFoundError("日报版本不存在")
+        return selected
+
     def _existing(self, report_date: str) -> DailyReport | None:
         try:
             return self.repository.get(report_date)
