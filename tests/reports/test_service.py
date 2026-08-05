@@ -13,6 +13,7 @@ from iris_agent.reports.errors import (
 )
 from iris_agent.reports.repository import JsonDailyReportRepository
 from iris_agent.reports.service import DailyReportService
+from iris_agent.reports.models import ReportSections
 from iris_agent.sessions.json_store import JsonSessionRepository
 
 
@@ -171,3 +172,119 @@ def test_regenerate_creates_next_version_with_optimistic_lock(tmp_path) -> None:
     assert [item.number for item in second.versions] == [1, 2]
     assert second.current.sections.completed == ("第二版",)
     assert repository.get("2026-08-05").source_notes == "第二版记录"
+
+
+def test_manual_save_creates_version_and_preserves_sources(tmp_path) -> None:
+    service, _, _ = make_service(tmp_path, FakeProvider())
+    generated = service.generate("2026-08-05", "原始记录", None, include_chat=False)
+
+    saved = service.save_manual(
+        "2026-08-05",
+        ReportSections(completed=("手动修改",), problems=("等待反馈",)),
+        expected_version=generated.current_version,
+    )
+
+    assert saved.current_version == 2
+    assert saved.current.kind == "manual"
+    assert saved.current.sections.completed == ("手动修改",)
+    assert saved.source_notes == "原始记录"
+
+
+def test_manual_save_rejects_stale_version(tmp_path) -> None:
+    service, _, _ = make_service(tmp_path, FakeProvider())
+    service.generate("2026-08-05", "记录", None, include_chat=False)
+
+    with pytest.raises(ReportVersionConflictError):
+        service.save_manual("2026-08-05", ReportSections(), expected_version=0)
+
+
+def test_failed_revision_keeps_current_version(tmp_path) -> None:
+    provider = FakeProvider()
+    service, _, repository = make_service(tmp_path, provider)
+    original = service.generate("2026-08-05", "记录", None, include_chat=False)
+    provider.error = RuntimeError("provider failed")
+
+    with pytest.raises(ReportGenerationError):
+        service.revise("2026-08-05", "突出成果", original.current_version)
+
+    assert repository.get("2026-08-05").current_version == original.current_version
+
+
+def test_revision_uses_current_sections_and_creates_version(tmp_path) -> None:
+    provider = FakeProvider()
+    service, _, _ = make_service(tmp_path, provider)
+    original = service.generate("2026-08-05", "记录", None, include_chat=False)
+    provider.content = json.dumps(valid_sections(completed=["突出后的成果"]), ensure_ascii=False)
+
+    revised = service.revise("2026-08-05", "突出成果", original.current_version)
+
+    request_payload = json.loads(provider.calls[-1][0][-1].content)
+    assert request_payload["instruction"] == "突出成果"
+    assert request_payload["current_report"]["completed"] == ["完成日报服务"]
+    assert provider.calls[-1][1] == []
+    assert revised.current.kind == "ai_revision"
+    assert revised.current.instruction == "突出成果"
+    assert revised.current.sections.completed == ("突出后的成果",)
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", "x" * 2001])
+def test_revision_validates_instruction_length(tmp_path, instruction) -> None:
+    provider = FakeProvider()
+    service, _, _ = make_service(tmp_path, provider)
+    original = service.generate("2026-08-05", "记录", None, include_chat=False)
+    calls_before = len(provider.calls)
+
+    with pytest.raises(ReportValidationError):
+        service.revise("2026-08-05", instruction, original.current_version)
+
+    assert len(provider.calls) == calls_before
+
+
+def test_restore_creates_new_version_without_deleting_history(tmp_path) -> None:
+    service, _, _ = make_service(tmp_path, FakeProvider())
+    first = service.generate("2026-08-05", "记录", None, include_chat=False)
+    second = service.save_manual(
+        "2026-08-05",
+        ReportSections(completed=("手动版本",)),
+        expected_version=first.current_version,
+    )
+
+    restored = service.restore("2026-08-05", 1, second.current_version)
+
+    assert restored.current_version == 3
+    assert restored.current.kind == "restored"
+    assert restored.current.sections == first.current.sections
+    assert [item.number for item in restored.versions] == [1, 2, 3]
+
+
+def test_render_markdown_uses_fixed_sections_and_supports_old_version(tmp_path) -> None:
+    provider = FakeProvider(
+        json.dumps(
+            valid_sections(
+                completed=["完成 **日报**"],
+                in_progress=[],
+                problems=["接口等待确认"],
+                next_day=[],
+                assistance=[],
+            ),
+            ensure_ascii=False,
+        )
+    )
+    service, _, _ = make_service(tmp_path, provider)
+    first = service.generate("2026-08-05", "记录", None, include_chat=False)
+    service.save_manual(
+        "2026-08-05",
+        ReportSections(completed=("第二版",)),
+        expected_version=first.current_version,
+    )
+
+    markdown = service.render_markdown("2026-08-05", version=1)
+
+    assert markdown == (
+        "# 2026 年 8 月 5 日工作日报\n\n"
+        "## 今日完成\n- 完成 **日报**\n\n"
+        "## 进行中\n- 无\n\n"
+        "## 遇到的问题\n- 接口等待确认\n\n"
+        "## 明日计划\n- 无\n\n"
+        "## 需要协助\n- 无\n"
+    )
