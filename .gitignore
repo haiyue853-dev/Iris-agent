@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .worktrees/
+.superpowers/
 .env
 data/
 web/node_modules/
