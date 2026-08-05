@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Session } from '../types';
+import type { AppView, Session } from '../types';
 import ConfirmDialog from './ConfirmDialog';
 
 interface SidebarProps {
@@ -10,6 +10,8 @@ interface SidebarProps {
   sessions: Session[];
   onSessionSwitch: (sessionId: string) => void;
   onSessionDelete: (sessionId: string) => void;
+  activeView: AppView;
+  onViewChange: (view: AppView) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -20,6 +22,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   sessions,
   onSessionSwitch,
   onSessionDelete,
+  activeView,
+  onViewChange,
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -80,6 +84,21 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="btn-text">新建会话</span>
             <span className="shortcut">Ctrl K</span>
           </button>
+
+          <div className="primary-view-nav" aria-label="主要功能">
+            <button
+              className={`primary-view-btn ${activeView === 'chat' ? 'active' : ''}`}
+              onClick={() => onViewChange('chat')}
+            >
+              聊天
+            </button>
+            <button
+              className={`primary-view-btn ${activeView === 'reports' ? 'active' : ''}`}
+              onClick={() => onViewChange('reports')}
+            >
+              日报
+            </button>
+          </div>
 
           <nav className="sidebar-menu">
             <div className="menu-section-title">对话</div>

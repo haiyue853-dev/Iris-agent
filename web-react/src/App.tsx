@@ -3,12 +3,16 @@ import Sidebar from './components/Sidebar';
 import WelcomePage from './components/WelcomePage';
 import ChatContainer from './components/ChatContainer';
 import { useChat } from './hooks/useChat';
+import type { AppView } from './types';
 import './App.css';
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [welcomeInput, setWelcomeInput] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [activeView, setActiveView] = useState<AppView>(() => (
+    localStorage.getItem('iris_active_view') === 'reports' ? 'reports' : 'chat'
+  ));
 
   const {
     messages,
@@ -34,9 +38,11 @@ function App() {
         e.preventDefault();
         if (messages.length > 0) {
           if (confirm('确定要新建会话吗？')) {
+            setActiveView('chat');
             handleNewChat();
           }
         } else {
+          setActiveView('chat');
           handleNewChat();
         }
       }
@@ -44,6 +50,10 @@ function App() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [handleNewChat, messages.length]);
+
+  useEffect(() => {
+    localStorage.setItem('iris_active_view', activeView);
+  }, [activeView]);
 
   const handleWelcomeSend = () => {
     const msg = welcomeInput.trim();
@@ -60,21 +70,29 @@ function App() {
   };
 
   const hasMessages = messages.length > 0;
+  const handleNewChatFromSidebar = () => {
+    setActiveView('chat');
+    handleNewChat();
+  };
 
   return (
     <>
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        onNewChat={handleNewChat}
+        onNewChat={handleNewChatFromSidebar}
         currentSessionId={currentSessionId}
         sessions={sessions}
         onSessionSwitch={handleSwitchSession}
         onSessionDelete={handleDeleteSession}
+        activeView={activeView}
+        onViewChange={setActiveView}
       />
 
       <main className="main-content">
-        {!hasMessages ? (
+        {activeView === 'reports' ? (
+          <div className="report-placeholder" aria-label="日报页面">日报工作台</div>
+        ) : !hasMessages ? (
           <WelcomePage
             inputValue={welcomeInput}
             onInputChange={setWelcomeInput}
