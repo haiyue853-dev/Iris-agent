@@ -7,9 +7,12 @@ from iris_agent.reports.errors import (
     ReportVersionConflictError,
 )
 from iris_agent.reports.models import DailyReport, ReportSections, ReportSourceMessage, ReportVersion
+from iris_agent.reports.repository import DailyReportRepository, JsonDailyReportRepository
 
 __all__ = [
     "DailyReport",
+    "DailyReportRepository",
+    "JsonDailyReportRepository",
     "ReportError",
     "ReportGenerationError",
     "ReportNotFoundError",
