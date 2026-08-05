@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import WelcomePage from './components/WelcomePage';
 import ChatContainer from './components/ChatContainer';
+import DailyReportPage from './components/reports/DailyReportPage';
 import { useChat } from './hooks/useChat';
 import type { AppView } from './types';
 import './App.css';
@@ -91,7 +92,7 @@ function App() {
 
       <main className="main-content">
         {activeView === 'reports' ? (
-          <div className="report-placeholder" aria-label="日报页面">日报工作台</div>
+          <DailyReportPage currentSessionId={currentSessionId} />
         ) : !hasMessages ? (
           <WelcomePage
             inputValue={welcomeInput}
