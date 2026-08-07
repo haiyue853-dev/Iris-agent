@@ -15,6 +15,11 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
+const testDate = (() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+})();
+
 const reportAt = (date: string, version = 1, completed = '完成日报'): DailyReport => ({
   ...sampleReport,
   date,
@@ -42,7 +47,7 @@ vi.mock('../api/reports', async () => {
 });
 
 const sampleReport: DailyReport = {
-  date: '2026-08-05',
+  date: testDate,
   source_notes: '记录',
   source_session_id: null,
   current_version: 1,
@@ -143,7 +148,7 @@ describe('useDailyReports', () => {
 
   it('debounces manual saves and keeps local content when saving fails', async () => {
     vi.mocked(reportsApi.listReports).mockResolvedValue([
-      { date: '2026-08-05', summary: '完成日报', current_version: 1, updated_at: 1 },
+      { date: testDate, summary: '完成日报', current_version: 1, updated_at: 1 },
     ]);
     vi.mocked(reportsApi.saveReport).mockRejectedValue(new Error('保存失败'));
     const { result } = renderHook(() => useDailyReports({ currentSessionId: '' }));
@@ -160,12 +165,12 @@ describe('useDailyReports', () => {
 
   it('keeps edits made while an earlier save is still running', async () => {
     vi.mocked(reportsApi.listReports).mockResolvedValue([
-      { date: '2026-08-05', summary: '完成日报', current_version: 1, updated_at: 1 },
+      { date: testDate, summary: '完成日报', current_version: 1, updated_at: 1 },
     ]);
     const firstSave = deferred<DailyReport>();
     vi.mocked(reportsApi.saveReport)
       .mockReturnValueOnce(firstSave.promise)
-      .mockResolvedValueOnce(reportAt('2026-08-05', 3, '第二次编辑'));
+      .mockResolvedValueOnce(reportAt(testDate, 3, '第二次编辑'));
     const { result } = renderHook(() => useDailyReports({ currentSessionId: '' }));
     await waitFor(() => expect(result.current.report).not.toBeNull());
     vi.useFakeTimers();
@@ -173,22 +178,22 @@ describe('useDailyReports', () => {
     act(() => result.current.updateSection('completed', ['第一次编辑']));
     act(() => vi.advanceTimersByTime(600));
     act(() => result.current.updateSection('completed', ['第二次编辑']));
-    firstSave.resolve(reportAt('2026-08-05', 2, '第一次编辑'));
+    firstSave.resolve(reportAt(testDate, 2, '第一次编辑'));
     await act(async () => firstSave.promise);
 
     expect(result.current.draftSections.completed).toEqual(['第二次编辑']);
     await act(() => vi.advanceTimersByTimeAsync(600));
     expect(reportsApi.saveReport).toHaveBeenLastCalledWith(
-      '2026-08-05',
+      testDate,
       expect.objectContaining({ completed: ['第二次编辑'] }),
       2,
     );
   });
 
   it('reloads the server version after a version conflict', async () => {
-    const latest = reportAt('2026-08-05', 2, '其他窗口修改');
+    const latest = reportAt(testDate, 2, '其他窗口修改');
     vi.mocked(reportsApi.listReports).mockResolvedValue([
-      { date: '2026-08-05', summary: '完成日报', current_version: 1, updated_at: 1 },
+      { date: testDate, summary: '完成日报', current_version: 1, updated_at: 1 },
     ]);
     vi.mocked(reportsApi.getReport)
       .mockResolvedValueOnce(sampleReport)
@@ -209,13 +214,13 @@ describe('useDailyReports', () => {
   });
 
   it('retries a failed save and restores an older version', async () => {
-    const restored = reportAt('2026-08-05', 2, '恢复内容');
+    const restored = reportAt(testDate, 2, '恢复内容');
     vi.mocked(reportsApi.listReports).mockResolvedValue([
-      { date: '2026-08-05', summary: '完成日报', current_version: 1, updated_at: 1 },
+      { date: testDate, summary: '完成日报', current_version: 1, updated_at: 1 },
     ]);
     vi.mocked(reportsApi.saveReport)
       .mockRejectedValueOnce(new Error('保存失败'))
-      .mockResolvedValueOnce(reportAt('2026-08-05', 2, '本地修改'));
+      .mockResolvedValueOnce(reportAt(testDate, 2, '本地修改'));
     vi.mocked(reportsApi.restoreReport).mockResolvedValue(restored);
     const { result } = renderHook(() => useDailyReports({ currentSessionId: '' }));
     await waitFor(() => expect(result.current.report).not.toBeNull());
@@ -228,7 +233,7 @@ describe('useDailyReports', () => {
     expect(result.current.saveState).toBe('saved');
 
     await act(async () => result.current.restore(1));
-    expect(reportsApi.restoreReport).toHaveBeenCalledWith('2026-08-05', 1, 2);
+    expect(reportsApi.restoreReport).toHaveBeenCalledWith(testDate, 1, 2);
     expect(result.current.draftSections.completed).toEqual(['恢复内容']);
   });
 });

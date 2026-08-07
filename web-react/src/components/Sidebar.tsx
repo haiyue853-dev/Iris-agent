@@ -106,7 +106,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div
                 key={session.id}
                 className={`menu-item session-item ${session.id === currentSessionId ? 'active' : ''}`}
-                onClick={() => onSessionSwitch(session.id)}
+                onClick={() => {
+                  onViewChange('chat');
+                  onSessionSwitch(session.id);
+                }}
                 onMouseEnter={() => setHoveredId(session.id)}
                 onMouseLeave={() => setHoveredId(null)}
               >

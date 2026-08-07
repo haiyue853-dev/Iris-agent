@@ -25,4 +25,27 @@ describe('Sidebar navigation', () => {
 
     expect(onViewChange).toHaveBeenCalledWith('reports');
   });
+
+  it('returns to chat when selecting a conversation from the report view', async () => {
+    const onViewChange = vi.fn();
+    const onSessionSwitch = vi.fn();
+    render(
+      <Sidebar
+        collapsed={false}
+        onToggle={vi.fn()}
+        onNewChat={vi.fn()}
+        currentSessionId=""
+        sessions={[{ id: 'session_1', name: '日报来源', created_at: 1, updated_at: 1 }]}
+        onSessionSwitch={onSessionSwitch}
+        onSessionDelete={vi.fn()}
+        activeView="reports"
+        onViewChange={onViewChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByText('日报来源'));
+
+    expect(onSessionSwitch).toHaveBeenCalledWith('session_1');
+    expect(onViewChange).toHaveBeenCalledWith('chat');
+  });
 });
