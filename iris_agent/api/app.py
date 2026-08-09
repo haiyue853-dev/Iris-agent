@@ -20,9 +20,11 @@ from iris_agent.api.aihot_daily_api import router as aihot_daily_router
 from iris_agent.api.world_news_api import router as world_news_router
 from iris_agent.api.tech_news_api import router as tech_news_router
 from iris_agent.api.settings_api import register_settings_routes
+from iris_agent.api.skills_api import register_skills_routes
 from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
 from iris_agent.core.errors import IrisError, SessionNotFoundError
+from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -123,6 +125,7 @@ def create_app(
     reports: DailyReportService | None = None,
     attachments: AttachmentRepository | None = None,
     extractor: LocalAttachmentExtractor | None = None,
+    skills: SkillCenterService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -137,6 +140,9 @@ def create_app(
     register_settings_routes(app, service)
     # UML 流程图生成（复用现有 LLM provider）
     register_uml_routes(app, service)
+    # Skills 中心（可选注入；不注入则不注册路由，保持既有测试兼容）
+    if skills is not None:
+        register_skills_routes(app, skills)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
