@@ -36,8 +36,9 @@ def test_build_application_exposes_skill_center_service(tmp_path, monkeypatch):
     application = build_application(config)
 
     assert application.skills is not None
-    assert application.skills.root == tmp_path / "skills"
-    # 服务创建后数据目录应存在
+    # catalog 指向包内 bundled 目录；状态文件目录为配置的数据目录
+    assert application.skills.catalog_root.is_dir()
+    assert application.skills.settings_file == tmp_path / "skills" / "settings.json"
     assert (tmp_path / "skills").is_dir()
 
 

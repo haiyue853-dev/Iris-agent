@@ -131,7 +131,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000))),
         skills=SkillSettings(
             directory=Path(skills.get("directory", "data/skills")),
-            settings_file=Path(skills.get("settings_file", "data/skills/settings.json")),
+            settings_file=Path(skills.get("settings_file", str(Path(str(skills.get("directory", "data/skills"))) / "settings.json"))),
         ),
         documents=DocumentSettings(
             directory=Path(documents.get("directory", "data/documents")),

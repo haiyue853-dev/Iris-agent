@@ -11,16 +11,20 @@ from iris_agent.skill_center.repository import SkillStateRepository, now_iso
 
 @dataclass(slots=True)
 class SkillCenterService:
-    """管理受信任的打包 Skill 元数据与启用状态；不执行任何 Skill 脚本。"""
+    """管理受信任的打包 Skill 元数据与启用状态；不执行任何 Skill 脚本。
 
-    root: Path
+    catalog_root: 包内 bundled 只读目录（SKILL.md 定义）
+    settings_file: 用户数据目录中的状态文件（启用状态）
+    """
+
+    catalog_root: Path
     settings_file: Path
     _catalog: SkillCatalog = field(init=False, repr=False)
     _repository: SkillStateRepository = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        self._catalog = SkillCatalog(self.root)
+        self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+        self._catalog = SkillCatalog(self.catalog_root)
         self._repository = SkillStateRepository(self.settings_file)
 
     def list_skills(self) -> list[SkillInfo]:

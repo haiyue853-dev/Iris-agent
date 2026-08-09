@@ -64,7 +64,10 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_total_bytes=settings.reports.max_attachment_total_bytes,
         max_count=settings.reports.max_attachment_count,
     )
-    skills = SkillCenterService(settings.skills.directory, settings.skills.settings_file)
+    skills = SkillCenterService(
+        Path(__file__).parent / "skill_center" / "bundled",
+        settings.skills.settings_file,
+    )
     documents = DocumentService(settings.documents.directory)
     hot_radar = HotRadarService(settings.hot_radar.directory)
     return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, settings)
