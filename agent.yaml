@@ -34,3 +34,19 @@ tools:
     - read_file
   workspace_root: workspace
   max_read_chars: 20000
+
+skills:
+  directory: data/skills
+  settings_file: data/skills/settings.json
+
+documents:
+  directory: data/documents
+  max_file_bytes: 10000000
+  max_total_bytes: 50000000
+  max_count: 50
+  max_text_chars: 50000
+
+hot_radar:
+  directory: data/hot_radar
+  poll_interval_seconds: 60
+  timezone: Asia/Shanghai

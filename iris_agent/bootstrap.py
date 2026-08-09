@@ -5,12 +5,15 @@ from openai import OpenAI
 
 from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
+from iris_agent.documents.service import DocumentService
+from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
 from iris_agent.reports.service import DailyReportService
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
+from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
 from iris_agent.tools.registry import ToolRegistry
 
@@ -21,6 +24,9 @@ class ApplicationServices:
     sessions: SessionRepository
     reports: DailyReportService
     attachments: AttachmentRepository
+    skills: SkillCenterService
+    documents: DocumentService
+    hot_radar: HotRadarService
     settings: Settings
 
 
@@ -58,4 +64,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_total_bytes=settings.reports.max_attachment_total_bytes,
         max_count=settings.reports.max_attachment_count,
     )
-    return ApplicationServices(agent, sessions, reports, attachments, settings)
+    skills = SkillCenterService(settings.skills.directory, settings.skills.settings_file)
+    documents = DocumentService(settings.documents.directory)
+    hot_radar = HotRadarService(settings.hot_radar.directory)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, settings)
