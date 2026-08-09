@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 from openai import OpenAI
@@ -5,12 +6,25 @@ from openai import OpenAI
 from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
+from iris_agent.reports.attachments import AttachmentRepository
+from iris_agent.reports.repository import JsonDailyReportRepository
+from iris_agent.reports.service import DailyReportService
+from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
-def build_application(config_path: str | Path = "agent.yaml"):
+@dataclass(frozen=True, slots=True)
+class ApplicationServices:
+    agent: AgentService
+    sessions: SessionRepository
+    reports: DailyReportService
+    attachments: AttachmentRepository
+    settings: Settings
+
+
+def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServices:
     settings = load_settings(config_path)
     client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
     provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
@@ -26,4 +40,22 @@ def build_application(config_path: str | Path = "agent.yaml"):
             registry.register(factories[name]())
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
-    return AgentService(loop, sessions, settings.agent.system_prompt), sessions, settings
+    agent = AgentService(loop, sessions, settings.agent.system_prompt)
+    report_repository = JsonDailyReportRepository(
+        settings.reports.directory,
+        max_versions=settings.reports.max_versions,
+    )
+    reports = DailyReportService(
+        provider,
+        sessions,
+        report_repository,
+        max_input_chars=settings.reports.max_input_chars,
+        max_revision_chars=settings.reports.max_revision_chars,
+    )
+    attachments = AttachmentRepository(
+        settings.reports.attachments_directory,
+        max_file_bytes=settings.reports.max_attachment_bytes,
+        max_total_bytes=settings.reports.max_attachment_total_bytes,
+        max_count=settings.reports.max_attachment_count,
+    )
+    return ApplicationServices(agent, sessions, reports, attachments, settings)

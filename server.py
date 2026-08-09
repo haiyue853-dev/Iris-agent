@@ -4,10 +4,14 @@ from dotenv import load_dotenv
 
 from iris_agent.api.app import create_app
 from iris_agent.bootstrap import build_application
+from iris_agent.reports.extraction import LocalAttachmentExtractor
 
 load_dotenv()
-service, sessions, settings = build_application()
-app = create_app(service, sessions)
+application = build_application()
+app = create_app(
+    application.agent, application.sessions, application.reports, application.attachments,
+    LocalAttachmentExtractor(application.settings.reports.max_attachment_text_chars),
+)
 
 
 if __name__ == "__main__":

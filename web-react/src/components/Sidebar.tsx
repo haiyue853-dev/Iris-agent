@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import type { Session } from '../types';
+import type { AppView } from '../App';
 import ConfirmDialog from './ConfirmDialog';
+import SettingsModal from './settings/SettingsModal';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -10,6 +12,8 @@ interface SidebarProps {
   sessions: Session[];
   onSessionSwitch: (sessionId: string) => void;
   onSessionDelete: (sessionId: string) => void;
+  activeView: AppView;
+  onViewChange: (view: AppView) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -20,9 +24,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   sessions,
   onSessionSwitch,
   onSessionDelete,
+  activeView,
+  onViewChange,
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleDeleteRequest = (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -81,13 +88,64 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="shortcut">Ctrl K</span>
           </button>
 
+          <nav className="sidebar-view-nav">
+            <div
+              className={`view-item ${activeView === 'chat' ? 'active' : ''}`}
+              onClick={() => onViewChange('chat')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              </svg>
+              <span className="view-label">聊天</span>
+            </div>
+            <button
+              type="button"
+              className={`view-item report-view-item ${activeView === 'reports' ? 'active' : ''}`}
+              onClick={() => onViewChange('reports')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3h9l3 3v15H6z" />
+                <path d="M15 3v4h4M9 12h6M9 16h4" />
+              </svg>
+              <span className="view-label">AI 日报</span>
+            </button>
+            <div
+              className={`view-item ${activeView === 'aihot' ? 'active' : ''}`}
+              onClick={() => onViewChange('aihot')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
+                <path d="M18 14h-8" />
+                <path d="M15 18h-5" />
+                <path d="M10 6h8v4h-8V6z" />
+              </svg>
+              <span className="view-label">每日资讯</span>
+            </div>
+            <div
+              className={`view-item ${activeView === 'uml' ? 'active' : ''}`}
+              onClick={() => onViewChange('uml')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                <path d="M10 6.5h4M6.5 10v4M17.5 10v4M10 17.5h4" />
+              </svg>
+              <span className="view-label">流程图</span>
+            </div>
+          </nav>
+
           <nav className="sidebar-menu">
             <div className="menu-section-title">对话</div>
             {sessions.map((session) => (
               <div
                 key={session.id}
                 className={`menu-item session-item ${session.id === currentSessionId ? 'active' : ''}`}
-                onClick={() => onSessionSwitch(session.id)}
+                onClick={() => {
+                  onViewChange('chat');
+                  onSessionSwitch(session.id);
+                }}
                 onMouseEnter={() => setHoveredId(session.id)}
                 onMouseLeave={() => setHoveredId(null)}
               >
@@ -110,6 +168,16 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
             ))}
           </nav>
+
+          <div className="sidebar-footer">
+            <button className="sidebar-settings-btn" onClick={() => setSettingsOpen(true)} title="设置">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span className="btn-text">设置</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -121,6 +189,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           onCancel={() => setDeleteTarget(null)}
         />
       )}
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </>
   );
 };

@@ -2,13 +2,22 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import WelcomePage from './components/WelcomePage';
 import ChatContainer from './components/ChatContainer';
+import AihotDailyPage from './components/aihot/AihotDailyPage';
+import UmlFlowPage from './components/uml/UmlFlowPage';
+import DailyReportPage from './components/reports/DailyReportPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
+
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports';
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [welcomeInput, setWelcomeInput] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [activeView, setActiveView] = useState<AppView>(() => {
+    const saved = localStorage.getItem('iris_active_view');
+    return saved === 'aihot' || saved === 'uml' || saved === 'reports' ? saved : 'chat';
+  });
 
   const {
     messages,
@@ -27,6 +36,10 @@ function App() {
     handleDeleteSession,
   } = useChat();
 
+  useEffect(() => {
+    localStorage.setItem('iris_active_view', activeView);
+  }, [activeView]);
+
   // Ctrl+K shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -34,9 +47,11 @@ function App() {
         e.preventDefault();
         if (messages.length > 0) {
           if (confirm('确定要新建会话吗？')) {
+            setActiveView('chat');
             handleNewChat();
           }
         } else {
+          setActiveView('chat');
           handleNewChat();
         }
       }
@@ -59,6 +74,11 @@ function App() {
     handleSendWithSession(msg);
   };
 
+  const handleNewChatFromSidebar = () => {
+    setActiveView('chat');
+    handleNewChat();
+  };
+
   const hasMessages = messages.length > 0;
 
   return (
@@ -66,19 +86,28 @@ function App() {
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        onNewChat={handleNewChat}
+        onNewChat={handleNewChatFromSidebar}
         currentSessionId={currentSessionId}
         sessions={sessions}
         onSessionSwitch={handleSwitchSession}
         onSessionDelete={handleDeleteSession}
+        activeView={activeView}
+        onViewChange={setActiveView}
       />
 
-      <main className="main-content">
-        {!hasMessages ? (
+      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : undefined}>
+        {activeView === 'reports' ? (
+          <DailyReportPage currentSessionId={currentSessionId} />
+        ) : activeView === 'aihot' ? (
+          <AihotDailyPage />
+        ) : activeView === 'uml' ? (
+          <UmlFlowPage />
+        ) : !hasMessages ? (
           <WelcomePage
             inputValue={welcomeInput}
             onInputChange={setWelcomeInput}
             onSend={handleWelcomeSend}
+            onNavigate={setActiveView}
           />
         ) : (
           <ChatContainer

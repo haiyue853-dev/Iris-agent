@@ -69,7 +69,7 @@ Iris Agent 的近期目标从“完整复刻 Hermes Agent 的高级执行能力�
 ### 4.2 手动编辑与自动保存
 
 - 预览栏按章节编辑，而不是编辑整段原始 Markdown。
-- 前端停止输入 600 ms 后自动保存，并携带 `expected_version` 做乐观并发控制。
+- 前端停止输入 600 ms 后自动保存，并携带不可回退的 `expected_revision` 做乐观并发控制；恢复或日期切换会取消尚未发出的自动保存。
 - 同一批连续输入只产生一个手动编辑版本；服务端最多保留最近 20 个版本。
 - 保存期间显示“正在保存”，成功后显示“已保存”；失败时保留本地内容并显示“保存失败，可重试”，不能显示虚假的成功状态。
 
@@ -82,8 +82,9 @@ Iris Agent 的近期目标从“完整复刻 Hermes Agent 的高级执行能力�
 ### 4.4 版本恢复
 
 - 用户可查看当前日报的版本时间、类型和修改说明。
-- 恢复旧版本不会删除后续历史，而是基于旧内容创建新的 `restored` 版本。
-- 同一天始终只有一个当前版本。
+- 恢复旧版本不会删除后续历史，也不会复制或新建版本；被选中的历史版本直接成为当前版本。
+- 恢复成功后，页面自动切到日报预览区域并滚动到顶部；同一天始终只有一个当前版本。
+- 恢复会递增日报修订号，但不会改变历史版本列表；旧页面因此不能在恢复后覆盖当前内容。
 
 ### 4.5 复制和下载
 
@@ -120,6 +121,7 @@ class DailyReport:
     source_chat_snapshot: tuple[ReportSourceMessage, ...]
     versions: list[ReportVersion]
     current_version: int
+    revision: int  # 单调递增的写入令牌，不等同于历史版本号
     created_at: float
     updated_at: float
 ```
@@ -161,9 +163,9 @@ class DailyReport:
 - `POST /api/reports/generate`：创建或重新生成当天日报。
 - `POST /api/reports/{report_date}/revise`：AI 修改当前日报。
 - `PUT /api/reports/{report_date}`：保存手动编辑的结构化章节。
-- `POST /api/reports/{report_date}/versions/{version}/restore`：恢复指定版本并创建新版本。
+- `POST /api/reports/{report_date}/versions/{version}/restore`：将指定历史版本设为当前版本，不创建复制版本。
 
-所有修改请求携带 `expected_version`；冲突返回 HTTP 409 和稳定错误码 `report_version_conflict`。
+所有修改请求携带 `expected_revision`；响应同时返回 `current_version`（当前历史内容）和 `revision`（单调递增写入令牌）。为短期兼容，`expected_version` 可作为同值别名；冲突返回 HTTP 409 和稳定错误码 `report_version_conflict`。
 
 ### 7.3 下载
 
@@ -228,7 +230,7 @@ class DailyReport:
 - 生成成功、模型无效 JSON、模型异常和输入超限。
 - AI 修改失败不改变当前版本。
 - 手动保存的版本冲突。
-- 版本恢复创建新版本且不删除历史。
+- 版本恢复不创建新版本、不删除历史，并跳转到恢复后的预览内容。
 - Markdown 标题、章节、UTF-8 下载文件名和响应类型。
 - API 成功路径及全部稳定错误码。
 

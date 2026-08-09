@@ -4,6 +4,12 @@ fastapi>=0.115.0,<1
 uvicorn[standard]>=0.30.0,<1
 pyyaml>=6.0,<7
 pydantic>=2.0,<3
+python-multipart>=0.0.9,<1
+python-docx>=1.1.0,<2
+pypdf>=5.0.0,<6
+openpyxl>=3.1.0,<4
+xlrd>=2.0,<3
+pillow>=10.0.0,<12
 
 # Development and API tests
 pytest>=8.0,<10

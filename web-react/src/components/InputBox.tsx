@@ -47,7 +47,7 @@ const InputBox: React.FC<InputBoxProps> = ({
   const hasContent = value.trim().length > 0;
 
   return (
-    <div className="input-box">
+    <div className={`input-box ${hasContent ? 'has-content' : ''}`}>
       <textarea
         ref={textareaRef}
         className="input-textarea"
@@ -60,22 +60,21 @@ const InputBox: React.FC<InputBoxProps> = ({
       />
       <div className="input-footer">
         <div className="input-actions">
-          <button className="action-btn" title="添加">+</button>
+          <button className="action-btn" title="添加">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
         </div>
         <div className="input-right">
-          <span className="mode-selector">
-            快速 进阶
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-            </svg>
-          </span>
+          <span className="input-hint">Enter 发送 · Shift+Enter 换行</span>
           {onStop ? (
             <button
               className="send-btn stop"
               onClick={onStop}
               title="停止生成"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>
@@ -86,8 +85,10 @@ const InputBox: React.FC<InputBoxProps> = ({
               disabled={!hasContent || disabled}
               title="发送"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 19V5M5 12l7-7 7 7" />
+              {/* 圆形按钮 + 向上箭头（简洁版） */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
               </svg>
             </button>
           )}

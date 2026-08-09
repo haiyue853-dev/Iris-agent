@@ -30,6 +30,19 @@ class SessionSettings:
 
 
 @dataclass(slots=True)
+class ReportSettings:
+    directory: Path = Path("data/reports")
+    attachments_directory: Path = Path("data/report_attachments")
+    max_input_chars: int = 50_000
+    max_revision_chars: int = 2_000
+    max_versions: int = 20
+    max_attachment_bytes: int = 10_000_000
+    max_attachment_total_bytes: int = 50_000_000
+    max_attachment_count: int = 10
+    max_attachment_text_chars: int = 20_000
+
+
+@dataclass(slots=True)
 class ToolSettings:
     enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file"])
     workspace_root: Path = Path("workspace")
@@ -41,6 +54,7 @@ class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     sessions: SessionSettings = field(default_factory=SessionSettings)
+    reports: ReportSettings = field(default_factory=ReportSettings)
     tools: ToolSettings = field(default_factory=ToolSettings)
 
 
@@ -62,6 +76,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     llm = _section(raw, "llm")
     agent = _section(raw, "agent")
     sessions = _section(raw, "sessions")
+    reports = _section(raw, "reports")
     tools = _section(raw, "tools")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -74,8 +89,29 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         agent=AgentSettings(system_prompt=str(agent.get("system_prompt", raw.get("system_prompt", AgentSettings().system_prompt))), max_tool_rounds=int(agent.get("max_tool_rounds", 8))),
         sessions=SessionSettings(directory=Path(sessions.get("directory", raw.get("session_path", "data/sessions")))),
+        reports=ReportSettings(
+            directory=Path(reports.get("directory", "data/reports")),
+            attachments_directory=Path(reports.get("attachments_directory", "data/report_attachments")),
+            max_input_chars=int(reports.get("max_input_chars", 50_000)),
+            max_revision_chars=int(reports.get("max_revision_chars", 2_000)),
+            max_versions=int(reports.get("max_versions", 20)),
+            max_attachment_bytes=int(reports.get("max_attachment_bytes", 10_000_000)),
+            max_attachment_total_bytes=int(reports.get("max_attachment_total_bytes", 50_000_000)),
+            max_attachment_count=int(reports.get("max_attachment_count", 10)),
+            max_attachment_text_chars=int(reports.get("max_attachment_text_chars", 20_000)),
+        ),
         tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000))),
     )
     if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:
         raise ConfigurationError("模型名称不能为空，且 max_tool_rounds 必须大于 0")
+    if (
+        settings.reports.max_input_chars < 1
+        or settings.reports.max_revision_chars < 1
+        or settings.reports.max_versions < 1
+        or settings.reports.max_attachment_bytes < 1
+        or settings.reports.max_attachment_total_bytes < 1
+        or settings.reports.max_attachment_count < 1
+        or settings.reports.max_attachment_text_chars < 1
+    ):
+        raise ConfigurationError("日报输入限制和版本上限必须大于 0")
     return settings
