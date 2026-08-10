@@ -5,6 +5,8 @@ import { analyzeUml } from '../../api/uml';
 import { buildDiagramSvg } from './exportDiagram';
 import type { UmlDiagramType } from '../../types';
 import FlowCanvas, { makeEdge, styleEdge, type CtxTarget } from './FlowCanvas';
+import DrawioEditor from './DrawioEditor';
+import { hasSavedDrawioDiagram } from './drawioStorage';
 import ShapePalette from './ShapePalette';
 import PropertiesPanel, { type NodePanelData, type EdgePanelData } from './PropertiesPanel';
 import ContextMenu, { type CtxMenuState, type CtxMenuAction } from './ContextMenu';
@@ -159,6 +161,7 @@ function mkImageNode(
 
 type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
 type DistMode = 'X' | 'Y';
+type EditorMode = 'professional' | 'classic';
 
 export default function UmlFlowPage() {
   const [prompt, setPrompt] = useState('');
@@ -166,6 +169,10 @@ export default function UmlFlowPage() {
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState('');
   const [mermaidCode, setMermaidCode] = useState('');
+  const [editorMode, setEditorMode] = useState<EditorMode>('professional');
+  const [drawioImportRequest, setDrawioImportRequest] = useState<number | null>(null);
+  const nextDrawioImportRequestRef = useRef(0);
+  const [hasDrawioContent, setHasDrawioContent] = useState(false);
   const [svg, setSvg] = useState('');
   const [renderError, setRenderError] = useState('');
   const renderSeq = useRef(0);
@@ -195,6 +202,7 @@ export default function UmlFlowPage() {
   }, [flowEdges]);
 
   const isBoardMode = BOARD_TYPES.includes(diagramType);
+  const isClassicBoardMode = editorMode === 'classic' && isBoardMode;
 
   // ---------- 历史栈 ----------
   const historyRef = useRef<{ n: Node[]; e: Edge[] }[]>([]);
@@ -209,7 +217,7 @@ export default function UmlFlowPage() {
 
   // ---------- 自动保存（操作完成时写入 localStorage） ----------
   const saveBoard = useCallback(() => {
-    if (!isBoardMode) return;
+    if (!isClassicBoardMode) return;
     // 仅序列化图形节点（图片节点不进入 mermaid 源码，但存入 localStorage 以便恢复）
     const flowNodesOnly = nodesRef.current.filter((n) => (n.data as { src?: string }).src === undefined);
     const code = serializeFlowchart(
@@ -244,7 +252,7 @@ export default function UmlFlowPage() {
       })),
       savedAt: Date.now(),
     });
-  }, [isBoardMode, direction, prompt, diagramType]);
+  }, [isClassicBoardMode, direction, prompt, diagramType]);
 
   const undo = useCallback(() => {
     if (histIdx.current <= 0) return;
@@ -316,7 +324,7 @@ export default function UmlFlowPage() {
     const handler = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
-      if (!isBoardMode) return;
+      if (!isClassicBoardMode) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -336,7 +344,7 @@ export default function UmlFlowPage() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isBoardMode, undo, redo, handleCopy, handlePaste, setFlowNodes]);
+  }, [isClassicBoardMode, undo, redo, handleCopy, handlePaste, setFlowNodes]);
 
   // ---------- Mermaid 渲染（非 flowchart） ----------
   const renderDiagram = useCallback(async (code: string) => {
@@ -499,7 +507,7 @@ export default function UmlFlowPage() {
   useEffect(() => {
     if (!boardActionRef.current) return;
     boardActionRef.current = false;
-    if (!isBoardMode) return;
+    if (!isClassicBoardMode) return;
     const code = serializeFlowchart(
       flowNodes
         .filter((n) => (n.data as { src?: string }).src === undefined)
@@ -511,7 +519,7 @@ export default function UmlFlowPage() {
       direction
     );
     setMermaidCode(code);
-  }, [flowNodes, flowEdges, direction, isBoardMode]);
+  }, [flowNodes, flowEdges, direction, isClassicBoardMode]);
 
   // ---------- 画板事件 ----------
   const handleNodesChange = useCallback(
@@ -853,8 +861,8 @@ export default function UmlFlowPage() {
     try {
       const result = await analyzeUml(prompt.trim(), diagramType);
       setMermaidCode(result.mermaid);
-      const ok = applyParsedToBoard(result.mermaid);
-      if (!ok) {
+      const ok = isClassicBoardMode ? applyParsedToBoard(result.mermaid) : false;
+      if (!ok && editorMode === 'classic') {
         setSvg('');
         setRenderError('');
         renderDiagram(result.mermaid);
@@ -870,14 +878,38 @@ export default function UmlFlowPage() {
   // ---------- 源码编辑 ----------
   const handleCodeEdit = (v: string) => {
     setMermaidCode(v);
-    if (isBoardMode) {
+    if (isClassicBoardMode) {
       const ok = applyParsedToBoard(v);
       if (ok) boardActionRef.current = false;
-      else renderDiagram(v);
-    } else {
+      else void renderDiagram(v);
+    } else if (editorMode === 'classic') {
       renderDiagram(v);
     }
   };
+
+  const switchEditorMode = (mode: EditorMode) => {
+    setEditorMode(mode);
+    if (mode !== 'classic' || !mermaidCode.trim()) return;
+    const initializedClassicBoard = isBoardMode && flowNodes.length === 0 ? applyParsedToBoard(mermaidCode) : false;
+    if (!initializedClassicBoard && (!isBoardMode || flowNodes.length === 0)) {
+      setSvg('');
+      setRenderError('');
+      void renderDiagram(mermaidCode);
+    }
+  };
+
+  const importMermaidToProfessionalCanvas = () => {
+    if (!mermaidCode.trim()) return;
+    if ((hasDrawioContent || hasSavedDrawioDiagram()) && !window.confirm('当前专业画布已有已编辑内容。导入 Mermaid 会替换画布内容，是否继续？')) {
+      return;
+    }
+    nextDrawioImportRequestRef.current += 1;
+    setDrawioImportRequest(nextDrawioImportRequestRef.current);
+  };
+
+  const handleDrawioImportConsumed = useCallback((request: number) => {
+    setDrawioImportRequest((current) => (current === request ? null : current));
+  }, []);
 
   const copyCode = async () => {
     if (!mermaidCode) return;
@@ -927,7 +959,7 @@ export default function UmlFlowPage() {
   };
 
   const hasResult = mermaidCode.trim().length > 0;
-  const boardReady = isBoardMode && flowNodes.length > 0;
+  const boardReady = isClassicBoardMode && flowNodes.length > 0;
 
   return (
     <div className="uml-page">
@@ -980,15 +1012,37 @@ export default function UmlFlowPage() {
       </div>
 
       {/* 结果区 */}
-      {hasResult && (
-        <div className="uml-result" ref={resultRef}>
+      <div className="uml-result" ref={resultRef}>
           <div className="uml-toolbar">
             <span className="uml-toolbar-type">
               {DIAGRAM_OPTIONS.find((o) => o.value === diagramType)?.label}
-              {isBoardMode && <span className="uml-toolbar-tag">可编辑画板</span>}
+              <span className="uml-toolbar-tag">{editorMode === 'professional' ? '专业画布' : '经典画布'}</span>
             </span>
             <div className="uml-toolbar-btns">
-              {isBoardMode && boardReady && (
+              <div className="uml-editor-mode" role="group" aria-label="流程图画布模式">
+                <button
+                  type="button"
+                  className={`uml-tool-btn ${editorMode === 'professional' ? 'active' : ''}`}
+                  aria-pressed={editorMode === 'professional'}
+                  onClick={() => switchEditorMode('professional')}
+                >
+                  专业画布
+                </button>
+                <button
+                  type="button"
+                  className={`uml-tool-btn ${editorMode === 'classic' ? 'active' : ''}`}
+                  aria-pressed={editorMode === 'classic'}
+                  onClick={() => switchEditorMode('classic')}
+                >
+                  经典画布
+                </button>
+              </div>
+              {editorMode === 'professional' && (
+                <button className="uml-tool-btn" onClick={importMermaidToProfessionalCanvas} disabled={!hasResult}>
+                  导入到专业画布
+                </button>
+              )}
+              {isClassicBoardMode && boardReady && (
                 <>
                   <button className="uml-tool-btn" onClick={handleAddNode} title="在画布中添加一个矩形节点">
                     + 节点
@@ -1017,7 +1071,7 @@ export default function UmlFlowPage() {
               <button className="uml-tool-btn" onClick={downloadMmd} title="下载 .mmd 源码文件">
                 下载 .mmd
               </button>
-              {!isBoardMode && (
+              {editorMode === 'classic' && !isBoardMode && (
                 <button className="uml-tool-btn" onClick={downloadPng} title="导出为 PNG 图片">
                   导出 PNG
                 </button>
@@ -1027,7 +1081,31 @@ export default function UmlFlowPage() {
 
           {renderError && <div className="uml-error">渲染错误：{renderError}</div>}
 
-          {boardReady ? (
+          {editorMode === 'professional' ? (
+            <>
+              <DrawioEditor
+                mermaidCode={mermaidCode}
+                importRequest={drawioImportRequest ?? 0}
+                onImportConsumed={handleDrawioImportConsumed}
+                onDiagramPresenceChange={setHasDrawioContent}
+                onSavedDiagramChange={setHasDrawioContent}
+              />
+              <div className="uml-editor uml-editor-professional-source">
+                <label className="uml-editor-head" htmlFor="uml-mermaid-source">
+                  Mermaid 源码
+                  <span className="uml-editor-hint">编辑后点击“导入到专业画布”才会替换 Draw.io 内容</span>
+                </label>
+                <textarea
+                  id="uml-mermaid-source"
+                  aria-label="Mermaid 源码"
+                  className="uml-editor-textarea uml-editor-textarea-short"
+                  value={mermaidCode}
+                  onChange={(e) => handleCodeEdit(e.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+            </>
+          ) : boardReady ? (
             <div className="uml-board">
               <ShapePalette onAdd={handleAddShape} />
                 <div className="uml-canvas-fl" ref={boardRef}>
@@ -1125,7 +1203,7 @@ export default function UmlFlowPage() {
             </div>
           )}
 
-          {isBoardMode && (
+          {isClassicBoardMode && (
             <div className="uml-editor">
               <div className="uml-editor-head">
                 Mermaid 源码
@@ -1140,7 +1218,6 @@ export default function UmlFlowPage() {
             </div>
           )}
         </div>
-      )}
 
       {/* 右键菜单 */}
       {ctxMenu && (

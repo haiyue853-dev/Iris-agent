@@ -2166,6 +2166,8 @@ button.view-item {
 .uml-toolbar-btns {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .uml-tool-btn {
   padding: 6px 13px;
@@ -2181,6 +2183,84 @@ button.view-item {
 .uml-tool-btn:hover {
   background: #e8e8ea;
   color: #1d1c23;
+}
+.uml-tool-btn.active {
+  color: var(--iris-text);
+  background: var(--iris-surface-muted);
+  border-color: var(--iris-border-strong);
+  box-shadow: inset 0 0 0 1px rgba(91, 106, 191, 0.12);
+}
+.uml-editor-mode {
+  display: inline-flex;
+  gap: 4px;
+  padding-right: 8px;
+  border-right: 1px solid var(--iris-border);
+}
+.drawio-editor {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--iris-surface);
+  border: 1px solid var(--iris-border);
+  border-radius: 12px;
+}
+.drawio-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
+  padding: 10px 14px;
+  background: var(--iris-surface);
+  border-bottom: 1px solid var(--iris-border);
+}
+.drawio-editor-head > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+.drawio-editor-head strong {
+  color: var(--iris-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.drawio-editor-head span {
+  color: var(--iris-text-subtle);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawio-editor-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.drawio-editor-frame {
+  display: block;
+  width: 100%;
+  height: min(780px, calc(100vh - 330px));
+  min-height: 540px;
+  border: 0;
+  background: var(--iris-background);
+}
+.drawio-editor-status {
+  min-height: 25px;
+  padding: 5px 14px;
+  border-top: 1px solid var(--iris-border);
+  color: var(--iris-text-subtle);
+  background: var(--iris-surface-muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+.uml-editor-professional-source {
+  margin-top: 12px;
+  border: 1px solid var(--iris-border);
+  border-radius: 12px;
+  overflow: hidden;
 }
 .uml-panes {
   display: grid;
@@ -2259,6 +2339,20 @@ button.view-item {
   .uml-canvas {
     border-right: none;
     border-bottom: 1px solid #e8e8ea;
+  }
+  .drawio-editor-frame {
+    height: 68vh;
+    min-height: 460px;
+  }
+  .drawio-editor-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .drawio-editor-head > div:first-child { width: 100%; }
+  .drawio-editor-actions { justify-content: flex-start; }
+  .uml-editor-mode {
+    padding-right: 0;
+    border-right: 0;
   }
 }
 
