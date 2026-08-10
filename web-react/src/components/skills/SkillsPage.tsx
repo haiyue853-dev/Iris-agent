@@ -14,7 +14,7 @@ function isEntryView(view: string): view is AppView {
 }
 
 export default function SkillsPage({ onNavigate }: SkillsPageProps) {
-  const { skills, loading, error, reload, toggleEnabled, togglingId } = useSkills();
+  const { skills, loading, error, reload, toggleEnabled, togglingIds, processingIds } = useSkills();
 
   const handleOpen = (skill: SkillInfo) => {
     if (skill.enabled && isEntryView(skill.entry_view)) {
@@ -53,7 +53,8 @@ export default function SkillsPage({ onNavigate }: SkillsPageProps) {
             <SkillCard
               key={skill.id}
               skill={skill}
-              toggling={togglingId === skill.id}
+              toggling={togglingIds.has(skill.id)}
+              processing={processingIds.has(skill.id)}
               onToggle={(id, enabled) => void toggleEnabled(id, enabled)}
               onOpen={handleOpen}
             />

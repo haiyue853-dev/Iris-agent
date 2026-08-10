@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,8 +51,27 @@ function response(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
+const PROCESSING_COPY = String.fromCodePoint(0x5904, 0x7406, 0x4e2d, 0x2026);
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function firstSkillToggle(container: HTMLElement): HTMLButtonElement {
+  const toggle = container.querySelector<HTMLButtonElement>('.skill-card-action');
+  if (!toggle) throw new Error('Expected a skill toggle button');
+  return toggle;
+}
+
 describe('SkillsPage behavior', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -165,5 +184,125 @@ describe('SkillsPage behavior', () => {
 
     expect(await screen.findByRole('button', { name: '打开 AI 日报' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables a fast toggle immediately without flashing processing copy', async () => {
+    const update = deferred<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ skills: SKILLS }))
+      .mockReturnValueOnce(update.promise);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<SkillsPage onNavigate={vi.fn()} />);
+    await screen.findAllByRole('heading', { level: 2 });
+    const action = firstSkillToggle(container);
+    vi.useFakeTimers();
+
+    fireEvent.click(action);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(action).toBeDisabled();
+    expect(screen.queryByText(PROCESSING_COPY)).not.toBeInTheDocument();
+    expect(action).not.toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(249);
+      update.resolve(response({ ...SKILLS[0], enabled: false }));
+      await update.promise;
+    });
+
+    expect(screen.queryByText(PROCESSING_COPY)).not.toBeInTheDocument();
+    expect(action).toBeEnabled();
+  });
+
+  it('shows processing only after a slow toggle and clears it after success', async () => {
+    const update = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(response({ skills: SKILLS }))
+        .mockReturnValueOnce(update.promise),
+    );
+
+    const { container } = render(<SkillsPage onNavigate={vi.fn()} />);
+    await screen.findAllByRole('heading', { level: 2 });
+    const action = firstSkillToggle(container);
+    vi.useFakeTimers();
+    fireEvent.click(action);
+
+    act(() => vi.advanceTimersByTime(250));
+
+    const processing = screen.getByText(PROCESSING_COPY);
+    expect(processing.closest('button')).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      update.resolve(response({ ...SKILLS[0], enabled: false }));
+      await update.promise;
+    });
+
+    expect(screen.queryByText(PROCESSING_COPY)).not.toBeInTheDocument();
+    expect(action).toBeEnabled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears slow processing and keeps the existing error UI after a failed toggle', async () => {
+    const update = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(response({ skills: SKILLS }))
+        .mockReturnValueOnce(update.promise),
+    );
+
+    const { container } = render(<SkillsPage onNavigate={vi.fn()} />);
+    await screen.findAllByRole('heading', { level: 2 });
+    const action = firstSkillToggle(container);
+    vi.useFakeTimers();
+    fireEvent.click(action);
+    act(() => vi.advanceTimersByTime(250));
+    expect(screen.getByText(PROCESSING_COPY)).toBeInTheDocument();
+
+    await act(async () => {
+      update.reject(new Error('toggle failed'));
+      try {
+        await update.promise;
+      } catch {
+        // The hook owns the rejected request and renders the existing error UI.
+      }
+    });
+
+    expect(screen.queryByText(PROCESSING_COPY)).not.toBeInTheDocument();
+    expect(action).toBeEnabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('toggle failed');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cleans a pending processing timer when the skills page unmounts', async () => {
+    const update = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(response({ skills: SKILLS }))
+        .mockReturnValueOnce(update.promise),
+    );
+
+    const page = render(<SkillsPage onNavigate={vi.fn()} />);
+    await screen.findAllByRole('heading', { level: 2 });
+    const action = firstSkillToggle(page.container);
+    vi.useFakeTimers();
+    fireEvent.click(action);
+    expect(vi.getTimerCount()).toBe(1);
+
+    page.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      update.resolve(response({ ...SKILLS[0], enabled: false }));
+      await update.promise;
+    });
   });
 });

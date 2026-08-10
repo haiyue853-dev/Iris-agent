@@ -259,6 +259,8 @@ class DocumentRepository:
 
     def _load(self) -> None:
         with self._lock:
+            if self._index_path.is_symlink():
+                raise DocumentStorageError("无法访问文档存储")
             if not self._index_path.exists():
                 self._validate_directory_contents(self._files_directory, set())
                 self._validate_directory_contents(self._text_directory, set())
@@ -280,61 +282,71 @@ class DocumentRepository:
                     raise DocumentStorageError("无法读取文档索引")
                 records[document.id] = document
 
-            self._recover_after_valid_index(records)
-
-            total = 0
-            raw_names: set[str] = set()
-            text_names: set[str] = set()
-            for document in records.values():
-                self._assert_controlled_file(
-                    self._raw_path(document), self._files_directory, expected_size=document.size_bytes
-                )
-                raw_names.add(self._raw_path(document).name)
-                if document.extraction_status == "ready":
-                    text_path = self._text_path(document)
-                    text = self._read_controlled_bytes(text_path, self._text_directory)
-                    try:
-                        decoded = text.decode("utf-8")
-                    except UnicodeDecodeError as exc:
-                        raise DocumentStorageError("文档提取文本已损坏") from exc
-                    if not decoded.strip() or len(decoded) > self.max_text_chars:
-                        raise DocumentStorageError("文档提取文本已损坏")
-                    text_names.add(text_path.name)
-                total += document.size_bytes
-            if len(records) > self.max_count or total > self.max_total_bytes:
-                raise DocumentStorageError("文档存储配额已损坏")
+            total, raw_names, text_names = self._validate_registered_records(records)
+            recovery_candidates = self._scan_recovery_candidates(records)
+            self._cleanup_recovery_candidates(recovery_candidates)
             self._validate_directory_contents(self._files_directory, raw_names)
             self._validate_directory_contents(self._text_directory, text_names)
             self._records = records
             self._total_bytes = total
             self._recover_interrupted_pending_documents()
 
-    def _recover_after_valid_index(self, records: dict[str, DocumentRecord]) -> None:
-        """仅在索引本身已通过严格解析后清理可证明属于本服务的残留。"""
+    def _validate_registered_records(
+        self, records: dict[str, DocumentRecord]
+    ) -> tuple[int, set[str], set[str]]:
+        """无副作用地验证所有 index 已登记文件，失败时不得进行恢复删除。"""
+        total = 0
+        raw_names: set[str] = set()
+        text_names: set[str] = set()
+        for document in records.values():
+            self._assert_controlled_file(
+                self._raw_path(document), self._files_directory, expected_size=document.size_bytes
+            )
+            raw_names.add(self._raw_path(document).name)
+            if document.extraction_status == "ready":
+                text_path = self._text_path(document)
+                text = self._read_controlled_bytes(text_path, self._text_directory)
+                try:
+                    decoded = text.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise DocumentStorageError("文档提取文本已损坏") from exc
+                if not decoded.strip() or len(decoded) > self.max_text_chars:
+                    raise DocumentStorageError("文档提取文本已损坏")
+                text_names.add(text_path.name)
+            total += document.size_bytes
+        if len(records) > self.max_count or total > self.max_total_bytes:
+            raise DocumentStorageError("文档存储配额已损坏")
+        return total, raw_names, text_names
+
+    def _scan_recovery_candidates(self, records: dict[str, DocumentRecord]) -> list[tuple[Path, Path]]:
+        """先扫描并验证所有可删除残留，再由调用方统一删除，避免部分恢复。"""
         registered_raw_names = {self._raw_path(document).name for document in records.values()}
         registered_text_names = {
             self._text_path(document).name
             for document in records.values()
             if document.extraction_status == "ready"
         }
-        self._recover_root_temporaries()
-        self._recover_directory_residues(
-            self._files_directory,
-            registered_raw_names,
-            self._is_server_raw_name,
-        )
-        self._recover_directory_residues(
-            self._text_directory,
-            registered_text_names,
-            self._is_server_text_name,
+        return (
+            self._scan_root_recovery_candidates()
+            + self._scan_directory_recovery_candidates(
+                self._files_directory,
+                registered_raw_names,
+                self._is_server_raw_name,
+            )
+            + self._scan_directory_recovery_candidates(
+                self._text_directory,
+                registered_text_names,
+                self._is_server_text_name,
+            )
         )
 
-    def _recover_root_temporaries(self) -> None:
+    def _scan_root_recovery_candidates(self) -> list[tuple[Path, Path]]:
         try:
             children = list(self._root.iterdir())
         except OSError as exc:
             raise DocumentStorageError("无法访问文档存储") from exc
         expected_directories = {"files", "text"}
+        candidates: list[tuple[Path, Path]] = []
         for child in children:
             if child.name == "index.json":
                 continue
@@ -343,27 +355,36 @@ class DocumentRepository:
                     raise DocumentStorageError("无法访问文档存储")
                 continue
             if self._is_temporary_name(child.name):
-                self._delete_recoverable_file(child, self._root)
+                self._assert_controlled_file(child, self._root)
+                candidates.append((child, self._root))
                 continue
             raise DocumentStorageError("文档存储包含未登记文件")
+        return candidates
 
-    def _recover_directory_residues(
+    def _scan_directory_recovery_candidates(
         self,
         directory: Path,
         registered_names: set[str],
         is_server_name: Callable[[str], bool],
-    ) -> None:
+    ) -> list[tuple[Path, Path]]:
         try:
             children = list(directory.iterdir())
         except OSError as exc:
             raise DocumentStorageError("无法访问文档存储") from exc
+        candidates: list[tuple[Path, Path]] = []
         for child in children:
             if child.name in registered_names:
                 continue
             if self._is_temporary_name(child.name) or is_server_name(child.name):
-                self._delete_recoverable_file(child, directory)
+                self._assert_controlled_file(child, directory)
+                candidates.append((child, directory))
                 continue
             raise DocumentStorageError("文档存储包含未登记文件")
+        return candidates
+
+    def _cleanup_recovery_candidates(self, candidates: list[tuple[Path, Path]]) -> None:
+        for path, directory in candidates:
+            self._delete_recoverable_file(path, directory)
 
     def _recover_interrupted_pending_documents(self) -> None:
         pending = [document for document in self._records.values() if document.extraction_status == "pending"]

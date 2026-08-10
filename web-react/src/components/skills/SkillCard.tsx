@@ -3,6 +3,7 @@ import type { SkillInfo } from '../../types';
 interface SkillCardProps {
   skill: SkillInfo;
   toggling: boolean;
+  processing: boolean;
   onToggle: (id: string, enabled: boolean) => void;
   onOpen: (skill: SkillInfo) => void;
 }
@@ -67,7 +68,7 @@ const CATEGORY_NAMES: Record<string, string> = {
   news: '资讯',
 };
 
-export default function SkillCard({ skill, toggling, onToggle, onOpen }: SkillCardProps) {
+export default function SkillCard({ skill, toggling, processing, onToggle, onOpen }: SkillCardProps) {
   const disabled = !skill.enabled;
   const action = disabled ? '启用' : '停用';
   const actionInProgress = disabled ? '正在启用' : '正在停用';
@@ -102,10 +103,10 @@ export default function SkillCard({ skill, toggling, onToggle, onOpen }: SkillCa
               className="skill-card-action"
               onClick={() => onToggle(skill.id, disabled)}
               disabled={toggling}
-              aria-label={`${toggling ? actionInProgress : action} ${skill.name}`}
-              aria-busy={toggling || undefined}
+              aria-label={`${processing ? actionInProgress : action} ${skill.name}`}
+              aria-busy={processing || undefined}
             >
-              {toggling ? '处理中…' : action}
+              {processing ? '处理中…' : action}
             </button>
           </div>
         </div>

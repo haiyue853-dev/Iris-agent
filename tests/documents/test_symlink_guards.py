@@ -68,6 +68,20 @@ def test_mocked_index_symlink_is_rejected_without_reading_it(
         repository(tmp_path)
 
 
+def test_mocked_dangling_index_symlink_is_rejected_before_empty_index_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository(tmp_path)
+    index = tmp_path / "index.json"
+    index.unlink()
+    mark_path_as_symlink(monkeypatch, index)
+
+    with pytest.raises(DocumentStorageError):
+        repository(tmp_path)
+
+    assert not index.exists()
+
+
 def test_mocked_raw_symlink_is_rejected_before_the_raw_file_is_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

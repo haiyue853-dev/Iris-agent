@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -119,6 +120,32 @@ def test_restart_still_rejects_unknown_residue_even_when_index_is_valid(tmp_path
         repository(tmp_path)
 
 
+def test_recovery_scans_every_candidate_before_deleting_any_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository(tmp_path)
+    files = tmp_path / "files"
+    recoverable = files / f"{uuid4()}.txt"
+    unknown = files / "manual-upload.txt"
+    recoverable.write_bytes(b"recoverable only after a complete scan")
+    unknown.write_bytes(b"must reject the storage")
+    path_type = type(files)
+    original_iterdir = path_type.iterdir
+
+    def ordered_iterdir(path: Path):
+        children = list(original_iterdir(path))
+        if path == files:
+            return iter([recoverable, unknown])
+        return iter(children)
+
+    monkeypatch.setattr(path_type, "iterdir", ordered_iterdir)
+
+    with pytest.raises(DocumentStorageError):
+        repository(tmp_path)
+
+    assert recoverable.read_bytes() == b"recoverable only after a complete scan"
+
+
 def test_restart_marks_pending_document_failed_after_interrupted_extraction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -151,3 +178,19 @@ def test_restart_keeps_rejecting_missing_registered_raw_file(tmp_path: Path) -> 
 
     with pytest.raises(DocumentStorageError):
         repository(tmp_path)
+
+
+def test_invalid_registered_index_does_not_delete_an_orphan_before_rejecting_storage(tmp_path: Path) -> None:
+    documents = repository(tmp_path)
+    saved = documents.save("notes.txt", b"raw", "text/plain")
+    orphan = tmp_path / "files" / f"{uuid4()}.txt"
+    orphan.write_bytes(b"must remain after an invalid-index rejection")
+    index_path = tmp_path / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["documents"][0]["size_bytes"] = 999
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(DocumentStorageError):
+        repository(tmp_path)
+
+    assert orphan.read_bytes() == b"must remain after an invalid-index rejection"
