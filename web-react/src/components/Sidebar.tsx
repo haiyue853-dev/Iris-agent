@@ -134,6 +134,18 @@ const Sidebar: React.FC<SidebarProps> = ({
               </svg>
               <span className="view-label">流程图</span>
             </div>
+            <button
+              type="button"
+              className={`view-item ${activeView === 'skills' ? 'active' : ''}`}
+              onClick={() => onViewChange('skills')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 20h16" />
+                <path d="M6 20V9l6-5 6 5v11" />
+                <path d="M9 20v-6h6v6" />
+              </svg>
+              <span className="view-label">Skills</span>
+            </button>
           </nav>
 
           <nav className="sidebar-menu">

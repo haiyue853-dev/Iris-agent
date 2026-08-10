@@ -48,5 +48,25 @@ describe('Sidebar navigation', () => {
     expect(onSessionSwitch).toHaveBeenCalledWith('session_1');
     expect(onViewChange).toHaveBeenCalledWith('chat');
   });
-});
 
+  it('opens Skills from the single left-sidebar entry', async () => {
+    const onViewChange = vi.fn();
+    render(
+      <Sidebar
+        collapsed={false}
+        onToggle={vi.fn()}
+        onNewChat={vi.fn()}
+        currentSessionId=""
+        sessions={[]}
+        onSessionSwitch={vi.fn()}
+        onSessionDelete={vi.fn()}
+        activeView="chat"
+        onViewChange={onViewChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Skills' }));
+
+    expect(onViewChange).toHaveBeenCalledWith('skills');
+  });
+});

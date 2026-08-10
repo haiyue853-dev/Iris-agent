@@ -5,10 +5,13 @@ import ChatContainer from './components/ChatContainer';
 import AihotDailyPage from './components/aihot/AihotDailyPage';
 import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
+import SkillsPage from './components/skills/SkillsPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar';
+
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -16,7 +19,7 @@ function App() {
   const [chatInput, setChatInput] = useState('');
   const [activeView, setActiveView] = useState<AppView>(() => {
     const saved = localStorage.getItem('iris_active_view');
-    return saved === 'aihot' || saved === 'uml' || saved === 'reports' ? saved : 'chat';
+    return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
 
   const {
@@ -95,9 +98,21 @@ function App() {
         onViewChange={setActiveView}
       />
 
-      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : undefined}>
+      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : undefined}>
         {activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
+        ) : activeView === 'skills' ? (
+          <SkillsPage onNavigate={setActiveView} />
+        ) : activeView === 'documents' ? (
+          <div className="view-placeholder">
+            <h2>文档工作台</h2>
+            <p>上传资料并生成可编辑的工作文档，即将上线。</p>
+          </div>
+        ) : activeView === 'radar' ? (
+          <div className="view-placeholder">
+            <h2>热点雷达</h2>
+            <p>按关键词订阅热点并生成每日摘要，即将上线。</p>
+          </div>
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
         ) : activeView === 'uml' ? (

@@ -40,5 +40,27 @@ describe('App workspace navigation', () => {
     expect(screen.getByRole('main', { name: 'AI 日报工作台' })).toBeInTheDocument();
     expect(localStorage.getItem('iris_active_view')).toBe('reports');
   });
-});
 
+  it('opens the Skills center from the left sidebar', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ skills: [] }) }));
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Skills' }));
+
+    expect(screen.getByRole('main', { name: 'Skills 中心' })).toBeInTheDocument();
+    expect(localStorage.getItem('iris_active_view')).toBe('skills');
+    vi.unstubAllGlobals();
+  });
+
+  it('restores the Skills center selected in local storage', async () => {
+    localStorage.setItem('iris_active_view', 'skills');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ skills: [] }) }));
+
+    render(<App />);
+
+    expect(screen.getByRole('main', { name: 'Skills 中心' })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+});

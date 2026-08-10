@@ -148,3 +148,15 @@ export type AgentEvent =
   | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string } }
   | { type: 'message_completed'; data: { content: string } }
   | { type: 'error'; data: { code: string; message: string } };
+
+// ---------- Skills 中心 ----------
+export type SkillInfo = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: string;
+  entry_view: string;
+  version: number;
+  enabled: boolean;
+};
