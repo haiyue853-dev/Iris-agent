@@ -4,6 +4,7 @@ from iris_agent.api.app import create_app
 from iris_agent.bootstrap import ApplicationServices, build_application
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.service import DailyReportService
+from iris_agent.mcp_center.service import McpServer, McpCenterService
 
 
 def _write_config(tmp_path: Path) -> Path:
@@ -75,3 +76,16 @@ def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     assert isinstance(application.attachments, AttachmentRepository)
     assert application.settings.reports.directory == Path(tmp_path / "reports")
     assert create_app(application.agent, application.sessions, application.reports).title == "Iris Agent API"
+
+
+def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    server = McpServer("browser", "Browser", "node", (), ("get_page",), True)
+    monkeypatch.setattr(McpCenterService, "enabled_tools", lambda _: ((server, {
+        "name": "get_page", "description": "Read page", "inputSchema": {"type": "object", "properties": {}},
+    }),))
+
+    application = build_application(config)
+
+    assert "mcp__browser__get_page" in [item["function"]["name"] for item in application.agent.loop.tools.schemas()]
