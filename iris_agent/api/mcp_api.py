@@ -49,6 +49,13 @@ def register_mcp_routes(app, mcp) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "工具白名单无效"}) from exc
 
+    @app.delete("/api/mcp/servers/{server_id}", status_code=204)
+    def delete_server(server_id: str):
+        try:
+            mcp.delete(server_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "MCP server was not found"}) from exc
+
     @app.post("/api/mcp/servers/{server_id}/discover")
     def discover_tools(server_id: str):
         try:

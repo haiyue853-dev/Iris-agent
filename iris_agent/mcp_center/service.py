@@ -63,6 +63,12 @@ class McpCenterService:
         self._save()
         return updated
 
+    def delete(self, server_id: str) -> McpServer:
+        server = self.get(server_id)
+        del self._servers[server_id]
+        self._save()
+        return server
+
     def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         """Run only the MCP handshake and tools/list request, then terminate the child."""
         server = self.get(server_id)

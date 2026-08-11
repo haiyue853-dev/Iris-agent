@@ -13,3 +13,4 @@ export const setMcpEnabled = (id: string, enabled: boolean) => request<McpServer
 export const createMcpServer = (input: Omit<McpServer, 'id' | 'enabled' | 'status'>) => request<McpServer>('/api/mcp/servers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
 export const discoverMcpTools = (id: string) => request<{ tools: { name: string; description?: string }[] }>(`/api/mcp/servers/${encodeURIComponent(id)}/discover`, { method: 'POST' });
 export const setMcpAllowedTools = (id: string, allowed_tools: string[]) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/allowed-tools`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allowed_tools }) });
+export const deleteMcpServer = (id: string) => request<void>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });

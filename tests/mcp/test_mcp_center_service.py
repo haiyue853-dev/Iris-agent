@@ -27,3 +27,14 @@ def test_mcp_server_updates_its_tool_allowlist(tmp_path: Path) -> None:
 
     assert updated.allowed_tools == ("get_page", "get_tabs")
     assert McpCenterService(tmp_path / "mcp.json").get(server.id).allowed_tools == ("get_page", "get_tabs")
+
+
+def test_mcp_server_delete_removes_its_local_configuration(tmp_path: Path) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+
+    deleted = service.delete(server.id)
+
+    assert deleted.id == server.id
+    assert service.list() == []
+    assert McpCenterService(tmp_path / "mcp.json").list() == []
