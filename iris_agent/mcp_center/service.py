@@ -80,6 +80,50 @@ class McpCenterService:
             try: process.wait(timeout=2)
             except subprocess.TimeoutExpired: process.kill()
 
+    def enabled_tools(self) -> tuple[tuple[McpServer, dict[str, object]], ...]:
+        """Return discoverable tools from enabled servers, restricted to each allowlist."""
+        discovered: list[tuple[McpServer, dict[str, object]]] = []
+        for server in self.list():
+            if not server.enabled:
+                continue
+            try:
+                tools = self.discover_tools(server.id)
+            except ValueError:
+                continue
+            for tool in tools:
+                name = tool.get("name")
+                schema = tool.get("inputSchema")
+                if name in server.allowed_tools and isinstance(schema, dict) and schema.get("type") == "object":
+                    discovered.append((server, tool))
+        return tuple(discovered)
+
+    def call_tool(self, server_id: str, name: str, arguments: dict[str, object]) -> object:
+        server = self.get(server_id)
+        if not server.enabled or name not in server.allowed_tools or not isinstance(arguments, dict):
+            raise ValueError("MCP tool is not allowed")
+        process = subprocess.Popen(
+            [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+        )
+        try:
+            assert process.stdin is not None
+            process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
+            process.stdin.flush()
+            self._read_response(process, 1)
+            request = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+            process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n" + json.dumps(request) + "\n")
+            process.stdin.flush()
+            response = self._read_response(process, 2)
+            if not isinstance(response.get("result"), dict):
+                raise ValueError("MCP returned an invalid result")
+            return response["result"]
+        except (OSError, TimeoutError, ValueError) as exc:
+            raise ValueError("unable to call MCP tool") from exc
+        finally:
+            process.terminate()
+            try: process.wait(timeout=2)
+            except subprocess.TimeoutExpired: process.kill()
+
     @staticmethod
     def _read_response(process: subprocess.Popen[str], expected_id: int) -> dict[str, object]:
         assert process.stdout is not None
