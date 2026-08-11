@@ -17,3 +17,13 @@ def test_mcp_server_rejects_an_unsafe_command(tmp_path: Path) -> None:
         assert "command" in str(exc)
     else:
         raise AssertionError("unsafe command was accepted")
+
+
+def test_mcp_server_updates_its_tool_allowlist(tmp_path: Path) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+
+    updated = service.set_allowed_tools(server.id, ("get_page", "get_tabs"))
+
+    assert updated.allowed_tools == ("get_page", "get_tabs")
+    assert McpCenterService(tmp_path / "mcp.json").get(server.id).allowed_tools == ("get_page", "get_tabs")

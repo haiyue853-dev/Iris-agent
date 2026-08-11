@@ -3493,6 +3493,8 @@ button.view-item {
   outline-offset: 2px;
 }
 
+.mcp-tool-option { display: flex; align-items: center; gap: 7px; margin: 8px 0; color: var(--iris-text-muted); font-size: 13px; }
+
 .skills-loading {
   max-width: 1080px;
   margin: 40px auto;

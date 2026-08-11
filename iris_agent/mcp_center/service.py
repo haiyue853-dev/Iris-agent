@@ -54,6 +54,15 @@ class McpCenterService:
         self._save()
         return updated
 
+    def set_allowed_tools(self, server_id: str, allowed_tools: tuple[str, ...]) -> McpServer:
+        if not isinstance(allowed_tools, tuple) or not all(isinstance(item, str) and item.strip() for item in allowed_tools):
+            raise ValueError("allowed_tools are invalid")
+        current = self.get(server_id)
+        updated = McpServer(current.id, current.name, current.command, current.args, tuple(dict.fromkeys(allowed_tools)), current.enabled)
+        self._servers[server_id] = updated
+        self._save()
+        return updated
+
     def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         """Run only the MCP handshake and tools/list request, then terminate the child."""
         server = self.get(server_id)

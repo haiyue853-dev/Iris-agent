@@ -13,6 +13,10 @@ class McpEnabledRequest(BaseModel):
     enabled: StrictBool
 
 
+class McpAllowedToolsRequest(BaseModel):
+    allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+
+
 def _data(server):
     return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured"}
 
@@ -35,6 +39,15 @@ def register_mcp_routes(app, mcp) -> None:
             return _data(mcp.set_enabled(server_id, request.enabled))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+
+    @app.put("/api/mcp/servers/{server_id}/allowed-tools")
+    def set_allowed_tools(server_id: str, request: McpAllowedToolsRequest):
+        try:
+            return _data(mcp.set_allowed_tools(server_id, tuple(request.allowed_tools)))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "工具白名单无效"}) from exc
 
     @app.post("/api/mcp/servers/{server_id}/discover")
     def discover_tools(server_id: str):
