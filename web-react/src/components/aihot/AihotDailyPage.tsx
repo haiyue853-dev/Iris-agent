@@ -143,6 +143,7 @@ export default function AihotDailyPage() {
   }, []);
 
   useEffect(() => {
+    if (cachedReport) return;
     fetchLatestDaily()
       .then((data) => {
         cachedReport = data;
@@ -153,6 +154,12 @@ export default function AihotDailyPage() {
     loadWorld();
     loadTech();
   }, [loadWorld, loadTech]);
+
+  const displayedAihotTotal = report
+    ? report.sections
+        .filter((section) => section.label !== '行业动态')
+        .reduce((total, section) => total + section.items.length, 0)
+    : 0;
 
   const handleDateChange = (value: string) => {
     if (!value) return;
@@ -189,7 +196,7 @@ export default function AihotDailyPage() {
         </div>
         {report && (
           <div className="aihot-meta">
-            <div className="aihot-total">今日共 <b>{report.total}</b> 条</div>
+            <div className="aihot-total">今日共 <b>{displayedAihotTotal}</b> 条</div>
             <div className="aihot-date-picker">
               <input
                 type="date"
@@ -407,7 +414,7 @@ export default function AihotDailyPage() {
 
       {report && !error && (
         <footer className="aihot-footer">
-          <div className="aihot-footer-src">本日报共 {report.total} 条 · 全部总结已展示，点击「阅读原文」可深入了解</div>
+          <div className="aihot-footer-src">本日报共 {displayedAihotTotal} 条 · 全部总结已展示，点击「阅读原文」可深入了解</div>
           <div>
             数据来源：<a href={report.daily_url} target="_blank" rel="noopener noreferrer">AI HOT 日报 · {report.date}</a>
             （aihot.virxact.com）｜ 第三方原文版权归原作者所有
