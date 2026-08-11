@@ -10,6 +10,8 @@ from uuid import UUID
 
 
 DocumentExtractionStatus = Literal["pending", "ready", "failed"]
+DocumentTemplate = Literal["meeting_minutes", "prd", "technical_solution", "weekly_report"]
+DOCUMENT_TEMPLATES = frozenset({"meeting_minutes", "prd", "technical_solution", "weekly_report"})
 
 
 def _is_basename(value: object) -> bool:
@@ -141,3 +143,86 @@ class DocumentFile:
 
     def read_bytes(self) -> bytes:
         return self._reader()
+
+
+def _is_canonical_uuid(value: object) -> bool:
+    try:
+        return isinstance(value, str) and str(UUID(value)) == value
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentCitation:
+    document_id: str
+    location: str
+
+    def __post_init__(self) -> None:
+        if not _is_canonical_uuid(self.document_id):
+            raise ValueError("document citation id is invalid")
+        if (
+            not isinstance(self.location, str)
+            or not self.location.strip()
+            or self.location != self.location.strip()
+            or len(self.location) > 200
+            or "\r" in self.location
+            or "\n" in self.location
+        ):
+            raise ValueError("document citation location is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentDraft:
+    id: str
+    title: str
+    template: DocumentTemplate
+    document_ids: tuple[str, ...]
+    instructions: str
+    markdown: str
+    citations: tuple[DocumentCitation, ...]
+    revision: int
+    created_at: float
+    updated_at: float
+
+    def __post_init__(self) -> None:
+        if not _is_canonical_uuid(self.id):
+            raise ValueError("document draft id is invalid")
+        if (
+            not isinstance(self.title, str)
+            or not self.title.strip()
+            or self.title != self.title.strip()
+            or len(self.title) > 200
+            or "\r" in self.title
+            or "\n" in self.title
+        ):
+            raise ValueError("document draft title is invalid")
+        if self.template not in DOCUMENT_TEMPLATES:
+            raise ValueError("document draft template is invalid")
+        if (
+            not isinstance(self.document_ids, tuple)
+            or not self.document_ids
+            or len(self.document_ids) != len(set(self.document_ids))
+            or not all(_is_canonical_uuid(item) for item in self.document_ids)
+        ):
+            raise ValueError("document draft sources are invalid")
+        if not isinstance(self.instructions, str) or len(self.instructions) > 2_000:
+            raise ValueError("document draft instructions are invalid")
+        if (
+            not isinstance(self.markdown, str)
+            or not self.markdown.strip()
+            or self.markdown != self.markdown.strip()
+        ):
+            raise ValueError("document draft markdown is invalid")
+        if (
+            not isinstance(self.citations, tuple)
+            or not all(isinstance(item, DocumentCitation) for item in self.citations)
+            or any(item.document_id not in self.document_ids for item in self.citations)
+        ):
+            raise ValueError("document draft citations are invalid")
+        if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 1:
+            raise ValueError("document draft revision is invalid")
+        if any(
+            not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+            for value in (self.created_at, self.updated_at)
+        ):
+            raise ValueError("document draft timestamps are invalid")

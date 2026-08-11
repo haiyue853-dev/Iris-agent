@@ -345,7 +345,8 @@ class DocumentRepository:
             children = list(self._root.iterdir())
         except OSError as exc:
             raise DocumentStorageError("无法访问文档存储") from exc
-        expected_directories = {"files", "text"}
+        # Drafts are a separately managed, source-body-free document-workbench store.
+        expected_directories = {"files", "text", "drafts"}
         candidates: list[tuple[Path, Path]] = []
         for child in children:
             if child.name == "index.json":

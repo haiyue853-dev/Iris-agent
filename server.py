@@ -12,6 +12,7 @@ app = create_app(
     application.agent, application.sessions, application.reports, application.attachments,
     LocalAttachmentExtractor(application.settings.reports.max_attachment_text_chars),
     skills=application.skills,
+    documents=application.documents,
 )
 
 

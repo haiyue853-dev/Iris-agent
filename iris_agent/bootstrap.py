@@ -68,6 +68,13 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         Path(__file__).parent / "skill_center" / "bundled",
         settings.skills.settings_file,
     )
-    documents = DocumentService(settings.documents.directory)
+    documents = DocumentService(
+        settings.documents.directory,
+        provider=provider,
+        max_file_bytes=settings.documents.max_file_bytes,
+        max_total_bytes=settings.documents.max_total_bytes,
+        max_count=settings.documents.max_count,
+        max_text_chars=settings.documents.max_text_chars,
+    )
     hot_radar = HotRadarService(settings.hot_radar.directory)
     return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, settings)
