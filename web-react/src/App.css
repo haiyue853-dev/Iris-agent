@@ -3536,6 +3536,36 @@ button.view-item {
   font-size: 13.5px;
 }
 
+.document-workbench { flex: 1; min-width: 0; overflow: auto; padding: 24px; background: var(--iris-background); }
+.document-workbench-header { max-width: 1440px; margin: 0 auto 18px; }
+.document-workbench-header h1 { margin: 0; color: var(--iris-text); font-size: 22px; }
+.document-workbench-header p, .document-hint, .document-empty { color: var(--iris-text-subtle); font-size: 13px; }
+.document-workspace { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(280px, 1fr) minmax(360px, 1.4fr); gap: 14px; max-width: 1440px; margin: 0 auto; }
+.document-workspace > div, .document-pane { min-width: 0; }
+.document-pane { min-height: 520px; padding: 16px; border: 1px solid var(--iris-border); border-radius: 12px; background: var(--iris-surface); }
+.document-pane-heading, .document-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.document-pane-heading h2, .document-draft-list h3 { margin: 0; color: var(--iris-text); font-size: 16px; }
+.document-pane-heading span, .document-save-state { color: var(--iris-text-subtle); font-size: 12px; }
+.document-pane label { display: grid; gap: 7px; margin-top: 16px; color: var(--iris-text-muted); font-size: 13px; }
+.document-pane input:not([type='checkbox']), .document-pane textarea, .document-pane select { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--iris-border); border-radius: 8px; background: var(--iris-background); color: var(--iris-text); font: inherit; }
+.document-pane textarea { min-height: 96px; resize: vertical; }
+.document-upload { padding: 12px; border: 1px dashed var(--iris-border-strong); border-radius: 8px; cursor: pointer; text-align: center; }
+.document-upload input { max-width: 100%; }
+.document-list { display: grid; gap: 9px; margin-top: 14px; }
+.document-item { position: relative; padding: 10px; border: 1px solid var(--iris-border); border-radius: 8px; }
+.document-item label { display: flex; align-items: center; gap: 8px; margin: 0; }
+.document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.document-status { margin: 8px 0 0 24px; font-size: 12px; }.document-status.ready { color: #2e8b57; }.document-status.failed { color: #bd5b5b; }
+.document-delete { position: absolute; top: 7px; right: 7px; border: 0; background: transparent; color: var(--iris-text-subtle); cursor: pointer; }
+.document-primary { width: 100%; margin-top: 16px; padding: 10px 14px; border: 0; border-radius: 8px; background: var(--iris-text); color: var(--iris-surface); cursor: pointer; font: inherit; }
+.document-primary:disabled, .document-pane :disabled { cursor: not-allowed; opacity: .55; }
+.document-draft-list { display: grid; gap: 8px; margin-top: 22px; }.document-draft-item { padding: 9px; border: 1px solid var(--iris-border); border-radius: 7px; background: transparent; color: var(--iris-text); cursor: pointer; text-align: left; }.document-draft-item.active { border-color: var(--iris-border-strong); background: var(--iris-surface-muted); }
+.document-markdown-label { height: calc(100% - 135px); }.document-markdown-label textarea { height: 100%; min-height: 310px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.55; }
+.document-editor-actions { flex-wrap: wrap; margin-top: 16px; }.document-editor-actions .document-primary { width: auto; margin: 0; }.document-editor-actions a { color: var(--iris-text-muted); font-size: 13px; }
+.document-conflict, .document-error { margin-top: 12px; padding: 10px; border: 1px solid #d8b26a; border-radius: 8px; color: var(--iris-text-muted); font-size: 13px; }.document-conflict button { margin-left: 8px; }
+.document-error { max-width: 1440px; margin: 0 auto 14px; border-color: #bd5b5b; }
+.document-mobile-tabs { display: none; }
+
 @media (max-width: 720px) {
   .skills-page {
     padding: 20px 16px 32px;
@@ -3544,4 +3574,11 @@ button.view-item {
   .skills-grid {
     grid-template-columns: 1fr;
   }
+
+  .document-workbench { padding: 16px; }
+  .document-mobile-tabs { display: flex; gap: 8px; max-width: 1440px; margin: 0 auto 12px; }
+  .document-mobile-tabs button { flex: 1; padding: 8px; border: 1px solid var(--iris-border); border-radius: 7px; background: var(--iris-surface); color: var(--iris-text-muted); }
+  .document-mobile-tabs button[aria-selected='true'] { background: var(--iris-surface-muted); color: var(--iris-text); }
+  .document-workspace { display: block; }.document-workspace > div { display: none; }.document-workspace > div.active { display: block; }
+  .document-pane { min-height: 0; }.document-markdown-label { height: auto; }.document-markdown-label textarea { min-height: 360px; }
 }

@@ -7,6 +7,7 @@ import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
+import DocumentWorkbenchPage from './components/documents/DocumentWorkbenchPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
@@ -101,7 +102,7 @@ function App() {
         onViewChange={setActiveView}
       />
 
-      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : undefined}>
+      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'documents' ? '文档工作台' : undefined}>
         {umlVisited && (
           <div hidden={activeView !== 'uml'}>
             <UmlFlowPage />
@@ -114,10 +115,7 @@ function App() {
         ) : activeView === 'mcp' ? (
           <McpPage />
         ) : activeView === 'documents' ? (
-          <div className="view-placeholder">
-            <h2>文档工作台</h2>
-            <p>上传资料并生成可编辑的工作文档，即将上线。</p>
-          </div>
+          <DocumentWorkbenchPage />
         ) : activeView === 'radar' ? (
           <div className="view-placeholder">
             <h2>热点雷达</h2>

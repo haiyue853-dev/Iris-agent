@@ -146,6 +146,12 @@ const Sidebar: React.FC<SidebarProps> = ({
               </svg>
               <span className="view-label">Skills</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'documents' ? 'active' : ''}`} onClick={() => onViewChange('documents')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3h9l3 3v15H6z" /><path d="M15 3v4h4M9 12h6M9 16h6" />
+              </svg>
+              <span className="view-label">文档工作台</span>
+            </button>
             <button type="button" className={`view-item ${activeView === 'mcp' ? 'active' : ''}`} onClick={() => onViewChange('mcp')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v4m8-4v4M6 7h12v14H6zM9 11h6m-6 4h6" /></svg>
               <span className="view-label">MCP</span>

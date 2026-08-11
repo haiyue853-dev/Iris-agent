@@ -54,6 +54,18 @@ describe('App workspace navigation', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens the document workbench from the left sidebar', async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '文档工作台' }));
+
+    expect(screen.getByRole('main', { name: '文档工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '文档工作台' })).toBeInTheDocument();
+    expect(localStorage.getItem('iris_active_view')).toBe('documents');
+  });
+
   it('restores the Skills center selected in local storage', async () => {
     localStorage.setItem('iris_active_view', 'skills');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ skills: [] }) }));
