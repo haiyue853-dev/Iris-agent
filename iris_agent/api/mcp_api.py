@@ -1,0 +1,37 @@
+from fastapi import HTTPException
+from pydantic import BaseModel, Field, StrictBool
+
+
+class McpCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    command: str = Field(min_length=1, max_length=300)
+    args: list[str] = Field(default_factory=list, max_length=30)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+
+
+class McpEnabledRequest(BaseModel):
+    enabled: StrictBool
+
+
+def _data(server):
+    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured"}
+
+
+def register_mcp_routes(app, mcp) -> None:
+    @app.get("/api/mcp/servers")
+    def list_servers():
+        return {"servers": [_data(item) for item in mcp.list()]}
+
+    @app.post("/api/mcp/servers", status_code=201)
+    def create_server(request: McpCreateRequest):
+        try:
+            return _data(mcp.create(name=request.name, command=request.command, args=tuple(request.args), allowed_tools=tuple(request.allowed_tools)))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "MCP 服务配置无效"}) from exc
+
+    @app.put("/api/mcp/servers/{server_id}/enabled")
+    def set_enabled(server_id: str, request: McpEnabledRequest):
+        try:
+            return _data(mcp.set_enabled(server_id, request.enabled))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc

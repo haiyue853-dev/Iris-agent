@@ -6,12 +6,13 @@ import AihotDailyPage from './components/aihot/AihotDailyPage';
 import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
+import McpPage from './components/mcp/McpPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar' | 'mcp';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar', 'mcp'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -21,6 +22,7 @@ function App() {
     const saved = localStorage.getItem('iris_active_view');
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
+  const [umlVisited, setUmlVisited] = useState(() => activeView === 'uml');
 
   const {
     messages,
@@ -41,6 +43,7 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('iris_active_view', activeView);
+    if (activeView === 'uml') setUmlVisited(true);
   }, [activeView]);
 
   // Ctrl+K shortcut
@@ -99,10 +102,17 @@ function App() {
       />
 
       <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : undefined}>
-        {activeView === 'reports' ? (
+        {umlVisited && (
+          <div hidden={activeView !== 'uml'}>
+            <UmlFlowPage />
+          </div>
+        )}
+        {activeView === 'uml' ? null : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (
           <SkillsPage onNavigate={setActiveView} />
+        ) : activeView === 'mcp' ? (
+          <McpPage />
         ) : activeView === 'documents' ? (
           <div className="view-placeholder">
             <h2>文档工作台</h2>
@@ -115,8 +125,6 @@ function App() {
           </div>
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
-        ) : activeView === 'uml' ? (
-          <UmlFlowPage />
         ) : !hasMessages ? (
           <WelcomePage
             inputValue={welcomeInput}

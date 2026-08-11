@@ -13,6 +13,7 @@ app = create_app(
     LocalAttachmentExtractor(application.settings.reports.max_attachment_text_chars),
     skills=application.skills,
     documents=application.documents,
+    mcp=application.mcp,
 )
 
 

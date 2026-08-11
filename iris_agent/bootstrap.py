@@ -7,6 +7,7 @@ from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.documents.service import DocumentService
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
@@ -27,6 +28,7 @@ class ApplicationServices:
     skills: SkillCenterService
     documents: DocumentService
     hot_radar: HotRadarService
+    mcp: McpCenterService
     settings: Settings
 
 
@@ -77,4 +79,5 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_text_chars=settings.documents.max_text_chars,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, settings)
+    mcp = McpCenterService(settings.mcp.settings_file)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, settings)

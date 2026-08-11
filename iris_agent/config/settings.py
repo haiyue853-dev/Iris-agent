@@ -72,6 +72,11 @@ class HotRadarSettings:
 
 
 @dataclass(slots=True)
+class McpSettings:
+    settings_file: Path = Path("data/mcp/servers.json")
+
+
+@dataclass(slots=True)
 class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
@@ -81,6 +86,7 @@ class Settings:
     skills: SkillSettings = field(default_factory=SkillSettings)
     documents: DocumentSettings = field(default_factory=DocumentSettings)
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
+    mcp: McpSettings = field(default_factory=McpSettings)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -106,6 +112,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     skills = _section(raw, "skills")
     documents = _section(raw, "documents")
     hot_radar = _section(raw, "hot_radar")
+    mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
     api_key = overrides.get("api_key") or os.getenv("OPENAI_API_KEY", "")
@@ -145,6 +152,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             poll_interval_seconds=int(hot_radar.get("poll_interval_seconds", 60)),
             timezone=str(hot_radar.get("timezone", "Asia/Shanghai")),
         ),
+        mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )
     if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:
         raise ConfigurationError("模型名称不能为空，且 max_tool_rounds 必须大于 0")

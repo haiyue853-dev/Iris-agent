@@ -22,6 +22,7 @@ from iris_agent.api.tech_news_api import router as tech_news_router
 from iris_agent.api.settings_api import register_settings_routes
 from iris_agent.api.skills_api import register_skills_routes
 from iris_agent.api.documents_api import register_documents_routes
+from iris_agent.api.mcp_api import register_mcp_routes
 from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
 from iris_agent.core.errors import IrisError, SessionNotFoundError
@@ -36,6 +37,7 @@ from iris_agent.documents.errors import (
     DocumentValidationError,
 )
 from iris_agent.documents.service import DocumentService
+from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -138,6 +140,7 @@ def create_app(
     extractor: LocalAttachmentExtractor | None = None,
     skills: SkillCenterService | None = None,
     documents: DocumentService | None = None,
+    mcp: McpCenterService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -157,6 +160,8 @@ def create_app(
         register_skills_routes(app, skills)
     if documents is not None:
         register_documents_routes(app, documents)
+    if mcp is not None:
+        register_mcp_routes(app, mcp)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
