@@ -149,6 +149,46 @@ export type AgentEvent =
   | { type: 'message_completed'; data: { content: string } }
   | { type: 'error'; data: { code: string; message: string } };
 
+// ---------- 文档工作台 ----------
+export type DocumentExtractionStatus = 'pending' | 'ready' | 'failed';
+export type DocumentTemplate = 'meeting_minutes' | 'prd' | 'technical_solution' | 'weekly_report';
+
+export type DocumentSource = {
+  file_name: string;
+  location: string | null;
+};
+
+export type WorkbenchDocument = {
+  id: string;
+  original_name: string;
+  suffix: string;
+  media_type: string;
+  size_bytes: number;
+  created_at: number;
+  extraction_status: DocumentExtractionStatus;
+  extraction_message?: string;
+  text_truncated: boolean;
+  sources: DocumentSource[];
+};
+
+export type DocumentCitation = {
+  document_id: string;
+  location: string;
+};
+
+export type DocumentDraft = {
+  id: string;
+  title: string;
+  template: DocumentTemplate;
+  document_ids: string[];
+  instructions: string;
+  markdown: string;
+  citations: DocumentCitation[];
+  revision: number;
+  created_at: number;
+  updated_at: number;
+};
+
 // ---------- Skills 中心 ----------
 export type SkillInfo = {
   id: string;
