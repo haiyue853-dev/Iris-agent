@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from uuid import uuid4
 
 
@@ -51,6 +53,44 @@ class McpCenterService:
         self._servers[server_id] = updated
         self._save()
         return updated
+
+    def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
+        """Run only the MCP handshake and tools/list request, then terminate the child."""
+        server = self.get(server_id)
+        if not server.enabled:
+            raise ValueError("server is disabled")
+        process = subprocess.Popen(
+            [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+        )
+        try:
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
+            process.stdin.flush()
+            self._read_response(process, 1)
+            process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n')
+            process.stdin.flush()
+            response = self._read_response(process, 2)
+            tools = response.get("result", {}).get("tools", []) if isinstance(response.get("result"), dict) else []
+            return tuple(item for item in tools if isinstance(item, dict) and isinstance(item.get("name"), str))
+        except (OSError, TimeoutError, ValueError) as exc:
+            raise ValueError("unable to discover MCP tools") from exc
+        finally:
+            process.terminate()
+            try: process.wait(timeout=2)
+            except subprocess.TimeoutExpired: process.kill()
+
+    @staticmethod
+    def _read_response(process: subprocess.Popen[str], expected_id: int) -> dict[str, object]:
+        assert process.stdout is not None
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            while True:
+                line = pool.submit(process.stdout.readline).result(timeout=10)
+                if not line: raise ValueError("MCP process ended")
+                message = json.loads(line)
+                if message.get("id") == expected_id:
+                    if "error" in message: raise ValueError("MCP returned an error")
+                    return message
 
     def _load(self) -> dict[str, McpServer]:
         if not self.settings_file.is_file():

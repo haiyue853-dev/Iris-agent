@@ -11,3 +11,4 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const listMcpServers = () => request<{ servers: McpServer[] }>('/api/mcp/servers');
 export const setMcpEnabled = (id: string, enabled: boolean) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
 export const createMcpServer = (input: Omit<McpServer, 'id' | 'enabled' | 'status'>) => request<McpServer>('/api/mcp/servers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+export const discoverMcpTools = (id: string) => request<{ tools: { name: string; description?: string }[] }>(`/api/mcp/servers/${encodeURIComponent(id)}/discover`, { method: 'POST' });

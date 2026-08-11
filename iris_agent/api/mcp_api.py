@@ -35,3 +35,12 @@ def register_mcp_routes(app, mcp) -> None:
             return _data(mcp.set_enabled(server_id, request.enabled))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+
+    @app.post("/api/mcp/servers/{server_id}/discover")
+    def discover_tools(server_id: str):
+        try:
+            return {"tools": list(mcp.discover_tools(server_id))}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_discovery_failed", "message": "无法发现 MCP 工具，请先启用并检查命令"}) from exc
