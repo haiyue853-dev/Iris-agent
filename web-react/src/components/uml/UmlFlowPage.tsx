@@ -169,7 +169,7 @@ export default function UmlFlowPage() {
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState('');
   const [mermaidCode, setMermaidCode] = useState('');
-  const [editorMode, setEditorMode] = useState<EditorMode>('professional');
+  const [editorMode] = useState<EditorMode>('professional');
   const [drawioImportRequest, setDrawioImportRequest] = useState<number | null>(null);
   const nextDrawioImportRequestRef = useRef(0);
   const [hasDrawioContent, setHasDrawioContent] = useState(false);
@@ -861,12 +861,7 @@ export default function UmlFlowPage() {
     try {
       const result = await analyzeUml(prompt.trim(), diagramType);
       setMermaidCode(result.mermaid);
-      const ok = isClassicBoardMode ? applyParsedToBoard(result.mermaid) : false;
-      if (!ok && editorMode === 'classic') {
-        setSvg('');
-        setRenderError('');
-        renderDiagram(result.mermaid);
-      }
+      importMermaidToProfessionalCanvas(result.mermaid);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
     } catch (err) {
       setApiError(err instanceof Error ? err.message : '生成失败，请稍后重试');
@@ -887,23 +882,13 @@ export default function UmlFlowPage() {
     }
   };
 
-  const switchEditorMode = (mode: EditorMode) => {
-    setEditorMode(mode);
-    if (mode !== 'classic' || !mermaidCode.trim()) return;
-    const initializedClassicBoard = isBoardMode && flowNodes.length === 0 ? applyParsedToBoard(mermaidCode) : false;
-    if (!initializedClassicBoard && (!isBoardMode || flowNodes.length === 0)) {
-      setSvg('');
-      setRenderError('');
-      void renderDiagram(mermaidCode);
-    }
-  };
-
-  const importMermaidToProfessionalCanvas = () => {
-    if (!mermaidCode.trim()) return;
+  const importMermaidToProfessionalCanvas = (code = mermaidCode) => {
+    if (!code.trim()) return;
     if ((hasDrawioContent || hasSavedDrawioDiagram()) && !window.confirm('当前专业画布已有已编辑内容。导入 Mermaid 会替换画布内容，是否继续？')) {
       return;
     }
     nextDrawioImportRequestRef.current += 1;
+    setMermaidCode(code);
     setDrawioImportRequest(nextDrawioImportRequestRef.current);
   };
 
@@ -1016,32 +1001,12 @@ export default function UmlFlowPage() {
           <div className="uml-toolbar">
             <span className="uml-toolbar-type">
               {DIAGRAM_OPTIONS.find((o) => o.value === diagramType)?.label}
-              <span className="uml-toolbar-tag">{editorMode === 'professional' ? '专业画布' : '经典画布'}</span>
+              <span className="uml-toolbar-tag">专业画布</span>
             </span>
             <div className="uml-toolbar-btns">
-              <div className="uml-editor-mode" role="group" aria-label="流程图画布模式">
-                <button
-                  type="button"
-                  className={`uml-tool-btn ${editorMode === 'professional' ? 'active' : ''}`}
-                  aria-pressed={editorMode === 'professional'}
-                  onClick={() => switchEditorMode('professional')}
-                >
-                  专业画布
-                </button>
-                <button
-                  type="button"
-                  className={`uml-tool-btn ${editorMode === 'classic' ? 'active' : ''}`}
-                  aria-pressed={editorMode === 'classic'}
-                  onClick={() => switchEditorMode('classic')}
-                >
-                  经典画布
-                </button>
-              </div>
-              {editorMode === 'professional' && (
-                <button className="uml-tool-btn" onClick={importMermaidToProfessionalCanvas} disabled={!hasResult}>
-                  导入到专业画布
-                </button>
-              )}
+              <button className="uml-tool-btn" onClick={() => importMermaidToProfessionalCanvas()} disabled={!hasResult}>
+                重新导入到专业画布
+              </button>
               {isClassicBoardMode && boardReady && (
                 <>
                   <button className="uml-tool-btn" onClick={handleAddNode} title="在画布中添加一个矩形节点">

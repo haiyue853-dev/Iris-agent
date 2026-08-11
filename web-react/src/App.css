@@ -2242,8 +2242,8 @@ button.view-item {
 .drawio-editor-frame {
   display: block;
   width: 100%;
-  height: min(780px, calc(100vh - 330px));
-  min-height: 540px;
+  height: min(900px, calc(100vh - 240px));
+  min-height: 680px;
   border: 0;
   background: var(--iris-background);
 }
