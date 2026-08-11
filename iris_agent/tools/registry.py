@@ -15,6 +15,14 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
 
+    def requires_approval(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool is not None and tool.requires_approval
+
+    def approval_context(self, name: str) -> dict[str, Any] | None:
+        tool = self._tools.get(name)
+        return None if tool is None else tool.approval_context
+
     def invoke(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
         tool = self._tools.get(name)
         if tool is None:

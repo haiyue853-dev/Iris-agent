@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import InputBox from './InputBox';
-import type { Message } from '../types';
+import type { AgentEvent, Message } from '../types';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -14,6 +14,9 @@ interface ChatContainerProps {
   onCopy: (text: string) => void;
   onRegenerate: () => void;
   onEdit: (index: number, content: string) => void;
+  pendingApproval?: Extract<AgentEvent, { type: 'tool_approval_requested' }>['data'] | null;
+  onApproveTool?: (callId: string) => void;
+  onRejectTool?: (callId: string) => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -27,6 +30,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onCopy,
   onRegenerate,
   onEdit,
+  pendingApproval,
+  onApproveTool,
+  onRejectTool,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -122,6 +128,18 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             onCopy={onCopy}
           />
         )}
+        {pendingApproval && (
+          <section className="tool-approval-card" aria-label="Tool approval">
+            <p className="tool-approval-eyebrow">需要确认工具操作</p>
+            <h2>{pendingApproval.context?.tool_name || pendingApproval.name}</h2>
+            {pendingApproval.context?.server_name && <p>来自 {pendingApproval.context.server_name}</p>}
+            <pre>{JSON.stringify(pendingApproval.arguments, null, 2)}</pre>
+            <div className="tool-approval-actions">
+              <button className="skill-card-open" onClick={() => onApproveTool?.(pendingApproval.call_id)}>批准执行</button>
+              <button className="skill-card-action" onClick={() => onRejectTool?.(pendingApproval.call_id)}>拒绝</button>
+            </div>
+          </section>
+        )}
       </div>
 
       {showScrollBtn && (
@@ -139,7 +157,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onSend={onSend}
           onStop={isStreaming ? onStop : undefined}
           placeholder="输入消息..."
-          disabled={isStreaming}
+          disabled={isStreaming || Boolean(pendingApproval)}
         />
       </div>
     </div>

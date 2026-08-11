@@ -30,6 +30,25 @@ export async function streamChat(sessionId: string, message: string, signal: Abo
   if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentEvent);
 }
 
+export async function streamToolApproval(sessionId: string, callId: string, approved: boolean, signal: AbortSignal, onEvent: (event: AgentEvent) => void): Promise<void> {
+  const response = await checked(await fetch(`${API_BASE}/api/sessions/${sessionId}/tool-approvals/${callId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }), signal,
+  }));
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('Server did not return a response stream');
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as AgentEvent);
+    if (done) break;
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentEvent);
+}
+
 export async function listSessions(): Promise<Session[]> {
   const data = await (await checked(await fetch(`${API_BASE}/api/sessions`))).json();
   return data.sessions;

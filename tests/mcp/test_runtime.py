@@ -26,3 +26,24 @@ def test_registers_only_enabled_allowlisted_mcp_tools_with_namespaces(tmp_path: 
     assert registry.invoke(name, {"url": "https://example.test"}).value == {"content": [{"type": "text", "text": "ok"}]}
     assert calls == [(allowed.id, "get_page", {"url": "https://example.test"})]
     assert blocked.id not in registry.schemas()[0]["function"]["name"]
+
+
+def test_mcp_tools_require_approval_unless_marked_read_only(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(
+        name="Files",
+        command="node",
+        args=("server.js",),
+        allowed_tools=("read_file", "write_file"),
+    )
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "discover_tools", lambda server_id: (
+        {"name": "read_file", "inputSchema": {"type": "object", "properties": {}}, "annotations": {"readOnlyHint": True}},
+        {"name": "write_file", "inputSchema": {"type": "object", "properties": {}}},
+    ))
+
+    registry = ToolRegistry()
+    register_mcp_tools(registry, service)
+
+    assert not registry.requires_approval(f"mcp__{server.id}__read_file")
+    assert registry.requires_approval(f"mcp__{server.id}__write_file")

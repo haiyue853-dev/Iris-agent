@@ -467,6 +467,22 @@ body {
   border-radius: 3px;
 }
 
+.tool-approval-card {
+  width: min(680px, calc(100% - 48px));
+  margin: 0 auto 20px;
+  padding: 16px;
+  border: 1px solid var(--iris-border, #e8e8ea);
+  border-radius: 14px;
+  background: var(--iris-surface, #fff);
+  box-shadow: 0 8px 22px rgba(29, 28, 35, 0.06);
+}
+
+.tool-approval-card h2 { margin: 2px 0 6px; font-size: 16px; color: var(--iris-text, #1d1c23); }
+.tool-approval-card p { margin: 0; color: var(--iris-text-muted, #68676e); font-size: 13px; }
+.tool-approval-eyebrow { color: var(--iris-primary, #625bf6) !important; font-weight: 600; }
+.tool-approval-card pre { margin: 12px 0; padding: 10px; overflow-x: auto; border-radius: 8px; background: var(--iris-bg-muted, #f4f4f6); color: var(--iris-text, #1d1c23); font-size: 12px; }
+.tool-approval-actions { display: flex; gap: 8px; }
+
 /* ========== Messages ========== */
 .message {
   margin-bottom: 20px;

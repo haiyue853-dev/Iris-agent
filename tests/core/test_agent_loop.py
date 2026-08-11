@@ -45,3 +45,14 @@ def test_malformed_arguments_do_not_execute_tool():
     events = list(AgentLoop(FakeProvider(malformed, ProviderResponse(content="handled")), registry, 1).run([]))
     assert calls == []
     assert next(event for event in events if event.type == "tool_finished").data["error_code"] == "invalid_tool_arguments"
+
+
+def test_loop_requests_approval_before_executing_a_write_tool():
+    calls = []
+    registry = ToolRegistry()
+    from iris_agent.tools.base import Tool
+    registry.register(Tool("write", "write", {"type": "object", "properties": {}}, lambda: calls.append(True), requires_approval=True))
+    events = list(AgentLoop(FakeProvider(ProviderResponse(tool_calls=[ToolCall("c", "write", {})])), registry, 1).run([]))
+    assert [event.type for event in events] == ["tool_started", "tool_approval_requested"]
+    assert events[-1].data["name"] == "write"
+    assert calls == []

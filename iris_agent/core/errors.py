@@ -26,5 +26,9 @@ class ToolRoundLimitError(IrisError):
     code = "tool_round_limit"
 
 
+class ToolApprovalNotFoundError(IrisError):
+    code = "tool_approval_not_found"
+
+
 class ValidationError(IrisError):
     code = "validation_error"

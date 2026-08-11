@@ -6,6 +6,7 @@ from fastapi import FastAPI, File, Form, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel
 
 from iris_agent.api.report_schemas import (
     ApplySuggestionRequest,
@@ -59,6 +60,10 @@ from iris_agent.reports.service import DailyReportService
 from iris_agent.sessions.base import Session, SessionRepository
 
 logger = logging.getLogger(__name__)
+
+
+class ToolApprovalRequest(BaseModel):
+    approved: bool
 
 
 def _session_data(session: Session, include_messages: bool = True) -> dict:
@@ -223,6 +228,22 @@ def create_app(
             except Exception:
                 logger.exception("流式对话发生未处理异常")
                 yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "服务内部错误"}}, ensure_ascii=False) + "\n"
+
+        return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.post("/api/sessions/{session_id}/tool-approvals/{call_id}")
+    def resolve_tool_approval(session_id: str, call_id: str, request: ToolApprovalRequest):
+        sessions.get(session_id)
+
+        def generate():
+            try:
+                for event in service.resolve_tool_approval(session_id, call_id, request.approved):
+                    yield json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
+            except IrisError as exc:
+                yield json.dumps({"type": "error", "data": {"code": exc.code, "message": exc.safe_message}}, ensure_ascii=False) + "\n"
+            except Exception:
+                logger.exception("Tool approval handling failed")
+                yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "Internal server error"}}, ensure_ascii=False) + "\n"
 
         return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

@@ -30,9 +30,11 @@ function App() {
     isStreaming,
     streamingContent,
     toast,
+    pendingApproval,
     currentSessionId,
     sessions,
     handleSendWithSession,
+    resolvePendingApproval,
     handleRegenerate,
     handleStop,
     handleNewChat,
@@ -142,6 +144,9 @@ function App() {
             onCopy={handleCopy}
             onRegenerate={handleRegenerate}
             onEdit={handleEditMessage}
+            pendingApproval={pendingApproval}
+            onApproveTool={(callId) => void resolvePendingApproval(callId, true)}
+            onRejectTool={(callId) => void resolvePendingApproval(callId, false)}
           />
         )}
       </main>

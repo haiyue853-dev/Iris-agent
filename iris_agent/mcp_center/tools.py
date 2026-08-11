@@ -9,6 +9,8 @@ def register_mcp_tools(registry: ToolRegistry, mcp: McpCenterService) -> None:
         schema = dict(definition["inputSchema"])
         name = f"mcp__{server.id}__{original_name}"
         description = str(definition.get("description") or original_name)
+        annotations = definition.get("annotations")
+        read_only = isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
 
         def invoke(*, _server_id=server.id, _tool_name=original_name, **arguments):
             try:
@@ -16,4 +18,11 @@ def register_mcp_tools(registry: ToolRegistry, mcp: McpCenterService) -> None:
             except ValueError as exc:
                 raise ToolInvocationError("mcp_tool_error", str(exc)) from exc
 
-        registry.register(Tool(name, f"MCP {server.name}: {description}", schema, invoke))
+        registry.register(Tool(
+            name,
+            f"MCP {server.name}: {description}",
+            schema,
+            invoke,
+            requires_approval=not read_only,
+            approval_context={"server_name": server.name, "tool_name": original_name},
+        ))

@@ -16,6 +16,8 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., Any]
+    requires_approval: bool = False
+    approval_context: dict[str, Any] | None = None
 
     def invoke(self, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:
