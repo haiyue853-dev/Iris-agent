@@ -14,6 +14,7 @@ app = create_app(
     skills=application.skills,
     documents=application.documents,
     mcp=application.mcp,
+    interview_knowledge=application.interview_knowledge,
 )
 
 

@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$requirementsFile = Join-Path $projectRoot 'requirements.txt'
 $frontendRoot = Join-Path $projectRoot 'web-react'
 $envFile = Join-Path $projectRoot '.env'
 
@@ -35,8 +36,21 @@ function ConvertTo-EncodedCommand([string]$Command) {
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
 }
 
+function Resolve-PythonCommand {
+    $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($launcher) { return [PSCustomObject]@{ Path = $launcher.Source; Arguments = @('-3') } }
+    $python = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($python) { return [PSCustomObject]@{ Path = $python.Source; Arguments = @() } }
+    throw 'Python 3 was not found. Install Python 3.11 or newer and try again.'
+}
+
 if (-not (Test-Path -LiteralPath $pythonExe)) {
-    throw "Project Python virtual environment was not found: $pythonExe"
+    Write-Host 'Creating project Python virtual environment...' -ForegroundColor Cyan
+    $pythonCommand = Resolve-PythonCommand
+    & $pythonCommand.Path @($pythonCommand.Arguments) -m venv (Join-Path $projectRoot '.venv')
+    if (-not (Test-Path -LiteralPath $pythonExe)) { throw "Failed to create project Python virtual environment: $pythonExe" }
+    Write-Host 'Installing Python dependencies...' -ForegroundColor Cyan
+    & $pythonExe -m pip install -r $requirementsFile
 }
 if (-not (Test-Path -LiteralPath (Join-Path $frontendRoot 'package.json'))) {
     throw "Frontend project was not found: $frontendRoot"
@@ -48,6 +62,11 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 $npmCommand = Resolve-NpmCommand
 & $pythonExe --version
 & $npmCommand --version
+
+if (-not (Test-Path -LiteralPath (Join-Path $frontendRoot 'node_modules'))) {
+    Write-Host 'Installing frontend dependencies...' -ForegroundColor Cyan
+    & $npmCommand ci --prefix $frontendRoot
+}
 
 if ($Check) {
     Write-Host 'Iris Agent startup check passed.' -ForegroundColor Green

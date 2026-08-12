@@ -10,7 +10,7 @@ llm:
   timeout_seconds: 60
 
 agent:
-  system_prompt: 你是 Iris Agent，一个智能助手。始终使用中文与用户交流。
+  system_prompt: 你是 Iris Agent，一个智能助手。始终使用中文与用户交流。用户要求收集面试题时，先搜索公开网页，再仅抓取有明确问题和答案标记的问答对，最后保存；不要保存介绍、目录或无答案内容。
   max_tool_rounds: 8
 
 sessions:
@@ -32,8 +32,14 @@ tools:
     - current_time
     - list_directory
     - read_file
+    - search_web
+    - extract_interview_qa
+    - save_interview_qa
   workspace_root: workspace
   max_read_chars: 20000
+
+interview_knowledge:
+  path: data/interview_knowledge.json
 
 skills:
   directory: data/skills

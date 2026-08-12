@@ -1,5 +1,6 @@
 export type Message = { role: 'user' | 'assistant'; content: string };
 export type Session = { id: string; name: string; created_at: number; updated_at: number };
+export type InterviewKnowledgeItem = { topic: string; question: string; answer: string; source_url: string; saved_at: number };
 
 // ---------- AI HOT 每日资讯日报 ----------
 export type AihotDailyItem = {

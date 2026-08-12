@@ -6,6 +6,7 @@ from iris_agent.core.models import ProviderResponse
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.tools.base import Tool
 from iris_agent.tools.registry import ToolRegistry
+from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
 
 
 class EchoProvider:
@@ -41,6 +42,17 @@ def test_validation_uses_stable_error_code(tmp_path):
     response = make_client(tmp_path).post("/api/chat/stream", json={})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "validation_error"
+
+
+def test_lists_interview_knowledge(tmp_path):
+    sessions = JsonSessionRepository(tmp_path / "sessions")
+    knowledge = InterviewKnowledgeRepository(tmp_path / "knowledge.json")
+    knowledge.save("Python", [{"question": "什么是 GIL？", "answer": "解释器锁", "source_url": "https://example.com"}])
+    service = AgentService(AgentLoop(EchoProvider(), ToolRegistry()), sessions, "system")
+
+    client = TestClient(create_app(service, sessions, interview_knowledge=knowledge))
+
+    assert client.get("/api/interview-knowledge?topic=Python").json()["items"][0]["question"] == "什么是 GIL？"
 
 
 def test_approved_tool_call_resumes_streaming_chat(tmp_path):

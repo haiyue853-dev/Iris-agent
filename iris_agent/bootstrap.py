@@ -7,6 +7,7 @@ from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.documents.service import DocumentService
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import register_mcp_tools
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
@@ -16,7 +17,7 @@ from iris_agent.reports.service import DailyReportService
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_extract_interview_qa_tool, build_list_directory_tool, build_read_file_tool, build_save_interview_qa_tool, build_web_search_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -30,6 +31,7 @@ class ApplicationServices:
     documents: DocumentService
     hot_radar: HotRadarService
     mcp: McpCenterService
+    interview_knowledge: InterviewKnowledgeRepository
     settings: Settings
 
 
@@ -38,10 +40,14 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
     provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
     registry = ToolRegistry()
+    interview_knowledge = InterviewKnowledgeRepository(settings.interview_knowledge.path)
     factories = {
         "current_time": lambda: build_current_time_tool(),
         "list_directory": lambda: build_list_directory_tool(settings.tools.workspace_root),
         "read_file": lambda: build_read_file_tool(settings.tools.workspace_root, settings.tools.max_read_chars),
+        "search_web": build_web_search_tool,
+        "extract_interview_qa": build_extract_interview_qa_tool,
+        "save_interview_qa": lambda: build_save_interview_qa_tool(interview_knowledge),
     }
     settings.tools.workspace_root.mkdir(parents=True, exist_ok=True)
     for name in settings.tools.enabled:
@@ -82,4 +88,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_text_chars=settings.documents.max_text_chars,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, interview_knowledge, settings)

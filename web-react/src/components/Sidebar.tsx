@@ -156,6 +156,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v4m8-4v4M6 7h12v14H6zM9 11h6m-6 4h6" /></svg>
               <span className="view-label">MCP</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'interview-knowledge' ? 'active' : ''}`} onClick={() => onViewChange('interview-knowledge')}>
+              <span className="view-label">面试复习</span>
+            </button>
           </nav>
 
           <nav className="sidebar-menu">
