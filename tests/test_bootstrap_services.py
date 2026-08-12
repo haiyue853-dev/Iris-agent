@@ -82,7 +82,7 @@ def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     server = McpServer("browser", "Browser", "node", (), ("get_page",), True)
-    monkeypatch.setattr(McpCenterService, "enabled_tools", lambda _: ((server, {
+    monkeypatch.setattr(McpCenterService, "enabled_tools", lambda _, **kwargs: ((server, {
         "name": "get_page", "description": "Read page", "inputSchema": {"type": "object", "properties": {}},
     }),))
 

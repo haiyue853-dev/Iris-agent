@@ -49,7 +49,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         if name in factories:
             registry.register(factories[name]())
     mcp = McpCenterService(settings.mcp.settings_file)
-    register_mcp_tools(registry, mcp)
+    register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)

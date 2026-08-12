@@ -70,6 +70,22 @@ def test_mcp_events_record_safe_tool_call_metadata(tmp_path: Path, monkeypatch) 
     assert "arguments" not in event and "result" not in event and "error" not in event
 
 
+def test_mcp_error_result_is_recorded_as_a_failed_tool_call(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_call", lambda item, name, arguments: {"isError": True, "content": [{"type": "text", "text": "denied"}]})
+
+    try:
+        service.call_tool(server.id, "get_page", {"url": "https://private.example"})
+    except ValueError as exc:
+        assert "MCP tool returned an error" in str(exc)
+    else:
+        raise AssertionError("MCP error result was treated as a success")
+
+    assert service.events(server.id)[0]["ok"] is False
+
+
 def test_mcp_events_survive_service_restart_without_sensitive_data(tmp_path: Path, monkeypatch) -> None:
     settings_file = tmp_path / "mcp.json"
     service = McpCenterService(settings_file)
@@ -96,3 +112,17 @@ def test_mcp_discovered_tools_are_available_after_service_restart(tmp_path: Path
     assert McpCenterService(settings_file).cached_tools(server.id) == (
         {"name": "get_page", "annotations": {"readOnlyHint": True}},
     )
+
+
+def test_enabled_tools_uses_cached_definitions_without_starting_mcp_at_boot(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_discover", lambda item: ({"name": "get_page", "inputSchema": {"type": "object", "properties": {}}},))
+    service.discover_tools(server.id)
+    restarted = McpCenterService(tmp_path / "mcp.json")
+    monkeypatch.setattr(restarted, "discover_tools", lambda server_id: (_ for _ in ()).throw(AssertionError("bootstrap must not discover MCP tools")))
+
+    tools = restarted.enabled_tools(cached_only=True)
+
+    assert [(item.id, definition["name"]) for item, definition in tools] == [(server.id, "get_page")]

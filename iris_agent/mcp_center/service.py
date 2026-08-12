@@ -138,16 +138,22 @@ class McpCenterService:
         self._events.append(event)
         self._save_events()
 
-    def enabled_tools(self) -> tuple[tuple[McpServer, dict[str, object]], ...]:
+    def enabled_tools(self, discovered_by_server: dict[str, tuple[dict[str, object], ...]] | None = None, *, cached_only: bool = False) -> tuple[tuple[McpServer, dict[str, object]], ...]:
         """Return discoverable tools from enabled servers, restricted to each allowlist."""
         discovered: list[tuple[McpServer, dict[str, object]]] = []
         for server in self.list():
             if not server.enabled:
                 continue
-            try:
-                tools = self.discover_tools(server.id)
-            except ValueError:
-                continue
+            if discovered_by_server is None:
+                if cached_only:
+                    tools = self.cached_tools(server.id)
+                else:
+                    try:
+                        tools = self.discover_tools(server.id)
+                    except ValueError:
+                        continue
+            else:
+                tools = discovered_by_server.get(server.id, ())
             for tool in tools:
                 name = tool.get("name")
                 schema = tool.get("inputSchema")
@@ -162,6 +168,8 @@ class McpCenterService:
         started = time.perf_counter()
         try:
             result = self._call(server, name, arguments)
+            if isinstance(result, dict) and result.get("isError") is True:
+                raise ValueError("MCP tool returned an error")
         except ValueError:
             self._record_event(server.id, "tool_call", False, started, name)
             raise

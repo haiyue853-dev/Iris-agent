@@ -111,6 +111,7 @@ export default function McpPage() {
             {servers.map((server) => <ServerPanel key={server.id} server={server} tools={tools[server.id] || []} selected={selectedTools[server.id] || []} events={events[server.id] || []}
               onToggleEnabled={() => void setMcpEnabled(server.id, !server.enabled).then(load).catch((reason) => setError(reason.message))}
               onDiscover={() => void discover(server)} onRemove={() => void remove(server)} onToggleTool={toggleTool}
+              onSelectAutomaticTools={(serverId, automaticTools) => setSelectedTools((current) => ({ ...current, [serverId]: automaticTools }))}
               onSaveTools={() => void setMcpAllowedTools(server.id, selectedTools[server.id] || []).then(load).catch((reason) => setError(reason.message))} />)}
           </div>
         )}
@@ -137,9 +138,11 @@ function EmptyServices({ onAdd }: { onAdd: () => void }) {
   return <div className="mcp-empty"><div className="mcp-empty-mark">⌘</div><h3>尚未接入 MCP 服务</h3><p>添加本地 stdio 服务后，即可检测工具并选择允许主对话调用的范围。</p><button className="mcp-secondary-button" onClick={onAdd}>添加第一个服务</button></div>;
 }
 
-function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDiscover, onRemove, onToggleTool, onSaveTools }: {
-  server: McpServer; tools: McpTool[]; selected: string[]; events: McpEvent[]; onToggleEnabled: () => void; onDiscover: () => void; onRemove: () => void; onToggleTool: (serverId: string, toolName: string) => void; onSaveTools: () => void;
+function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDiscover, onRemove, onToggleTool, onSelectAutomaticTools, onSaveTools }: {
+  server: McpServer; tools: McpTool[]; selected: string[]; events: McpEvent[]; onToggleEnabled: () => void; onDiscover: () => void; onRemove: () => void; onToggleTool: (serverId: string, toolName: string) => void; onSelectAutomaticTools: (serverId: string, toolNames: string[]) => void; onSaveTools: () => void;
 }) {
+  const automaticTools = tools.filter((tool) => tool.annotations?.readOnlyHint === true).map((tool) => tool.name);
+
   return <article className="mcp-server-panel">
     <div className="mcp-server-topline">
       <div className={`mcp-server-icon ${server.enabled ? 'is-online' : ''}`}>⌘</div>
@@ -147,7 +150,7 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
       <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>检测连接</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
     </div>
     <div className="mcp-server-body">
-      <section className="mcp-permissions"><div className="mcp-panel-heading"><div><h4>工具权限</h4><span>{tools.length ? `已发现 ${tools.length} 个工具` : '请先检测连接以发现工具'}</span></div>{tools.length > 0 && <button className="mcp-text-button" disabled={!server.enabled} onClick={onSaveTools}>保存授权</button>}</div>
+      <section className="mcp-permissions"><div className="mcp-panel-heading"><div><h4>工具权限</h4><span>{tools.length ? `已发现 ${tools.length} 个工具` : '请先检测连接以发现工具'}</span></div>{tools.length > 0 && <div className="mcp-permission-actions"><button className="mcp-text-button" disabled={!server.enabled || automaticTools.length === 0} onClick={() => onSelectAutomaticTools(server.id, automaticTools)}>选择全部可自动执行工具</button><button className="mcp-text-button" disabled={!server.enabled} onClick={onSaveTools}>保存授权</button></div>}</div>
         {tools.length > 0 ? <div className="mcp-tool-list">{tools.map((tool) => <label key={tool.name} className="mcp-tool-row"><input type="checkbox" checked={selected.includes(tool.name)} disabled={!server.enabled} onChange={() => onToggleTool(server.id, tool.name)} /><span className="mcp-tool-name">{tool.name}<small>{tool.description || 'MCP 工具'}</small></span><span className={`mcp-tool-safety ${tool.annotations?.readOnlyHint === true ? 'is-read-only' : 'requires-approval'}`}>{tool.annotations?.readOnlyHint === true ? '自动执行' : '需确认'}</span></label>)}</div> : <p className="mcp-panel-empty">检测仅执行初始化与工具发现，不会调用工具。</p>}
       </section>
       <section className="mcp-activity"><div className="mcp-panel-heading"><div><h4>最近活动</h4><span>不记录参数与结果</span></div></div><McpStatus events={events} /></section>

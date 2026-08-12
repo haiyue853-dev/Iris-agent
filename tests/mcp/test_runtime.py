@@ -69,6 +69,25 @@ def test_refresh_replaces_only_mcp_tools_and_keeps_builtin_tools(tmp_path: Path,
     assert "mcp__old__stale" not in names
 
 
+def test_refresh_discovers_each_enabled_server_only_once(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    calls: list[str] = []
+
+    def discover(server_id: str):
+        calls.append(server_id)
+        return ({"name": "get_page", "inputSchema": {"type": "object", "properties": {}}},)
+
+    monkeypatch.setattr(service, "discover_tools", discover)
+    registry = ToolRegistry()
+
+    McpToolRefresher(registry, service).refresh()
+
+    assert calls == [server.id]
+    assert f"mcp__{server.id}__get_page" in [item["function"]["name"] for item in registry.schemas()]
+
+
 def test_refresh_keeps_existing_mcp_tools_when_an_enabled_server_cannot_be_discovered(tmp_path: Path, monkeypatch) -> None:
     service = McpCenterService(tmp_path / "mcp.json")
     server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))

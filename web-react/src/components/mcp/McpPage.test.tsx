@@ -35,6 +35,9 @@ describe('McpPage', () => {
     expect(await screen.findByText('read_page')).toBeInTheDocument();
     expect(screen.getByText('自动执行')).toBeInTheDocument();
     expect(screen.getByText('工具权限')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择全部可自动执行工具' }));
+    expect(screen.getByRole('checkbox', { name: /read_page/ })).toBeChecked();
   });
 
   it('deletes only the selected MCP configuration', async () => {
