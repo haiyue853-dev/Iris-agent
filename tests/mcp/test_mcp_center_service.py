@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from iris_agent.mcp_center.service import McpCenterService
 
@@ -53,6 +54,45 @@ def test_mcp_events_record_only_safe_discovery_metadata(tmp_path: Path, monkeypa
     assert event["ok"] is True
     assert event["duration_ms"] >= 0
     assert "arguments" not in event and "result" not in event and "error" not in event
+
+
+def test_mcp_missing_command_is_a_safe_discovery_failure(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("node not found")))
+
+    try:
+        service.discover_tools(server.id)
+    except ValueError as exc:
+        assert "unable to discover MCP tools" in str(exc)
+    else:
+        raise AssertionError("missing MCP command was not reported as a discovery error")
+
+    assert service.events(server.id)[0]["ok"] is False
+
+
+def test_mcp_uses_windows_node_fallback_when_node_is_not_on_path(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+
+    monkeypatch.setenv("PATH", "C:\\Windows")
+    monkeypatch.setenv("ProgramFiles", "C:\\Program Files")
+    monkeypatch.setattr("iris_agent.mcp_center.service.Path.is_file", lambda path: str(path) == "C:\\Program Files\\nodejs\\node.exe")
+
+    environment = service._subprocess_env(server)
+
+    assert environment["PATH"].startswith("C:\\Program Files\\nodejs")
+
+
+def test_mcp_resolves_windows_node_fallback_to_an_executable_path(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+
+    monkeypatch.setenv("ProgramFiles", "C:\\Program Files")
+    monkeypatch.setattr("iris_agent.mcp_center.service.Path.is_file", lambda path: str(path) == "C:\\Program Files\\nodejs\\node.exe")
+
+    assert service._command_args(server)[0] == "C:\\Program Files\\nodejs\\node.exe"
 
 
 def test_mcp_events_record_safe_tool_call_metadata(tmp_path: Path, monkeypatch) -> None:

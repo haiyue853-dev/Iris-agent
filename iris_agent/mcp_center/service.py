@@ -104,10 +104,13 @@ class McpCenterService:
         return tools
 
     def _discover(self, server: McpServer) -> tuple[dict[str, object], ...]:
-        process = subprocess.Popen(
-            [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-        )
+        try:
+            process = subprocess.Popen(
+                self._command_args(server), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=self._subprocess_env(server),
+            )
+        except OSError as exc:
+            raise ValueError("unable to discover MCP tools") from exc
         try:
             assert process.stdin is not None and process.stdout is not None
             process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
@@ -177,10 +180,13 @@ class McpCenterService:
         return result
 
     def _call(self, server: McpServer, name: str, arguments: dict[str, object]) -> object:
-        process = subprocess.Popen(
-            [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-        )
+        try:
+            process = subprocess.Popen(
+                self._command_args(server), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=self._subprocess_env(server),
+            )
+        except OSError as exc:
+            raise ValueError("unable to call MCP tool") from exc
         try:
             assert process.stdin is not None
             process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
@@ -199,6 +205,24 @@ class McpCenterService:
             process.terminate()
             try: process.wait(timeout=2)
             except subprocess.TimeoutExpired: process.kill()
+
+    @staticmethod
+    def _subprocess_env(server: McpServer) -> dict[str, str]:
+        environment = os.environ.copy()
+        if os.name == "nt" and server.command.casefold() in {"node", "node.exe"}:
+            node_dir = Path(environment.get("ProgramFiles", r"C:\Program Files")) / "nodejs"
+            if (node_dir / "node.exe").is_file() and node_dir.as_posix().casefold() not in environment.get("PATH", "").casefold():
+                environment["PATH"] = f"{node_dir}{os.pathsep}{environment.get('PATH', '')}"
+        return environment
+
+    @staticmethod
+    def _command_args(server: McpServer) -> list[str]:
+        command = server.command
+        if os.name == "nt" and command.casefold() in {"node", "node.exe"}:
+            node_executable = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "node.exe"
+            if node_executable.is_file():
+                command = str(node_executable)
+        return [command, *server.args]
 
     @staticmethod
     def _read_response(process: subprocess.Popen[str], expected_id: int) -> dict[str, object]:
