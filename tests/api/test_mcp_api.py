@@ -92,3 +92,15 @@ def test_mcp_environment_endpoint_does_not_return_secret_values(tmp_path):
     assert response.status_code == 200
     assert response.json()["env_keys"] == ["SEARCH_API_KEY"]
     assert "top-secret" not in response.text
+
+
+def test_mcp_timeout_endpoint_returns_the_saved_timeout(tmp_path):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Search", command="node", args=("server.js",), allowed_tools=())
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).put(f"/api/mcp/servers/{server.id}/timeout", json={"timeout_seconds": 45})
+
+    assert response.status_code == 200
+    assert response.json()["timeout_seconds"] == 45

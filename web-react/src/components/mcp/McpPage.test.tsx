@@ -5,7 +5,7 @@ import McpPage from './McpPage';
 
 const server = {
   id: 'browser', name: 'Browser MCP', command: 'node', args: ['server.js'],
-  allowed_tools: [], env_keys: [], enabled: true, status: 'configured', discovered_tools: [],
+  allowed_tools: [], env_keys: [], timeout_seconds: 10, enabled: true, status: 'configured', discovered_tools: [],
 };
 
 function response(body: unknown, status = 200): Response {
@@ -108,5 +108,24 @@ describe('McpPage', () => {
     );
     expect(screen.getByText('变量：SEARCH_API_KEY')).toBeInTheDocument();
     expect(screen.queryByText('top-secret')).not.toBeInTheDocument();
+  });
+
+  it('updates the response timeout for an MCP service', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ servers: [server] }))
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ ...server, timeout_seconds: 45 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<McpPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '超时 10 秒' }));
+    fireEvent.change(screen.getByLabelText('响应超时 Browser MCP'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存超时' }));
+
+    await screen.findByRole('button', { name: '超时 45 秒' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/mcp/servers/browser/timeout'),
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ timeout_seconds: 45 }) }),
+    );
   });
 });

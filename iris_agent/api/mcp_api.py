@@ -21,8 +21,12 @@ class McpEnvironmentRequest(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict, max_length=50)
 
 
+class McpTimeoutRequest(BaseModel):
+    timeout_seconds: int = Field(ge=1, le=120)
+
+
 def _data(server, tools=(), *, connected=False):
-    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "env_keys": [key for key, _ in server.environment], "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
+    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "env_keys": [key for key, _ in server.environment], "timeout_seconds": server.timeout_seconds, "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
 
 
 def register_mcp_routes(app, mcp, refresher=None) -> None:
@@ -79,6 +83,15 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "环境变量无效"}) from exc
+
+    @app.put("/api/mcp/servers/{server_id}/timeout")
+    def set_timeout(server_id: str, request: McpTimeoutRequest):
+        try:
+            return _data(mcp.set_timeout_seconds(server_id, request.timeout_seconds))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "超时时间无效"}) from exc
 
     @app.delete("/api/mcp/servers/{server_id}", status_code=204)
     def delete_server(server_id: str):

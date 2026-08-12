@@ -1,6 +1,6 @@
 const API_BASE = 'http://localhost:8000';
 
-export type McpServer = { id: string; name: string; command: string; args: string[]; allowed_tools: string[]; env_keys: string[]; enabled: boolean; status: string; discovered_tools: McpTool[] };
+export type McpServer = { id: string; name: string; command: string; args: string[]; allowed_tools: string[]; env_keys: string[]; timeout_seconds: number; enabled: boolean; status: string; discovered_tools: McpTool[] };
 export type McpEvent = { server_id: string; kind: 'discovery' | 'tool_call'; tool_name?: string; ok: boolean; duration_ms: number; created_at: number };
 export type McpTool = { name: string; description?: string; annotations?: { readOnlyHint?: boolean } };
 
@@ -16,5 +16,6 @@ export const createMcpServer = (input: Pick<McpServer, 'name' | 'command' | 'arg
 export const discoverMcpTools = (id: string) => request<{ tools: McpTool[]; server: McpServer }>(`/api/mcp/servers/${encodeURIComponent(id)}/discover`, { method: 'POST' });
 export const setMcpAllowedTools = (id: string, allowed_tools: string[]) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/allowed-tools`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allowed_tools }) });
 export const setMcpEnvironment = (id: string, environment: Record<string, string>) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/environment`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ environment }) });
+export const setMcpTimeout = (id: string, timeout_seconds: number) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/timeout`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timeout_seconds }) });
 export const deleteMcpServer = (id: string) => request<void>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const listMcpEvents = (id: string) => request<{ events: McpEvent[] }>(`/api/mcp/servers/${encodeURIComponent(id)}/events`);
