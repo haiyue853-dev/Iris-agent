@@ -36,3 +36,18 @@ def test_mcp_events_endpoint_returns_safe_server_events(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"events": []}
+
+
+def test_mcp_server_list_includes_cached_discovered_tools(tmp_path, monkeypatch):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    mcp.set_enabled(server.id, True)
+    monkeypatch.setattr(mcp, "_discover", lambda item: ({"name": "get_page"},))
+    mcp.discover_tools(server.id)
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).get("/api/mcp/servers")
+
+    assert response.status_code == 200
+    assert response.json()["servers"][0]["discovered_tools"] == [{"name": "get_page"}]

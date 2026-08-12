@@ -30,6 +30,8 @@ class McpCenterService:
         self._servers = self._load()
         self.events_file = settings_file.with_name("events.json")
         self._events = self._load_events()
+        self.tools_file = settings_file.with_name("tools.json")
+        self._tools = self._load_tools()
 
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
@@ -73,11 +75,17 @@ class McpCenterService:
         self._save()
         self._events = deque((event for event in self._events if event["server_id"] != server_id), maxlen=50)
         self._save_events()
+        self._tools.pop(server_id, None)
+        self._save_tools()
         return server
 
     def events(self, server_id: str) -> tuple[dict[str, object], ...]:
         self.get(server_id)
         return tuple(event for event in reversed(self._events) if event["server_id"] == server_id)
+
+    def cached_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
+        self.get(server_id)
+        return tuple(self._tools.get(server_id, ()))
 
     def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         """Run only the MCP handshake and tools/list request, then terminate the child."""
@@ -90,6 +98,8 @@ class McpCenterService:
         except ValueError:
             self._record_event(server.id, "discovery", False, started)
             raise
+        self._tools[server.id] = tools
+        self._save_tools()
         self._record_event(server.id, "discovery", True, started)
         return tools
 
@@ -252,5 +262,32 @@ class McpCenterService:
                 json.dump({"events": list(self._events)}, handle, ensure_ascii=False, indent=2)
                 handle.flush(); os.fsync(handle.fileno())
             os.replace(temporary, self.events_file)
+        finally:
+            if os.path.exists(temporary): os.unlink(temporary)
+
+    def _load_tools(self) -> dict[str, tuple[dict[str, object], ...]]:
+        if not self.tools_file.is_file():
+            return {}
+        try:
+            raw = json.loads(self.tools_file.read_text(encoding="utf-8"))
+            cached = raw.get("tools", {})
+            if not isinstance(cached, dict):
+                return {}
+            return {
+                server_id: tuple(item for item in tools if isinstance(item, dict) and isinstance(item.get("name"), str))
+                for server_id, tools in cached.items()
+                if isinstance(server_id, str) and isinstance(tools, list)
+            }
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+
+    def _save_tools(self) -> None:
+        self.tools_file.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=self.tools_file.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"tools": self._tools}, handle, ensure_ascii=False, indent=2)
+                handle.flush(); os.fsync(handle.fileno())
+            os.replace(temporary, self.tools_file)
         finally:
             if os.path.exists(temporary): os.unlink(temporary)

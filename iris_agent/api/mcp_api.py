@@ -17,8 +17,8 @@ class McpAllowedToolsRequest(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list, max_length=100)
 
 
-def _data(server):
-    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured"}
+def _data(server, tools=()):
+    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured", "discovered_tools": list(tools)}
 
 
 def register_mcp_routes(app, mcp, refresher=None) -> None:
@@ -28,7 +28,7 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
 
     @app.get("/api/mcp/servers")
     def list_servers():
-        return {"servers": [_data(item) for item in mcp.list()]}
+        return {"servers": [_data(item, mcp.cached_tools(item.id)) for item in mcp.list()]}
 
     @app.get("/api/mcp/servers/{server_id}/events")
     def server_events(server_id: str):

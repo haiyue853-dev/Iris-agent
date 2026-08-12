@@ -27,6 +27,8 @@ export default function McpPage() {
     try {
       const loaded = (await listMcpServers()).servers;
       setServers(loaded);
+      setTools(Object.fromEntries(loaded.filter((server) => (server.discovered_tools || []).length > 0).map((server) => [server.id, server.discovered_tools || []])));
+      setSelectedTools(Object.fromEntries(loaded.map((server) => [server.id, server.allowed_tools])));
       const entries = await Promise.all(loaded.map(async (server) => [server.id, (await listMcpEvents(server.id)).events] as const));
       setEvents(Object.fromEntries(entries));
     } catch (reason) {

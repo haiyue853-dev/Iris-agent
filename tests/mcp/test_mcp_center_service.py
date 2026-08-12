@@ -82,3 +82,17 @@ def test_mcp_events_survive_service_restart_without_sensitive_data(tmp_path: Pat
     event = McpCenterService(settings_file).events(server.id)[0]
     assert event["tool_name"] == "get_page"
     assert "arguments" not in event and "result" not in event and "error" not in event
+
+
+def test_mcp_discovered_tools_are_available_after_service_restart(tmp_path: Path, monkeypatch) -> None:
+    settings_file = tmp_path / "mcp.json"
+    service = McpCenterService(settings_file)
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_discover", lambda item: ({"name": "get_page", "annotations": {"readOnlyHint": True}},))
+
+    service.discover_tools(server.id)
+
+    assert McpCenterService(settings_file).cached_tools(server.id) == (
+        {"name": "get_page", "annotations": {"readOnlyHint": True}},
+    )
