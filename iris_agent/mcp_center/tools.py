@@ -3,6 +3,20 @@ from iris_agent.tools.base import Tool, ToolInvocationError
 from iris_agent.tools.registry import ToolRegistry
 
 
+class McpToolRefresher:
+    def __init__(self, registry: ToolRegistry, mcp: McpCenterService):
+        self.registry = registry
+        self.mcp = mcp
+
+    def refresh(self) -> None:
+        for server in self.mcp.list():
+            if server.enabled:
+                self.mcp.discover_tools(server.id)
+        candidate = ToolRegistry()
+        register_mcp_tools(candidate, self.mcp)
+        self.registry.replace_prefix("mcp__", candidate.tools_with_prefix("mcp__"))
+
+
 def register_mcp_tools(registry: ToolRegistry, mcp: McpCenterService) -> None:
     for server, definition in mcp.enabled_tools():
         original_name = str(definition["name"])

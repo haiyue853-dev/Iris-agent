@@ -146,6 +146,7 @@ def create_app(
     skills: SkillCenterService | None = None,
     documents: DocumentService | None = None,
     mcp: McpCenterService | None = None,
+    mcp_tools=None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -166,7 +167,7 @@ def create_app(
     if documents is not None:
         register_documents_routes(app, documents)
     if mcp is not None:
-        register_mcp_routes(app, mcp)
+        register_mcp_routes(app, mcp, mcp_tools)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):

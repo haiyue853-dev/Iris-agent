@@ -21,7 +21,11 @@ def _data(server):
     return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured"}
 
 
-def register_mcp_routes(app, mcp) -> None:
+def register_mcp_routes(app, mcp, refresher=None) -> None:
+    def refresh():
+        if refresher is not None:
+            refresher.refresh()
+
     @app.get("/api/mcp/servers")
     def list_servers():
         return {"servers": [_data(item) for item in mcp.list()]}
@@ -29,21 +33,27 @@ def register_mcp_routes(app, mcp) -> None:
     @app.post("/api/mcp/servers", status_code=201)
     def create_server(request: McpCreateRequest):
         try:
-            return _data(mcp.create(name=request.name, command=request.command, args=tuple(request.args), allowed_tools=tuple(request.allowed_tools)))
+            server = mcp.create(name=request.name, command=request.command, args=tuple(request.args), allowed_tools=tuple(request.allowed_tools))
+            refresh()
+            return _data(server)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "MCP 服务配置无效"}) from exc
 
     @app.put("/api/mcp/servers/{server_id}/enabled")
     def set_enabled(server_id: str, request: McpEnabledRequest):
         try:
-            return _data(mcp.set_enabled(server_id, request.enabled))
+            server = mcp.set_enabled(server_id, request.enabled)
+            refresh()
+            return _data(server)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
 
     @app.put("/api/mcp/servers/{server_id}/allowed-tools")
     def set_allowed_tools(server_id: str, request: McpAllowedToolsRequest):
         try:
-            return _data(mcp.set_allowed_tools(server_id, tuple(request.allowed_tools)))
+            server = mcp.set_allowed_tools(server_id, tuple(request.allowed_tools))
+            refresh()
+            return _data(server)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
         except ValueError as exc:
@@ -53,6 +63,7 @@ def register_mcp_routes(app, mcp) -> None:
     def delete_server(server_id: str):
         try:
             mcp.delete(server_id)
+            refresh()
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "MCP server was not found"}) from exc
 

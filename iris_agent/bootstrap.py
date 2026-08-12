@@ -8,7 +8,7 @@ from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.documents.service import DocumentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.mcp_center.service import McpCenterService
-from iris_agent.mcp_center.tools import register_mcp_tools
+from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
@@ -30,6 +30,7 @@ class ApplicationServices:
     documents: DocumentService
     hot_radar: HotRadarService
     mcp: McpCenterService
+    mcp_tools: McpToolRefresher
     settings: Settings
 
 
@@ -49,6 +50,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             registry.register(factories[name]())
     mcp = McpCenterService(settings.mcp.settings_file)
     register_mcp_tools(registry, mcp)
+    mcp_tools = McpToolRefresher(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
     agent = AgentService(loop, sessions, settings.agent.system_prompt)
@@ -82,4 +84,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_text_chars=settings.documents.max_text_chars,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, mcp_tools, settings)

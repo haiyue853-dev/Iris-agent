@@ -15,6 +15,16 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
 
+    def replace_prefix(self, prefix: str, tools: list[Tool]) -> None:
+        for name in tuple(self._tools):
+            if name.startswith(prefix):
+                del self._tools[name]
+        for tool in tools:
+            self.register(tool)
+
+    def tools_with_prefix(self, prefix: str) -> list[Tool]:
+        return [tool for name, tool in self._tools.items() if name.startswith(prefix)]
+
     def requires_approval(self, name: str) -> bool:
         tool = self._tools.get(name)
         return tool is not None and tool.requires_approval
