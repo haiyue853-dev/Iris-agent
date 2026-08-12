@@ -24,3 +24,15 @@ def test_updating_an_mcp_allowlist_refreshes_runtime_tools(tmp_path):
 
     assert response.status_code == 200
     assert refresher.calls == 1
+
+
+def test_mcp_events_endpoint_returns_safe_server_events(tmp_path):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).get(f"/api/mcp/servers/{server.id}/events")
+
+    assert response.status_code == 200
+    assert response.json() == {"events": []}

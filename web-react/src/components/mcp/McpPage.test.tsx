@@ -18,6 +18,7 @@ describe('McpPage', () => {
   it('detects a connection through the discovery endpoint', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ servers: [server] }))
+      .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response({ tools: [{ name: 'read_page' }] }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -34,6 +35,7 @@ describe('McpPage', () => {
   it('deletes only the selected MCP configuration', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ servers: [server] }))
+      .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response(null, 204))
       .mockResolvedValueOnce(response({ servers: [] }));
     vi.stubGlobal('fetch', fetchMock);
@@ -46,5 +48,16 @@ describe('McpPage', () => {
       expect.stringContaining('/api/mcp/servers/browser'),
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+
+  it('shows safe recent connection status without tool arguments', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response({ servers: [server] }))
+      .mockResolvedValueOnce(response({ events: [{ server_id: 'browser', kind: 'discovery', ok: true, duration_ms: 28, created_at: 1, arguments: { secret: true } }] })));
+
+    render(<McpPage />);
+
+    expect(await screen.findByText('最近检测：成功 · 28ms')).toBeInTheDocument();
+    expect(screen.queryByText('secret')).not.toBeInTheDocument();
   });
 });

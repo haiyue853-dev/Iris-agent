@@ -30,6 +30,13 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
     def list_servers():
         return {"servers": [_data(item) for item in mcp.list()]}
 
+    @app.get("/api/mcp/servers/{server_id}/events")
+    def server_events(server_id: str):
+        try:
+            return {"events": list(mcp.events(server_id))}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "MCP server was not found"}) from exc
+
     @app.post("/api/mcp/servers", status_code=201)
     def create_server(request: McpCreateRequest):
         try:

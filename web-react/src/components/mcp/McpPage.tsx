@@ -4,10 +4,12 @@ import {
   createMcpServer,
   deleteMcpServer,
   discoverMcpTools,
+  listMcpEvents,
   listMcpServers,
   setMcpAllowedTools,
   setMcpEnabled,
   type McpServer,
+  type McpEvent,
 } from '../../api/mcp';
 
 type McpTool = { name: string; description?: string };
@@ -20,10 +22,14 @@ export default function McpPage() {
   const [error, setError] = useState('');
   const [tools, setTools] = useState<Record<string, McpTool[]>>({});
   const [selectedTools, setSelectedTools] = useState<Record<string, string[]>>({});
+  const [events, setEvents] = useState<Record<string, McpEvent[]>>({});
 
   const load = async () => {
     try {
-      setServers((await listMcpServers()).servers);
+      const loaded = (await listMcpServers()).servers;
+      setServers(loaded);
+      const entries = await Promise.all(loaded.map(async (server) => [server.id, (await listMcpEvents(server.id)).events] as const));
+      setEvents(Object.fromEntries(entries));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法加载 MCP 配置');
     }
@@ -51,6 +57,8 @@ export default function McpPage() {
       setTools((current) => ({ ...current, [server.id]: result.tools }));
       setSelectedTools((current) => ({ ...current, [server.id]: current[server.id] || server.allowed_tools }));
       setError('');
+      const recent = await listMcpEvents(server.id);
+      setEvents((current) => ({ ...current, [server.id]: recent.events }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '连接检测失败');
     }
@@ -97,6 +105,7 @@ export default function McpPage() {
               <button className="skill-card-open" disabled={!server.enabled} onClick={() => void discover(server)}>检测连接</button>
               <button className="skill-card-action" aria-label={`删除配置 ${server.name}`} onClick={() => void remove(server)}>删除配置</button>
             </div>
+            <McpStatus events={events[server.id] || []} />
             {tools[server.id]?.map((tool) => (
               <label key={tool.name} className="mcp-tool-option">
                 <input type="checkbox" checked={(selectedTools[server.id] || []).includes(tool.name)} disabled={!server.enabled} onChange={() => toggleTool(server.id, tool.name)} />
@@ -117,5 +126,17 @@ export default function McpPage() {
         <button className="uml-generate-btn" onClick={() => void add()}>保存 MCP 配置</button>
       </div>
     </section>
+  );
+}
+
+function McpStatus({ events }: { events: McpEvent[] }) {
+  const discovery = events.find((event) => event.kind === 'discovery');
+  const call = events.find((event) => event.kind === 'tool_call');
+  if (!discovery && !call) return <p className="mcp-status">暂无最近状态</p>;
+  return (
+    <div className="mcp-status" aria-label="最近 MCP 状态">
+      {discovery && <p>最近检测：{discovery.ok ? '成功' : '失败'} · {discovery.duration_ms}ms</p>}
+      {call && <p>最近调用：{call.tool_name || '工具'} · {call.ok ? '成功' : '失败'} · {call.duration_ms}ms</p>}
+    </div>
   );
 }

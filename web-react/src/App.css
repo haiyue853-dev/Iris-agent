@@ -3510,6 +3510,8 @@ button.view-item {
 }
 
 .mcp-tool-option { display: flex; align-items: center; gap: 7px; margin: 8px 0; color: var(--iris-text-muted); font-size: 13px; }
+.mcp-status { margin: 10px 0; color: var(--iris-text-muted); font-size: 12px; }
+.mcp-status p { margin: 3px 0; }
 
 .skills-loading {
   max-width: 1080px;

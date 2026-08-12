@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from uuid import uuid4
@@ -26,6 +28,7 @@ class McpCenterService:
     def __init__(self, settings_file: Path):
         self.settings_file = settings_file
         self._servers = self._load()
+        self._events: deque[dict[str, object]] = deque(maxlen=50)
 
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
@@ -69,11 +72,25 @@ class McpCenterService:
         self._save()
         return server
 
+    def events(self, server_id: str) -> tuple[dict[str, object], ...]:
+        self.get(server_id)
+        return tuple(event for event in reversed(self._events) if event["server_id"] == server_id)
+
     def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         """Run only the MCP handshake and tools/list request, then terminate the child."""
         server = self.get(server_id)
         if not server.enabled:
             raise ValueError("server is disabled")
+        started = time.perf_counter()
+        try:
+            tools = self._discover(server)
+        except ValueError:
+            self._record_event(server.id, "discovery", False, started)
+            raise
+        self._record_event(server.id, "discovery", True, started)
+        return tools
+
+    def _discover(self, server: McpServer) -> tuple[dict[str, object], ...]:
         process = subprocess.Popen(
             [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
@@ -94,6 +111,18 @@ class McpCenterService:
             process.terminate()
             try: process.wait(timeout=2)
             except subprocess.TimeoutExpired: process.kill()
+
+    def _record_event(self, server_id: str, kind: str, ok: bool, started: float, tool_name: str | None = None) -> None:
+        event: dict[str, object] = {
+            "server_id": server_id,
+            "kind": kind,
+            "ok": ok,
+            "duration_ms": round((time.perf_counter() - started) * 1000),
+            "created_at": time.time(),
+        }
+        if tool_name is not None:
+            event["tool_name"] = tool_name
+        self._events.append(event)
 
     def enabled_tools(self) -> tuple[tuple[McpServer, dict[str, object]], ...]:
         """Return discoverable tools from enabled servers, restricted to each allowlist."""
@@ -116,6 +145,16 @@ class McpCenterService:
         server = self.get(server_id)
         if not server.enabled or name not in server.allowed_tools or not isinstance(arguments, dict):
             raise ValueError("MCP tool is not allowed")
+        started = time.perf_counter()
+        try:
+            result = self._call(server, name, arguments)
+        except ValueError:
+            self._record_event(server.id, "tool_call", False, started, name)
+            raise
+        self._record_event(server.id, "tool_call", True, started, name)
+        return result
+
+    def _call(self, server: McpServer, name: str, arguments: dict[str, object]) -> object:
         process = subprocess.Popen(
             [server.command, *server.args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8",

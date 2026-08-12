@@ -38,3 +38,33 @@ def test_mcp_server_delete_removes_its_local_configuration(tmp_path: Path) -> No
     assert deleted.id == server.id
     assert service.list() == []
     assert McpCenterService(tmp_path / "mcp.json").list() == []
+
+
+def test_mcp_events_record_only_safe_discovery_metadata(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_discover", lambda item: ({"name": "get_page"},))
+
+    service.discover_tools(server.id)
+
+    event = service.events(server.id)[0]
+    assert event["kind"] == "discovery"
+    assert event["ok"] is True
+    assert event["duration_ms"] >= 0
+    assert "arguments" not in event and "result" not in event and "error" not in event
+
+
+def test_mcp_events_record_safe_tool_call_metadata(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_call", lambda item, name, arguments: {"content": [{"text": "secret"}]})
+
+    service.call_tool(server.id, "get_page", {"url": "https://private.example"})
+
+    event = service.events(server.id)[0]
+    assert event["kind"] == "tool_call"
+    assert event["tool_name"] == "get_page"
+    assert event["ok"] is True
+    assert "arguments" not in event and "result" not in event and "error" not in event
