@@ -1,4 +1,6 @@
 from pathlib import Path
+import io
+import json
 import subprocess
 
 from iris_agent.mcp_center.service import McpCenterService
@@ -108,6 +110,100 @@ def test_mcp_events_record_safe_tool_call_metadata(tmp_path: Path, monkeypatch) 
     assert event["tool_name"] == "get_page"
     assert event["ok"] is True
     assert "arguments" not in event and "result" not in event and "error" not in event
+
+
+def test_two_mcp_calls_reuse_one_initialized_process(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("navigate", "get_page_source"))
+    service.set_enabled(server.id, True)
+    starts = 0
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO(
+                '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"navigated"}]}}\n'
+                '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"<title>Example</title>"}]}}\n'
+            )
+
+        def terminate(self) -> None:
+            pass
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout: float) -> None:
+            pass
+
+    def start(*args, **kwargs):
+        nonlocal starts
+        starts += 1
+        return Process()
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+
+    service.call_tool(server.id, "navigate", {"url": "https://example.test"})
+    result = service.call_tool(server.id, "get_page_source", {})
+
+    assert starts == 1
+    assert result == {"content": [{"type": "text", "text": "<title>Example</title>"}]}
+
+
+def test_disabling_or_deleting_server_closes_its_live_session(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page_source",))
+    service.set_enabled(server.id, True)
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO(
+                '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                '{"jsonrpc":"2.0","id":2,"result":{"content":[]}}\n'
+            )
+            self.terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, timeout: float) -> None:
+            pass
+
+    process = Process()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+
+    service.call_tool(server.id, "get_page_source", {})
+    service.set_enabled(server.id, False)
+
+    assert process.terminated is True
+
+
+def test_close_releases_all_live_mcp_sessions(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page_source",))
+    service.set_enabled(server.id, True)
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO('{"jsonrpc":"2.0","id":1,"result":{}}\n{"jsonrpc":"2.0","id":2,"result":{"content":[]}}\n')
+            self.terminated = False
+
+        def poll(self): return None
+        def terminate(self): self.terminated = True
+        def wait(self, timeout: float): pass
+
+    process = Process()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+
+    service.call_tool(server.id, "get_page_source", {})
+    service.close()
+
+    assert process.terminated is True
 
 
 def test_mcp_error_result_is_recorded_as_a_failed_tool_call(tmp_path: Path, monkeypatch) -> None:

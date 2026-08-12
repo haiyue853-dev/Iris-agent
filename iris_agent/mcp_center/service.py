@@ -22,6 +22,12 @@ class McpServer:
     enabled: bool = False
 
 
+@dataclass(slots=True)
+class _McpProcessSession:
+    process: subprocess.Popen[str]
+    next_request_id: int = 2
+
+
 class McpCenterService:
     """Stores MCP intent only. Starting a configured process is a separate approved action."""
 
@@ -32,9 +38,14 @@ class McpCenterService:
         self._events = self._load_events()
         self.tools_file = settings_file.with_name("tools.json")
         self._tools = self._load_tools()
+        self._sessions: dict[str, _McpProcessSession] = {}
 
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
+
+    def close(self) -> None:
+        for server_id in tuple(self._sessions):
+            self._close_session(server_id)
 
     def get(self, server_id: str) -> McpServer:
         return self._servers[server_id]
@@ -58,6 +69,8 @@ class McpCenterService:
         updated = McpServer(current.id, current.name, current.command, current.args, current.allowed_tools, bool(enabled))
         self._servers[server_id] = updated
         self._save()
+        if not enabled:
+            self._close_session(server_id)
         return updated
 
     def set_allowed_tools(self, server_id: str, allowed_tools: tuple[str, ...]) -> McpServer:
@@ -72,6 +85,7 @@ class McpCenterService:
     def delete(self, server_id: str) -> McpServer:
         server = self.get(server_id)
         del self._servers[server_id]
+        self._close_session(server_id)
         self._save()
         self._events = deque((event for event in self._events if event["server_id"] != server_id), maxlen=50)
         self._save_events()
@@ -105,28 +119,12 @@ class McpCenterService:
 
     def _discover(self, server: McpServer) -> tuple[dict[str, object], ...]:
         try:
-            process = subprocess.Popen(
-                self._command_args(server), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=self._subprocess_env(server),
-            )
-        except OSError as exc:
-            raise ValueError("unable to discover MCP tools") from exc
-        try:
-            assert process.stdin is not None and process.stdout is not None
-            process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
-            process.stdin.flush()
-            self._read_response(process, 1)
-            process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n')
-            process.stdin.flush()
-            response = self._read_response(process, 2)
+            response = self._request(server, "tools/list", {})
             tools = response.get("result", {}).get("tools", []) if isinstance(response.get("result"), dict) else []
             return tuple(item for item in tools if isinstance(item, dict) and isinstance(item.get("name"), str))
         except (OSError, TimeoutError, ValueError) as exc:
+            self._close_session(server.id)
             raise ValueError("unable to discover MCP tools") from exc
-        finally:
-            process.terminate()
-            try: process.wait(timeout=2)
-            except subprocess.TimeoutExpired: process.kill()
 
     def _record_event(self, server_id: str, kind: str, ok: bool, started: float, tool_name: str | None = None) -> None:
         event: dict[str, object] = {
@@ -181,30 +179,61 @@ class McpCenterService:
 
     def _call(self, server: McpServer, name: str, arguments: dict[str, object]) -> object:
         try:
-            process = subprocess.Popen(
-                self._command_args(server), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=self._subprocess_env(server),
-            )
-        except OSError as exc:
-            raise ValueError("unable to call MCP tool") from exc
-        try:
-            assert process.stdin is not None
-            process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
-            process.stdin.flush()
-            self._read_response(process, 1)
-            request = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
-            process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n" + json.dumps(request) + "\n")
-            process.stdin.flush()
-            response = self._read_response(process, 2)
+            response = self._request(server, "tools/call", {"name": name, "arguments": arguments})
             if not isinstance(response.get("result"), dict):
                 raise ValueError("MCP returned an invalid result")
             return response["result"]
         except (OSError, TimeoutError, ValueError) as exc:
+            self._close_session(server.id)
             raise ValueError("unable to call MCP tool") from exc
-        finally:
-            process.terminate()
-            try: process.wait(timeout=2)
-            except subprocess.TimeoutExpired: process.kill()
+
+    def _request(self, server: McpServer, method: str, params: dict[str, object]) -> dict[str, object]:
+        session = self._session(server)
+        process = session.process
+        assert process.stdin is not None
+        request_id = session.next_request_id
+        request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        process.stdin.write(json.dumps(request) + "\n")
+        process.stdin.flush()
+        response = self._read_response(process, request_id)
+        session.next_request_id += 1
+        return response
+
+    def _session(self, server: McpServer) -> _McpProcessSession:
+        session = self._sessions.get(server.id)
+        if session is not None and session.process.poll() is None:
+            return session
+        self._close_session(server.id)
+        try:
+            process = subprocess.Popen(
+                self._command_args(server), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=self._subprocess_env(server),
+            )
+            assert process.stdin is not None
+            process.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iris-agent","version":"0.1"}}}\n')
+            process.stdin.flush()
+            self._read_response(process, 1)
+            process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n')
+            process.stdin.flush()
+        except (OSError, TimeoutError, ValueError) as exc:
+            try:
+                process.terminate()
+            except UnboundLocalError:
+                pass
+            raise ValueError("unable to start MCP session") from exc
+        session = _McpProcessSession(process)
+        self._sessions[server.id] = session
+        return session
+
+    def _close_session(self, server_id: str) -> None:
+        session = self._sessions.pop(server_id, None)
+        if session is None:
+            return
+        session.process.terminate()
+        try:
+            session.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            session.process.kill()
 
     @staticmethod
     def _subprocess_env(server: McpServer) -> dict[str, str]:

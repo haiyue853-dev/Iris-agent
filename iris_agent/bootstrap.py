@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import atexit
 
 from openai import OpenAI
 
@@ -49,6 +50,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         if name in factories:
             registry.register(factories[name]())
     mcp = McpCenterService(settings.mcp.settings_file)
+    atexit.register(mcp.close)
     register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
