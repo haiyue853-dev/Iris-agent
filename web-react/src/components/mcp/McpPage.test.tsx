@@ -24,6 +24,8 @@ describe('McpPage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<McpPage />);
+    expect(await screen.findByText('连接总览')).toBeInTheDocument();
+    expect(screen.getByText('服务配置')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: '检测连接' }));
 
     expect(fetchMock).toHaveBeenLastCalledWith(
@@ -32,6 +34,7 @@ describe('McpPage', () => {
     );
     expect(await screen.findByText('read_page')).toBeInTheDocument();
     expect(screen.getByText('自动执行')).toBeInTheDocument();
+    expect(screen.getByText('工具权限')).toBeInTheDocument();
   });
 
   it('deletes only the selected MCP configuration', async () => {
@@ -59,7 +62,8 @@ describe('McpPage', () => {
 
     render(<McpPage />);
 
-    expect(await screen.findByText('最近检测：成功 · 28ms')).toBeInTheDocument();
+    expect(await screen.findByText(/连接检测 · 成功/)).toBeInTheDocument();
+    expect(screen.getByText('28ms')).toBeInTheDocument();
     expect(screen.queryByText('secret')).not.toBeInTheDocument();
   });
 });
