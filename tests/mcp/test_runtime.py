@@ -49,6 +49,25 @@ def test_mcp_tool_rejects_undeclared_arguments_before_calling_the_server(tmp_pat
     assert calls == []
 
 
+def test_mcp_tool_rejects_boolean_values_for_numeric_parameters(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("search",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "discover_tools", lambda server_id: (
+        {"name": "search", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": ["limit"]}},
+    ))
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(service, "call_tool", lambda server_id, name, arguments: calls.append(arguments))
+    registry = ToolRegistry()
+    register_mcp_tools(registry, service)
+
+    result = registry.invoke(f"mcp__{server.id}__search", {"limit": True})
+
+    assert result.ok is False
+    assert result.error_code == "invalid_tool_arguments"
+    assert calls == []
+
+
 def test_mcp_tools_require_approval_unless_marked_read_only(tmp_path: Path, monkeypatch) -> None:
     service = McpCenterService(tmp_path / "mcp.json")
     server = service.create(

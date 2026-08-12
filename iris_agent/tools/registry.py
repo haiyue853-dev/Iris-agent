@@ -55,6 +55,7 @@ def _validate(schema: dict[str, Any], arguments: dict[str, Any]) -> str | None:
         if schema.get("additionalProperties") is False and name not in properties:
             return f"不支持的参数: {name}"
         expected = properties.get(name, {}).get("type")
-        if expected in types and not isinstance(value, types[expected]):
+        is_numeric_boolean = expected in {"integer", "number"} and isinstance(value, bool)
+        if expected in types and (is_numeric_boolean or not isinstance(value, types[expected])):
             return f"参数 {name} 类型应为 {expected}"
     return None
