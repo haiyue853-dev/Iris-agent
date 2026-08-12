@@ -19,7 +19,7 @@ describe('McpPage', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ servers: [server] }))
       .mockResolvedValueOnce(response({ events: [] }))
-      .mockResolvedValueOnce(response({ tools: [{ name: 'read_page', annotations: { readOnlyHint: true } }] }))
+      .mockResolvedValueOnce(response({ tools: [{ name: 'read_page', annotations: { readOnlyHint: true } }], server: { ...server, status: 'connected' } }))
       .mockResolvedValueOnce(response({ events: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -68,5 +68,24 @@ describe('McpPage', () => {
     expect(await screen.findByText(/连接检测 · 成功/)).toBeInTheDocument();
     expect(screen.getByText('28ms')).toBeInTheDocument();
     expect(screen.queryByText('secret')).not.toBeInTheDocument();
+  });
+
+  it('shows when authorized tools are available to the main conversation', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response({ servers: [{ ...server, allowed_tools: ['read_page'], discovered_tools: [{ name: 'read_page', annotations: { readOnlyHint: true } }] }] }))
+      .mockResolvedValueOnce(response({ events: [] })));
+
+    render(<McpPage />);
+
+    expect(await screen.findByText('已接入主对话 · 1 个工具')).toBeInTheDocument();
+  });
+  it('identifies a persistent MCP session as connected', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response({ servers: [{ ...server, status: 'connected' }] }))
+      .mockResolvedValueOnce(response({ events: [] })));
+
+    render(<McpPage />);
+
+    expect(await screen.findByTestId('mcp-session-state')).toHaveAttribute('data-status', 'connected');
   });
 });

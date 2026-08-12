@@ -23,6 +23,7 @@ def register_mcp_tools(registry: ToolRegistry, mcp: McpCenterService, discovered
     for server, definition in enabled_tools:
         original_name = str(definition["name"])
         schema = dict(definition["inputSchema"])
+        schema["additionalProperties"] = False
         name = f"mcp__{server.id}__{original_name}"
         description = str(definition.get("description") or original_name)
         annotations = definition.get("annotations")

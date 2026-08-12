@@ -43,6 +43,12 @@ class McpCenterService:
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
 
+    def is_connected(self, server_id: str) -> bool:
+        """Whether this server currently has a live persistent stdio session."""
+        self.get(server_id)
+        session = self._sessions.get(server_id)
+        return session is not None and session.process.poll() is None
+
     def close(self) -> None:
         for server_id in tuple(self._sessions):
             self._close_session(server_id)

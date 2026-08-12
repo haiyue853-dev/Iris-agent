@@ -3547,6 +3547,7 @@ button.view-item {
 .mcp-server-identity > div { display: flex; align-items: center; gap: 8px; }
 .mcp-server-identity h3 { margin: 0; color: var(--iris-text); font-size: 15px; }
 .mcp-server-identity code { display: block; overflow: hidden; margin-top: 5px; color: var(--iris-text-subtle); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-conversation-ready { display: inline-flex; margin-top: 7px; padding: 3px 7px; border-radius: 999px; background: color-mix(in srgb, #35a374 12%, var(--iris-surface)); color: #27815b; font-size: 10.5px; font-weight: 750; }
 .mcp-server-state { padding: 3px 7px; border-radius: 999px; background: var(--iris-surface-muted); color: var(--iris-text-muted); font-size: 10.5px; font-weight: 750; }
 .mcp-server-state.is-online { background: color-mix(in srgb, #35a374 14%, var(--iris-surface)); color: #27815b; }
 .mcp-server-actions { display: flex; align-items: center; gap: 8px; }

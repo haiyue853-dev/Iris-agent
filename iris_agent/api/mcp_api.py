@@ -17,8 +17,8 @@ class McpAllowedToolsRequest(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list, max_length=100)
 
 
-def _data(server, tools=()):
-    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "configured", "discovered_tools": list(tools)}
+def _data(server, tools=(), *, connected=False):
+    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
 
 
 def register_mcp_routes(app, mcp, refresher=None) -> None:
@@ -28,7 +28,7 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
 
     @app.get("/api/mcp/servers")
     def list_servers():
-        return {"servers": [_data(item, mcp.cached_tools(item.id)) for item in mcp.list()]}
+        return {"servers": [_data(item, mcp.cached_tools(item.id), connected=mcp.is_connected(item.id)) for item in mcp.list()]}
 
     @app.get("/api/mcp/servers/{server_id}/events")
     def server_events(server_id: str):
@@ -77,7 +77,9 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
     @app.post("/api/mcp/servers/{server_id}/discover")
     def discover_tools(server_id: str):
         try:
-            return {"tools": list(mcp.discover_tools(server_id))}
+            tools = mcp.discover_tools(server_id)
+            server = mcp.get(server_id)
+            return {"tools": list(tools), "server": _data(server, tools, connected=mcp.is_connected(server_id))}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
         except ValueError as exc:

@@ -51,3 +51,31 @@ def test_mcp_server_list_includes_cached_discovered_tools(tmp_path, monkeypatch)
 
     assert response.status_code == 200
     assert response.json()["servers"][0]["discovered_tools"] == [{"name": "get_page"}]
+
+
+def test_mcp_server_list_marks_an_open_persistent_session_as_connected(tmp_path, monkeypatch):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    monkeypatch.setattr(mcp, "is_connected", lambda server_id: server_id == server.id)
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).get("/api/mcp/servers")
+
+    assert response.status_code == 200
+    assert response.json()["servers"][0]["status"] == "connected"
+
+
+def test_mcp_discovery_returns_the_connected_server_status(tmp_path, monkeypatch):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Browser", command="node", args=("server.js",), allowed_tools=())
+    mcp.set_enabled(server.id, True)
+    monkeypatch.setattr(mcp, "discover_tools", lambda server_id: ({"name": "get_page"},))
+    monkeypatch.setattr(mcp, "is_connected", lambda server_id: server_id == server.id)
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).post(f"/api/mcp/servers/{server.id}/discover")
+
+    assert response.status_code == 200
+    assert response.json()["server"]["status"] == "connected"

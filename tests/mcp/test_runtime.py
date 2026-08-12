@@ -29,6 +29,26 @@ def test_registers_only_enabled_allowlisted_mcp_tools_with_namespaces(tmp_path: 
     assert blocked.id not in registry.schemas()[0]["function"]["name"]
 
 
+def test_mcp_tool_rejects_undeclared_arguments_before_calling_the_server(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "discover_tools", lambda server_id: (
+        {"name": "get_page", "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    ))
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(service, "call_tool", lambda server_id, name, arguments: calls.append((server_id, name, arguments)))
+    registry = ToolRegistry()
+    register_mcp_tools(registry, service)
+
+    result = registry.invoke(f"mcp__{server.id}__get_page", {"url": "https://example.test", "debug": True})
+
+    assert result.ok is False
+    assert result.error_code == "invalid_tool_arguments"
+    assert "debug" in (result.error_message or "")
+    assert calls == []
+
+
 def test_mcp_tools_require_approval_unless_marked_read_only(tmp_path: Path, monkeypatch) -> None:
     service = McpCenterService(tmp_path / "mcp.json")
     server = service.create(

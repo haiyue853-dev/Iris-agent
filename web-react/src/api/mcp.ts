@@ -13,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const listMcpServers = () => request<{ servers: McpServer[] }>('/api/mcp/servers');
 export const setMcpEnabled = (id: string, enabled: boolean) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
 export const createMcpServer = (input: Pick<McpServer, 'name' | 'command' | 'args' | 'allowed_tools'>) => request<McpServer>('/api/mcp/servers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-export const discoverMcpTools = (id: string) => request<{ tools: McpTool[] }>(`/api/mcp/servers/${encodeURIComponent(id)}/discover`, { method: 'POST' });
+export const discoverMcpTools = (id: string) => request<{ tools: McpTool[]; server: McpServer }>(`/api/mcp/servers/${encodeURIComponent(id)}/discover`, { method: 'POST' });
 export const setMcpAllowedTools = (id: string, allowed_tools: string[]) => request<McpServer>(`/api/mcp/servers/${encodeURIComponent(id)}/allowed-tools`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allowed_tools }) });
 export const deleteMcpServer = (id: string) => request<void>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const listMcpEvents = (id: string) => request<{ events: McpEvent[] }>(`/api/mcp/servers/${encodeURIComponent(id)}/events`);

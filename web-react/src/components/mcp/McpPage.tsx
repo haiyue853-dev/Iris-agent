@@ -59,6 +59,7 @@ export default function McpPage() {
       const result = await discoverMcpTools(server.id);
       setTools((current) => ({ ...current, [server.id]: result.tools }));
       setSelectedTools((current) => ({ ...current, [server.id]: current[server.id] || server.allowed_tools }));
+      setServers((current) => current.map((item) => item.id === server.id ? result.server : item));
       const recent = await listMcpEvents(server.id);
       setEvents((current) => ({ ...current, [server.id]: recent.events }));
       setError('');
@@ -142,11 +143,13 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
   server: McpServer; tools: McpTool[]; selected: string[]; events: McpEvent[]; onToggleEnabled: () => void; onDiscover: () => void; onRemove: () => void; onToggleTool: (serverId: string, toolName: string) => void; onSelectAutomaticTools: (serverId: string, toolNames: string[]) => void; onSaveTools: () => void;
 }) {
   const automaticTools = tools.filter((tool) => tool.annotations?.readOnlyHint === true).map((tool) => tool.name);
+  const connectedToolCount = server.enabled ? selected.length : 0;
+  const isConnected = server.status === 'connected';
 
   return <article className="mcp-server-panel">
     <div className="mcp-server-topline">
       <div className={`mcp-server-icon ${server.enabled ? 'is-online' : ''}`}>⌘</div>
-      <div className="mcp-server-identity"><div><h3>{server.name}</h3><span className={`mcp-server-state ${server.enabled ? 'is-online' : ''}`}>{server.enabled ? '已启用' : '未启用'}</span></div><code>{server.command} {server.args.join(' ')}</code></div>
+      <div className="mcp-server-identity"><div><h3>{server.name}</h3><span data-testid="mcp-session-state" data-status={server.status} className={`mcp-server-state ${server.enabled ? 'is-online' : ''}`}>{isConnected ? '已连接' : server.enabled ? '已启用' : '未启用'}</span></div><code>{server.command} {server.args.join(' ')}</code>{connectedToolCount > 0 && <span className="mcp-conversation-ready">已接入主对话 · {connectedToolCount} 个工具</span>}</div>
       <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>检测连接</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
     </div>
     <div className="mcp-server-body">

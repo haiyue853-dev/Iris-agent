@@ -51,7 +51,10 @@ def _validate(schema: dict[str, Any], arguments: dict[str, Any]) -> str | None:
             return f"缺少必填参数: {name}"
     types = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "object": dict, "array": list}
     for name, value in arguments.items():
-        expected = schema.get("properties", {}).get(name, {}).get("type")
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False and name not in properties:
+            return f"不支持的参数: {name}"
+        expected = properties.get(name, {}).get("type")
         if expected in types and not isinstance(value, types[expected]):
             return f"参数 {name} 类型应为 {expected}"
     return None
