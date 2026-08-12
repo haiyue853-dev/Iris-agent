@@ -5,7 +5,7 @@ export type McpServer = { id: string; name: string; command: string; args: strin
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail?.message || 'MCP 请求失败');
-  return response.json() as Promise<T>;
+  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
 export const listMcpServers = () => request<{ servers: McpServer[] }>('/api/mcp/servers');
