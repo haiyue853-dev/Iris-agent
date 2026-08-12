@@ -28,7 +28,8 @@ class McpCenterService:
     def __init__(self, settings_file: Path):
         self.settings_file = settings_file
         self._servers = self._load()
-        self._events: deque[dict[str, object]] = deque(maxlen=50)
+        self.events_file = settings_file.with_name("events.json")
+        self._events = self._load_events()
 
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
@@ -70,6 +71,8 @@ class McpCenterService:
         server = self.get(server_id)
         del self._servers[server_id]
         self._save()
+        self._events = deque((event for event in self._events if event["server_id"] != server_id), maxlen=50)
+        self._save_events()
         return server
 
     def events(self, server_id: str) -> tuple[dict[str, object], ...]:
@@ -123,6 +126,7 @@ class McpCenterService:
         if tool_name is not None:
             event["tool_name"] = tool_name
         self._events.append(event)
+        self._save_events()
 
     def enabled_tools(self) -> tuple[tuple[McpServer, dict[str, object]], ...]:
         """Return discoverable tools from enabled servers, restricted to each allowlist."""
@@ -214,5 +218,39 @@ class McpCenterService:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush(); os.fsync(handle.fileno())
             os.replace(temporary, self.settings_file)
+        finally:
+            if os.path.exists(temporary): os.unlink(temporary)
+
+    def _load_events(self) -> deque[dict[str, object]]:
+        if not self.events_file.is_file():
+            return deque(maxlen=50)
+        try:
+            raw = json.loads(self.events_file.read_text(encoding="utf-8"))
+            events = raw.get("events", [])
+            if not isinstance(events, list):
+                return deque(maxlen=50)
+            safe = [
+                {key: item[key] for key in ("server_id", "kind", "ok", "duration_ms", "created_at", "tool_name") if key in item}
+                for item in events
+                if isinstance(item, dict)
+                and isinstance(item.get("server_id"), str)
+                and item.get("kind") in {"discovery", "tool_call"}
+                and isinstance(item.get("ok"), bool)
+                and isinstance(item.get("duration_ms"), (int, float))
+                and isinstance(item.get("created_at"), (int, float))
+                and ("tool_name" not in item or isinstance(item["tool_name"], str))
+            ]
+            return deque(safe[-50:], maxlen=50)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return deque(maxlen=50)
+
+    def _save_events(self) -> None:
+        self.events_file.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=self.events_file.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"events": list(self._events)}, handle, ensure_ascii=False, indent=2)
+                handle.flush(); os.fsync(handle.fileno())
+            os.replace(temporary, self.events_file)
         finally:
             if os.path.exists(temporary): os.unlink(temporary)

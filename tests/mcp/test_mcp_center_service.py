@@ -68,3 +68,17 @@ def test_mcp_events_record_safe_tool_call_metadata(tmp_path: Path, monkeypatch) 
     assert event["tool_name"] == "get_page"
     assert event["ok"] is True
     assert "arguments" not in event and "result" not in event and "error" not in event
+
+
+def test_mcp_events_survive_service_restart_without_sensitive_data(tmp_path: Path, monkeypatch) -> None:
+    settings_file = tmp_path / "mcp.json"
+    service = McpCenterService(settings_file)
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+    monkeypatch.setattr(service, "_call", lambda item, name, arguments: {"content": [{"text": "secret"}]})
+
+    service.call_tool(server.id, "get_page", {"url": "https://private.example"})
+
+    event = McpCenterService(settings_file).events(server.id)[0]
+    assert event["tool_name"] == "get_page"
+    assert "arguments" not in event and "result" not in event and "error" not in event
