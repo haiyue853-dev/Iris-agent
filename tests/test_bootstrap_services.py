@@ -96,3 +96,12 @@ def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
     application = build_application(config)
 
     assert "mcp__browser__get_page" in [item["function"]["name"] for item in application.agent.loop.tools.schemas()]
+
+
+def test_build_application_registers_builtin_interview_mcp_tools(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert "mcp__builtin-interview-web__search_interview_sources" in [item["function"]["name"] for item in application.agent.loop.tools.schemas()]

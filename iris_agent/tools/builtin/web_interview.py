@@ -5,7 +5,7 @@ import ipaddress
 import re
 import socket
 from typing import Any
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
@@ -74,7 +74,7 @@ class PublicRedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def download(url: str) -> str:
+def fetch_html(url: str) -> str:
     request = Request(validate_public_url(url), headers={"User-Agent": "Iris-Agent/0.1 (+interview-study)"})
     try:
         with build_opener(PublicRedirectHandler()).open(request, timeout=15) as response:
@@ -87,18 +87,33 @@ def download(url: str) -> str:
     except OSError as exc: raise ToolInvocationError("web_request_failed", "网页请求失败") from exc
 
 
+def _result_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    destination = parse_qs(parsed.query).get("uddg", [None])[0]
+    return unquote(destination) if destination else raw_url
+
+
+def search_public_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    if not query.strip() or len(query) > 300:
+        raise ToolInvocationError("invalid_query", "搜索词不能为空且不能超过 300 个字符")
+    html = fetch_html(f"https://html.duckduckgo.com/html/?q={quote_plus(query)}")
+    results = re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.S)
+    return [
+        {"url": _result_url(url), "title": re.sub(r"<.*?>", "", title).strip()}
+        for url, title in results[:max(1, min(max_results, 10))]
+    ]
+
+
 def build_web_search_tool() -> Tool:
     def search_web(query: str, max_results: int = 5) -> dict[str, Any]:
         if not query.strip() or len(query) > 300: raise ToolInvocationError("invalid_query", "搜索词不能为空且不能超过 300 个字符")
-        html = download(f"https://html.duckduckgo.com/html/?q={quote_plus(query)}")
-        results = re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.S)
-        return {"query": query, "results": [{"url": url, "title": re.sub(r"<.*?>", "", title).strip()} for url, title in results[:max(1, min(max_results, 10))]]}
+        return {"query": query, "results": search_public_web(query, max_results)}
     return Tool("search_web", "搜索公开网页，寻找含明确问题与答案的面试资料。", {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer"}}, "required": ["query"]}, search_web)
 
 
 def build_extract_interview_qa_tool() -> Tool:
     def extract_interview_qa(url: str, max_items: int = 20) -> dict[str, Any]:
-        items = extract_qa_pairs(download(url), url, max(1, min(max_items, 50)))
+        items = extract_qa_pairs(fetch_html(url), url, max(1, min(max_items, 50)))
         return {"source_url": url, "items": items, "count": len(items)}
     return Tool("extract_interview_qa", "仅抓取网页中明确标注为问题/Q和答案/A的面试问答对。", {"type": "object", "properties": {"url": {"type": "string"}, "max_items": {"type": "integer"}}, "required": ["url"]}, extract_interview_qa)
 

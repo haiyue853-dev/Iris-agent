@@ -31,11 +31,11 @@ _VALID = (
 )
 
 
-def test_loads_all_four_bundled_skills():
+def test_loads_all_bundled_skills():
     catalog = SkillCatalog(BUNDLED)
     skills = catalog.list()
     ids = {s.id for s in skills}
-    assert ids == {"daily-report", "uml", "document-workbench", "hot-radar"}
+    assert ids == {"daily-report", "uml", "document-workbench", "hot-radar", "interview-collection"}
     for s in skills:
         assert s.name and s.description and s.entry_view and s.icon
 
@@ -47,6 +47,7 @@ def test_bundled_skill_has_expected_entry_views():
     assert views["uml"] == "uml"
     assert views["document-workbench"] == "documents"
     assert views["hot-radar"] == "radar"
+    assert views["interview-collection"] == "chat"
 
 
 def test_rejects_missing_required_field(tmp_path):

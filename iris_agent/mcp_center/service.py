@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from uuid import uuid4
 
@@ -29,6 +30,21 @@ class McpCenterService:
 
     def list(self) -> list[McpServer]:
         return sorted(self._servers.values(), key=lambda item: item.name.casefold())
+
+    def ensure_builtin_interview_server(self, knowledge_path: Path) -> McpServer:
+        server_id = "builtin-interview-web"
+        server = McpServer(
+            server_id,
+            "Interview Web",
+            sys.executable,
+            ("-m", "iris_agent.interview_knowledge.mcp_server", "--knowledge-path", str(knowledge_path)),
+            ("search_interview_sources", "extract_interview_qa", "save_interview_qa"),
+            True,
+        )
+        if self._servers.get(server_id) != server:
+            self._servers[server_id] = server
+            self._save()
+        return server
 
     def get(self, server_id: str) -> McpServer:
         return self._servers[server_id]

@@ -17,7 +17,7 @@ from iris_agent.reports.service import DailyReportService
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
-from iris_agent.tools.builtin import build_current_time_tool, build_extract_interview_qa_tool, build_list_directory_tool, build_read_file_tool, build_save_interview_qa_tool, build_web_search_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -45,15 +45,13 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         "current_time": lambda: build_current_time_tool(),
         "list_directory": lambda: build_list_directory_tool(settings.tools.workspace_root),
         "read_file": lambda: build_read_file_tool(settings.tools.workspace_root, settings.tools.max_read_chars),
-        "search_web": build_web_search_tool,
-        "extract_interview_qa": build_extract_interview_qa_tool,
-        "save_interview_qa": lambda: build_save_interview_qa_tool(interview_knowledge),
     }
     settings.tools.workspace_root.mkdir(parents=True, exist_ok=True)
     for name in settings.tools.enabled:
         if name in factories:
             registry.register(factories[name]())
     mcp = McpCenterService(settings.mcp.settings_file)
+    mcp.ensure_builtin_interview_server(settings.interview_knowledge.path)
     register_mcp_tools(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
