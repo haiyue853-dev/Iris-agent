@@ -3510,6 +3510,9 @@ button.view-item {
 }
 
 .mcp-tool-option { display: flex; align-items: center; gap: 7px; margin: 8px 0; color: var(--iris-text-muted); font-size: 13px; }
+.mcp-tool-safety { border: 1px solid var(--iris-border); border-radius: 999px; font-size: 11px; line-height: 18px; padding: 0 7px; }
+.mcp-tool-safety.is-read-only { color: var(--iris-accent); border-color: color-mix(in srgb, var(--iris-accent) 45%, var(--iris-border)); background: color-mix(in srgb, var(--iris-accent) 10%, transparent); }
+.mcp-tool-safety.requires-approval { color: var(--iris-warning); border-color: color-mix(in srgb, var(--iris-warning) 45%, var(--iris-border)); background: color-mix(in srgb, var(--iris-warning) 10%, transparent); }
 .mcp-status { margin: 10px 0; color: var(--iris-text-muted); font-size: 12px; }
 .mcp-status p { margin: 3px 0; }
 

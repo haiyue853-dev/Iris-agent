@@ -19,7 +19,8 @@ describe('McpPage', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ servers: [server] }))
       .mockResolvedValueOnce(response({ events: [] }))
-      .mockResolvedValueOnce(response({ tools: [{ name: 'read_page' }] }));
+      .mockResolvedValueOnce(response({ tools: [{ name: 'read_page', annotations: { readOnlyHint: true } }] }))
+      .mockResolvedValueOnce(response({ events: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(<McpPage />);
@@ -30,6 +31,7 @@ describe('McpPage', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     expect(await screen.findByText('read_page')).toBeInTheDocument();
+    expect(screen.getByText('自动执行')).toBeInTheDocument();
   });
 
   it('deletes only the selected MCP configuration', async () => {

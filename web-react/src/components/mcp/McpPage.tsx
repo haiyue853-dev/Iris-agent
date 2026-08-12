@@ -10,9 +10,8 @@ import {
   setMcpEnabled,
   type McpServer,
   type McpEvent,
+  type McpTool,
 } from '../../api/mcp';
-
-type McpTool = { name: string; description?: string };
 
 export default function McpPage() {
   const [servers, setServers] = useState<McpServer[]>([]);
@@ -109,7 +108,10 @@ export default function McpPage() {
             {tools[server.id]?.map((tool) => (
               <label key={tool.name} className="mcp-tool-option">
                 <input type="checkbox" checked={(selectedTools[server.id] || []).includes(tool.name)} disabled={!server.enabled} onChange={() => toggleTool(server.id, tool.name)} />
-                {tool.name}
+                <span>{tool.name}</span>
+                <span className={`mcp-tool-safety ${tool.annotations?.readOnlyHint === true ? 'is-read-only' : 'requires-approval'}`}>
+                  {tool.annotations?.readOnlyHint === true ? '自动执行' : '需确认'}
+                </span>
               </label>
             ))}
             {tools[server.id] && (
