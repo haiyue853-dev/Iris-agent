@@ -5,7 +5,7 @@ import McpPage from './McpPage';
 
 const server = {
   id: 'browser', name: 'Browser MCP', command: 'node', args: ['server.js'],
-  allowed_tools: [], enabled: true, status: 'configured',
+  allowed_tools: [], enabled: true, status: 'configured', discovered_tools: [],
 };
 
 function response(body: unknown, status = 200): Response {
