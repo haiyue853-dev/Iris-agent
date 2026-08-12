@@ -17,8 +17,12 @@ class McpAllowedToolsRequest(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list, max_length=100)
 
 
+class McpEnvironmentRequest(BaseModel):
+    environment: dict[str, str] = Field(default_factory=dict, max_length=50)
+
+
 def _data(server, tools=(), *, connected=False):
-    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
+    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "env_keys": [key for key, _ in server.environment], "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
 
 
 def register_mcp_routes(app, mcp, refresher=None) -> None:
@@ -65,6 +69,16 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "工具白名单无效"}) from exc
+
+    @app.put("/api/mcp/servers/{server_id}/environment")
+    def set_environment(server_id: str, request: McpEnvironmentRequest):
+        try:
+            server = mcp.set_environment(server_id, request.environment)
+            return _data(server)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "环境变量无效"}) from exc
 
     @app.delete("/api/mcp/servers/{server_id}", status_code=204)
     def delete_server(server_id: str):

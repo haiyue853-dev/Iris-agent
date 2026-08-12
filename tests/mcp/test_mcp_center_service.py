@@ -32,6 +32,16 @@ def test_mcp_server_updates_its_tool_allowlist(tmp_path: Path) -> None:
     assert McpCenterService(tmp_path / "mcp.json").get(server.id).allowed_tools == ("get_page", "get_tabs")
 
 
+def test_mcp_server_persists_valid_environment_variables(tmp_path: Path) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Search", command="node", args=("server.js",), allowed_tools=())
+
+    updated = service.set_environment(server.id, {"SEARCH_API_KEY": "secret", "REGION": "cn"})
+
+    assert updated.environment == (("REGION", "cn"), ("SEARCH_API_KEY", "secret"))
+    assert McpCenterService(tmp_path / "mcp.json").get(server.id).environment == updated.environment
+
+
 def test_mcp_server_delete_removes_its_local_configuration(tmp_path: Path) -> None:
     service = McpCenterService(tmp_path / "mcp.json")
     server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=())

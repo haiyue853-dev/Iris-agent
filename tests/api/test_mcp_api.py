@@ -79,3 +79,16 @@ def test_mcp_discovery_returns_the_connected_server_status(tmp_path, monkeypatch
 
     assert response.status_code == 200
     assert response.json()["server"]["status"] == "connected"
+
+
+def test_mcp_environment_endpoint_does_not_return_secret_values(tmp_path):
+    mcp = McpCenterService(tmp_path / "mcp.json")
+    server = mcp.create(name="Search", command="node", args=("server.js",), allowed_tools=())
+    app = FastAPI()
+    register_mcp_routes(app, mcp)
+
+    response = TestClient(app).put(f"/api/mcp/servers/{server.id}/environment", json={"environment": {"SEARCH_API_KEY": "top-secret"}})
+
+    assert response.status_code == 200
+    assert response.json()["env_keys"] == ["SEARCH_API_KEY"]
+    assert "top-secret" not in response.text

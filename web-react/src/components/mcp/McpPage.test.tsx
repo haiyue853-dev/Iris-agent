@@ -5,7 +5,7 @@ import McpPage from './McpPage';
 
 const server = {
   id: 'browser', name: 'Browser MCP', command: 'node', args: ['server.js'],
-  allowed_tools: [], enabled: true, status: 'configured', discovered_tools: [],
+  allowed_tools: [], env_keys: [], enabled: true, status: 'configured', discovered_tools: [],
 };
 
 function response(body: unknown, status = 200): Response {
@@ -87,5 +87,26 @@ describe('McpPage', () => {
     render(<McpPage />);
 
     expect(await screen.findByTestId('mcp-session-state')).toHaveAttribute('data-status', 'connected');
+  });
+
+  it('saves environment variables without rendering their values after reload', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ servers: [{ ...server, env_keys: [] }] }))
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ ...server, env_keys: ['SEARCH_API_KEY'] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<McpPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '环境变量' }));
+    fireEvent.change(screen.getByLabelText('环境变量 Browser MCP'), { target: { value: 'SEARCH_API_KEY=top-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存环境变量' }));
+
+    await screen.findByText('变量：SEARCH_API_KEY');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/mcp/servers/browser/environment'),
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ environment: { SEARCH_API_KEY: 'top-secret' } }) }),
+    );
+    expect(screen.getByText('变量：SEARCH_API_KEY')).toBeInTheDocument();
+    expect(screen.queryByText('top-secret')).not.toBeInTheDocument();
   });
 });

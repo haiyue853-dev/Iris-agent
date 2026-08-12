@@ -3548,12 +3548,19 @@ button.view-item {
 .mcp-server-identity h3 { margin: 0; color: var(--iris-text); font-size: 15px; }
 .mcp-server-identity code { display: block; overflow: hidden; margin-top: 5px; color: var(--iris-text-subtle); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-conversation-ready { display: inline-flex; margin-top: 7px; padding: 3px 7px; border-radius: 999px; background: color-mix(in srgb, #35a374 12%, var(--iris-surface)); color: #27815b; font-size: 10.5px; font-weight: 750; }
+.mcp-environment-summary { display: block; margin-top: 6px; color: var(--iris-text-subtle); font-family: var(--iris-mono); font-size: 10.5px; }
 .mcp-server-state { padding: 3px 7px; border-radius: 999px; background: var(--iris-surface-muted); color: var(--iris-text-muted); font-size: 10.5px; font-weight: 750; }
 .mcp-server-state.is-online { background: color-mix(in srgb, #35a374 14%, var(--iris-surface)); color: #27815b; }
 .mcp-server-actions { display: flex; align-items: center; gap: 8px; }
 .mcp-icon-button { width: 31px; height: 31px; background: transparent; color: var(--iris-text-muted); font-size: 21px; line-height: 1; }
 .mcp-icon-button:hover { background: color-mix(in srgb, #d65c5c 10%, var(--iris-surface)); color: #c84d4d; }
 .mcp-server-body { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(220px, .8fr); }
+.mcp-environment-editor { display: grid; grid-template-columns: minmax(180px, .65fr) minmax(220px, 1fr) auto; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--iris-border); background: color-mix(in srgb, var(--iris-surface-muted) 45%, var(--iris-surface)); }
+.mcp-environment-editor h4 { margin: 0 0 4px; color: var(--iris-text); font-size: 12px; }
+.mcp-environment-editor span, .mcp-environment-editor p { color: var(--iris-text-subtle); font-size: 11px; }
+.mcp-environment-editor textarea { min-height: 58px; width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--iris-border); border-radius: 8px; background: var(--iris-background); color: var(--iris-text); font: inherit; font-size: 12px; resize: vertical; }
+.mcp-environment-keys { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
+.mcp-environment-keys span { padding: 3px 7px; border: 1px solid var(--iris-border); border-radius: 999px; background: var(--iris-surface); color: var(--iris-text-muted); font-family: var(--iris-mono); }
 .mcp-permissions, .mcp-activity { min-width: 0; padding: 18px 20px; }
 .mcp-activity { border-left: 1px solid var(--iris-border); background: color-mix(in srgb, var(--iris-surface-muted) 48%, var(--iris-surface)); }
 .mcp-panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 10px; margin-bottom: 13px; }
@@ -3587,7 +3594,7 @@ button.view-item {
 .mcp-empty-mark { width: 46px; height: 46px; margin-bottom: 12px; font-size: 20px; }
 .mcp-empty h3 { margin: 0; color: var(--iris-text); font-size: 15px; }
 .mcp-empty p { max-width: 430px; margin: 8px 0 17px; color: var(--iris-text-subtle); font-size: 12.5px; line-height: 1.65; }
-@media (max-width: 760px) { .mcp-page { padding: 20px 16px 40px; } .mcp-hero { align-items: start; flex-direction: column; padding: 22px; } .mcp-metrics, .mcp-form-grid, .mcp-server-body { grid-template-columns: 1fr; } .mcp-server-topline { align-items: start; flex-wrap: wrap; } .mcp-server-actions { width: 100%; } .mcp-server-actions .mcp-primary-button { flex: 1; } .mcp-activity { border-top: 1px solid var(--iris-border); border-left: 0; } .mcp-form-foot { align-items: start; flex-direction: column; } }
+@media (max-width: 760px) { .mcp-page { padding: 20px 16px 40px; } .mcp-hero { align-items: start; flex-direction: column; padding: 22px; } .mcp-metrics, .mcp-form-grid, .mcp-server-body, .mcp-environment-editor { grid-template-columns: 1fr; } .mcp-server-topline { align-items: start; flex-wrap: wrap; } .mcp-server-actions { width: 100%; } .mcp-server-actions .mcp-primary-button { flex: 1; } .mcp-activity { border-top: 1px solid var(--iris-border); border-left: 0; } .mcp-form-foot { align-items: start; flex-direction: column; } }
 
 .skills-loading {
   max-width: 1080px;

@@ -20,6 +20,7 @@ class McpServer:
     args: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     enabled: bool = False
+    environment: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(slots=True)
@@ -72,7 +73,7 @@ class McpCenterService:
 
     def set_enabled(self, server_id: str, enabled: bool) -> McpServer:
         current = self.get(server_id)
-        updated = McpServer(current.id, current.name, current.command, current.args, current.allowed_tools, bool(enabled))
+        updated = McpServer(current.id, current.name, current.command, current.args, current.allowed_tools, bool(enabled), current.environment)
         self._servers[server_id] = updated
         self._save()
         if not enabled:
@@ -83,8 +84,20 @@ class McpCenterService:
         if not isinstance(allowed_tools, tuple) or not all(isinstance(item, str) and item.strip() for item in allowed_tools):
             raise ValueError("allowed_tools are invalid")
         current = self.get(server_id)
-        updated = McpServer(current.id, current.name, current.command, current.args, tuple(dict.fromkeys(allowed_tools)), current.enabled)
+        updated = McpServer(current.id, current.name, current.command, current.args, tuple(dict.fromkeys(allowed_tools)), current.enabled, current.environment)
         self._servers[server_id] = updated
+        self._save()
+        return updated
+
+    def set_environment(self, server_id: str, environment: dict[str, str]) -> McpServer:
+        if not isinstance(environment, dict) or len(environment) > 50:
+            raise ValueError("environment is invalid")
+        if not all(isinstance(key, str) and key.replace("_", "a").isalnum() and key[:1].isalpha() and len(key) <= 100 and isinstance(value, str) and "\x00" not in value and len(value) <= 10_000 for key, value in environment.items()):
+            raise ValueError("environment is invalid")
+        current = self.get(server_id)
+        updated = McpServer(current.id, current.name, current.command, current.args, current.allowed_tools, current.enabled, tuple(sorted(environment.items())))
+        self._servers[server_id] = updated
+        self._close_session(server_id)
         self._save()
         return updated
 
@@ -244,6 +257,7 @@ class McpCenterService:
     @staticmethod
     def _subprocess_env(server: McpServer) -> dict[str, str]:
         environment = os.environ.copy()
+        environment.update(dict(server.environment))
         if os.name == "nt" and server.command.casefold() in {"node", "node.exe"}:
             node_dir = Path(environment.get("ProgramFiles", r"C:\Program Files")) / "nodejs"
             if (node_dir / "node.exe").is_file() and node_dir.as_posix().casefold() not in environment.get("PATH", "").casefold():
@@ -277,7 +291,7 @@ class McpCenterService:
         try:
             raw = json.loads(self.settings_file.read_text(encoding="utf-8"))
             return {
-                item["id"]: McpServer(item["id"], item["name"], item["command"], tuple(item["args"]), tuple(item["allowed_tools"]), bool(item.get("enabled", False)))
+                item["id"]: McpServer(item["id"], item["name"], item["command"], tuple(item["args"]), tuple(item["allowed_tools"]), bool(item.get("enabled", False)), tuple(sorted((key, value) for key, value in item.get("environment", {}).items() if isinstance(key, str) and isinstance(value, str))))
                 for item in raw.get("servers", [])
             }
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
@@ -286,7 +300,7 @@ class McpCenterService:
     def _save(self) -> None:
         self.settings_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"servers": [
-            {"id": item.id, "name": item.name, "command": item.command, "args": list(item.args), "allowed_tools": list(item.allowed_tools), "enabled": item.enabled}
+            {"id": item.id, "name": item.name, "command": item.command, "args": list(item.args), "allowed_tools": list(item.allowed_tools), "enabled": item.enabled, "environment": dict(item.environment)}
             for item in self.list()
         ]}
         fd, temporary = tempfile.mkstemp(dir=self.settings_file.parent, suffix=".tmp")
