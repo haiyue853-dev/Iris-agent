@@ -22,22 +22,11 @@ from iris_agent.api.world_news_api import router as world_news_router
 from iris_agent.api.tech_news_api import router as tech_news_router
 from iris_agent.api.settings_api import register_settings_routes
 from iris_agent.api.skills_api import register_skills_routes
-from iris_agent.api.documents_api import register_documents_routes
 from iris_agent.api.mcp_api import register_mcp_routes
 from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
 from iris_agent.core.errors import IrisError, SessionNotFoundError
 from iris_agent.skill_center.service import SkillCenterService
-from iris_agent.documents.errors import (
-    DocumentDraftNotFoundError,
-    DocumentError,
-    DocumentGenerationError,
-    DocumentNotFoundError,
-    DocumentRevisionConflictError,
-    DocumentStorageError,
-    DocumentValidationError,
-)
-from iris_agent.documents.service import DocumentService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.reports.errors import (
     ReportAttachmentError,
@@ -144,7 +133,6 @@ def create_app(
     attachments: AttachmentRepository | None = None,
     extractor: LocalAttachmentExtractor | None = None,
     skills: SkillCenterService | None = None,
-    documents: DocumentService | None = None,
     mcp: McpCenterService | None = None,
     mcp_tools=None,
 ) -> FastAPI:
@@ -164,25 +152,21 @@ def create_app(
     # Skills 中心（可选注入；不注入则不注册路由，保持既有测试兼容）
     if skills is not None:
         register_skills_routes(app, skills)
-    if documents is not None:
-        register_documents_routes(app, documents)
     if mcp is not None:
         register_mcp_routes(app, mcp, mcp_tools)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
-        if isinstance(exc, (SessionNotFoundError, ReportNotFoundError, ReportAttachmentNotFoundError, ReportSuggestionNotFoundError, DocumentNotFoundError, DocumentDraftNotFoundError)):
+        if isinstance(exc, (SessionNotFoundError, ReportNotFoundError, ReportAttachmentNotFoundError, ReportSuggestionNotFoundError)):
             code = 404
-        elif isinstance(exc, (ReportVersionConflictError, DocumentRevisionConflictError)):
+        elif isinstance(exc, ReportVersionConflictError):
             code = 409
-        elif isinstance(exc, (ReportValidationError, ReportAttachmentError, DocumentValidationError)):
+        elif isinstance(exc, (ReportValidationError, ReportAttachmentError)):
             code = 422
-        elif isinstance(exc, (ReportGenerationError, DocumentGenerationError)) and exc.code in {"report_model_output_invalid", "document_model_output_invalid"}:
+        elif isinstance(exc, ReportGenerationError) and exc.code == "report_model_output_invalid":
             code = 422
-        elif isinstance(exc, (ReportGenerationError, ReportStorageError, ReportAttachmentStorageError, DocumentStorageError)):
+        elif isinstance(exc, (ReportGenerationError, ReportStorageError, ReportAttachmentStorageError)):
             code = 500
-        elif isinstance(exc, DocumentError):
-            code = 422
         else:
             code = 500
         return Response(content=json.dumps({"detail": {"code": exc.code, "message": exc.safe_message}}, ensure_ascii=False), status_code=code, media_type="application/json")

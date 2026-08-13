@@ -19,17 +19,17 @@ def _build_service(tmp_path: Path) -> SkillCenterService:
 def test_all_skills_enabled_by_default(tmp_path):
     service = _build_service(tmp_path)
     skills = service.list_skills()
-    assert len(skills) == 4
+    assert len(skills) == 3
     assert all(s.enabled for s in skills)
 
 
 def test_toggle_persists_across_restart(tmp_path):
     service = _build_service(tmp_path)
-    service.set_enabled("document-workbench", False)
+    service.set_enabled("hot-radar", False)
 
     restarted = _build_service(tmp_path)
     state = {s.id: s.enabled for s in restarted.list_skills()}
-    assert state["document-workbench"] is False
+    assert state["hot-radar"] is False
     assert state["uml"] is True
 
 

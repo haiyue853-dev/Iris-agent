@@ -19,8 +19,6 @@ def _write_config(tmp_path: Path) -> Path:
         f"  attachments_directory: {str(tmp_path / 'attachments').replace('\\', '/')}\n"
         "skills:\n"
         f"  directory: {str(tmp_path / 'skills').replace('\\', '/')}\n"
-        "documents:\n"
-        f"  directory: {str(tmp_path / 'documents').replace('\\', '/')}\n"
         "hot_radar:\n"
         f"  directory: {str(tmp_path / 'hot_radar').replace('\\', '/')}\n"
         "tools:\n"
@@ -43,15 +41,14 @@ def test_build_application_exposes_skill_center_service(tmp_path, monkeypatch):
     assert (tmp_path / "skills").is_dir()
 
 
-def test_build_application_exposes_document_service(tmp_path, monkeypatch):
+def test_build_application_no_longer_exposes_document_service(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     application = build_application(config)
 
-    assert application.documents is not None
-    assert application.documents.root == tmp_path / "documents"
-    assert (tmp_path / "documents").is_dir()
+    assert not hasattr(application, "documents")
+    assert not (tmp_path / "documents").exists()
 
 
 def test_build_application_exposes_hot_radar_service(tmp_path, monkeypatch):

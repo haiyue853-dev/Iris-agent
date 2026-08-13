@@ -7,13 +7,12 @@ import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
-import DocumentWorkbenchPage from './components/documents/DocumentWorkbenchPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar' | 'mcp';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar', 'mcp'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -104,7 +103,7 @@ function App() {
         onViewChange={setActiveView}
       />
 
-      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'documents' ? '文档工作台' : undefined}>
+      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'automation' ? '自动化任务' : undefined}>
         {umlVisited && (
           <div hidden={activeView !== 'uml'}>
             <UmlFlowPage />
@@ -116,8 +115,8 @@ function App() {
           <SkillsPage onNavigate={setActiveView} />
         ) : activeView === 'mcp' ? (
           <McpPage />
-        ) : activeView === 'documents' ? (
-          <DocumentWorkbenchPage />
+        ) : activeView === 'automation' ? (
+          <div className="view-placeholder"><h2>自动化任务</h2><p>热点雷达订阅与定时扫描即将上线。</p></div>
         ) : activeView === 'radar' ? (
           <div className="view-placeholder">
             <h2>热点雷达</h2>

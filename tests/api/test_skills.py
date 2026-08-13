@@ -30,7 +30,7 @@ def test_list_skills_returns_public_metadata_only(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body["skills"], list)
-    assert len(body["skills"]) == 4
+    assert len(body["skills"]) == 3
     for item in body["skills"]:
         assert set(item.keys()) <= {"id", "name", "description", "icon", "category", "entry_view", "version", "enabled"}
         assert "path" not in item
@@ -49,10 +49,10 @@ def test_get_single_skill(tmp_path):
 
 def test_toggle_enabled(tmp_path):
     client = _client(tmp_path)
-    response = client.put("/api/skills/document-workbench/enabled", json={"enabled": False})
+    response = client.put("/api/skills/hot-radar/enabled", json={"enabled": False})
     assert response.status_code == 200
     assert response.json()["enabled"] is False
-    assert client.get("/api/skills/document-workbench").json()["enabled"] is False
+    assert client.get("/api/skills/hot-radar").json()["enabled"] is False
 
 
 def test_unknown_id_returns_4xx_without_path_leak(tmp_path):
