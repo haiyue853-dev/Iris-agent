@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from iris_agent.api.app import create_app
+from iris_agent.automation.service import AutomationService
 from iris_agent.bootstrap import ApplicationServices, build_application
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.service import DailyReportService
@@ -21,6 +22,8 @@ def _write_config(tmp_path: Path) -> Path:
         f"  directory: {str(tmp_path / 'skills').replace('\\', '/')}\n"
         "hot_radar:\n"
         f"  directory: {str(tmp_path / 'hot_radar').replace('\\', '/')}\n"
+        "automation:\n"
+        f"  directory: {str(tmp_path / 'automation').replace('\\', '/')}\n"
         "tools:\n"
         f"  workspace_root: {str(tmp_path / 'workspace').replace('\\', '/')}\n",
         encoding="utf-8",
@@ -62,6 +65,16 @@ def test_build_application_exposes_hot_radar_service(tmp_path, monkeypatch):
     assert (tmp_path / "hot_radar").is_dir()
 
 
+def test_build_application_exposes_automation_service(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert isinstance(application.automation, AutomationService)
+    assert application.automation.root == tmp_path / "automation"
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -94,3 +107,4 @@ def test_server_entrypoint_loads_without_document_service(monkeypatch):
     from fastapi.testclient import TestClient
     server = importlib.import_module("server")
     assert TestClient(server.app).post("/api/hot-radar/scan").status_code == 200
+    assert TestClient(server.app).get("/api/automation/tasks").status_code == 200

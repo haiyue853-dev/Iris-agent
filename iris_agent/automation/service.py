@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
+import threading
+import time
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -48,7 +52,12 @@ class AutomationService:
 
     @staticmethod
     def _valid_schedule(schedule: str) -> bool:
-        return len(schedule.split()) == 5 and all(part.strip() for part in schedule.split())
+        fields = schedule.split()
+        ranges = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 6))
+        return len(fields) == 5 and all(
+            _valid_cron_field(field, minimum, maximum)
+            for field, (minimum, maximum) in zip(fields, ranges)
+        )
 
     def create_task(self, name: str, schedule: str) -> AutomationTask:
         if not name.strip() or not self._valid_schedule(schedule): raise ValueError("任务名称或计划无效")
@@ -78,3 +87,91 @@ class AutomationService:
         for item in data["executions"]:
             if item["id"] == execution.id: item.update(status=status, summary=summary); self._write(data); return AutomationExecution(**item)
         raise RuntimeError("execution missing")
+
+
+def _matches_cron_field(field: str, value: int, minimum: int, maximum: int) -> bool:
+    for part in field.split(","):
+        match = re.fullmatch(r"(\*|\d+)(?:/(\d+))?", part)
+        if not match:
+            return False
+        base, step_text = match.groups()
+        step = int(step_text) if step_text else 1
+        if step < 1:
+            return False
+        if base == "*" and value % step == 0:
+            return True
+        if base != "*":
+            start = int(base)
+            if minimum <= start <= maximum and (
+                value == start or (step_text is not None and value >= start and (value - start) % step == 0)
+            ):
+                return True
+    return False
+
+
+def _valid_cron_field(field: str, minimum: int, maximum: int) -> bool:
+    for part in field.split(","):
+        match = re.fullmatch(r"(\*|\d+)(?:/(\d+))?", part)
+        if not match:
+            return False
+        base, step_text = match.groups()
+        if step_text and int(step_text) < 1:
+            return False
+        if base != "*" and not minimum <= int(base) <= maximum:
+            return False
+    return True
+
+
+def schedule_matches(schedule: str, now: datetime) -> bool:
+    """Return whether a restricted five-field cron expression matches *now*."""
+    fields = schedule.split()
+    if len(fields) != 5:
+        return False
+    minute, hour, day, month, weekday = fields
+    return (
+        _matches_cron_field(minute, now.minute, 0, 59)
+        and _matches_cron_field(hour, now.hour, 0, 23)
+        and _matches_cron_field(day, now.day, 1, 31)
+        and _matches_cron_field(month, now.month, 1, 12)
+        and _matches_cron_field(weekday, (now.weekday() + 1) % 7, 0, 6)
+    )
+
+
+class AutomationScheduler:
+    """Small in-process scheduler for enabled automation tasks."""
+
+    def __init__(self, automation: AutomationService):
+        self.automation = automation
+        self._last_window: set[tuple[str, str]] = set()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def run_pending(self, now: datetime | None = None) -> int:
+        moment = now or datetime.now()
+        window = moment.strftime("%Y-%m-%dT%H:%M")
+        ran = 0
+        for task in self.automation.list_tasks():
+            key = (task.id, window)
+            if task.enabled and key not in self._last_window and schedule_matches(task.schedule, moment):
+                self.automation.run_now(task.id)
+                self._last_window.add(key)
+                ran += 1
+        self._last_window = {key for key in self._last_window if key[1] == window}
+        return ran
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="iris-automation", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self.run_pending()
+            self._stop.wait(15)

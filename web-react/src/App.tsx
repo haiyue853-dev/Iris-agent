@@ -7,6 +7,7 @@ import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
+import AutomationPage from './components/automation/AutomationPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
@@ -115,13 +116,8 @@ function App() {
           <SkillsPage onNavigate={setActiveView} />
         ) : activeView === 'mcp' ? (
           <McpPage />
-        ) : activeView === 'automation' ? (
-          <div className="view-placeholder"><h2>自动化任务</h2><p>热点雷达订阅与定时扫描即将上线。</p></div>
-        ) : activeView === 'radar' ? (
-          <div className="view-placeholder">
-            <h2>热点雷达</h2>
-            <p>按关键词订阅热点并生成每日摘要，即将上线。</p>
-          </div>
+        ) : activeView === 'automation' || activeView === 'radar' ? (
+          <AutomationPage />
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
         ) : !hasMessages ? (

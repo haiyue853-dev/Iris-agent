@@ -1,4 +1,8 @@
-from iris_agent.automation.service import AutomationService
+from datetime import datetime
+
+import pytest
+
+from iris_agent.automation.service import AutomationScheduler, AutomationService
 from iris_agent.hot_radar.service import HotRadarService
 
 
@@ -27,3 +31,31 @@ def test_running_execution_is_marked_unknown_on_restart_and_terminal_status_is_i
 
     assert execution.status == "running"
     assert recovered.status == "unknown"
+
+
+def test_scheduler_runs_matching_task_once_per_minute(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={})
+    service = AutomationService(tmp_path / "automation", radar)
+    task = service.create_task("hourly scan", "5 * * * *")
+    scheduler = AutomationScheduler(service)
+
+    assert scheduler.run_pending(datetime(2026, 8, 13, 9, 5)) == 1
+    assert scheduler.run_pending(datetime(2026, 8, 13, 9, 5)) == 0
+    assert scheduler.run_pending(datetime(2026, 8, 13, 9, 6)) == 0
+    assert service.list_executions(task.id)[0].status == "succeeded"
+
+
+def test_scheduler_supports_step_from_a_specific_start(tmp_path):
+    service = AutomationService(tmp_path / "automation", HotRadarService(tmp_path / "radar", sources={}))
+    task = service.create_task("stepped", "5/10 * * * *")
+    scheduler = AutomationScheduler(service)
+
+    assert scheduler.run_pending(datetime(2026, 8, 13, 9, 15)) == 1
+    assert service.list_executions(task.id)[0].task_id == task.id
+
+
+def test_task_rejects_cron_fields_the_scheduler_cannot_run(tmp_path):
+    service = AutomationService(tmp_path / "automation", HotRadarService(tmp_path / "radar", sources={}))
+
+    with pytest.raises(ValueError):
+        service.create_task("invalid", "today at nine every day")

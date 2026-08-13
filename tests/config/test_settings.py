@@ -124,3 +124,10 @@ def test_hot_radar_settings_load_from_yaml(tmp_path):
     assert radar.directory == Path("custom/radar")
     assert radar.poll_interval_seconds == 5
     assert radar.timezone == "UTC"
+
+
+def test_automation_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("automation:\n  directory: custom/automation\n", encoding="utf-8")
+
+    assert load_settings(path).automation.directory == Path("custom/automation")

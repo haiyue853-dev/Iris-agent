@@ -63,6 +63,11 @@ class HotRadarSettings:
 
 
 @dataclass(slots=True)
+class AutomationSettings:
+    directory: Path = Path("data/automation")
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -76,6 +81,7 @@ class Settings:
     tools: ToolSettings = field(default_factory=ToolSettings)
     skills: SkillSettings = field(default_factory=SkillSettings)
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
+    automation: AutomationSettings = field(default_factory=AutomationSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -101,6 +107,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     tools = _section(raw, "tools")
     skills = _section(raw, "skills")
     hot_radar = _section(raw, "hot_radar")
+    automation = _section(raw, "automation")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -133,6 +140,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             directory=Path(hot_radar.get("directory", "data/hot_radar")),
             poll_interval_seconds=int(hot_radar.get("poll_interval_seconds", 60)),
             timezone=str(hot_radar.get("timezone", "Asia/Shanghai")),
+        ),
+        automation=AutomationSettings(
+            directory=Path(automation.get("directory", "data/automation")),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )
