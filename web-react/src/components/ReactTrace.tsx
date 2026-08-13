@@ -11,7 +11,7 @@ const phaseLabel: Record<ReactStep['phase'], string> = {
 
 function summary(step: ReactStep): string {
   if (step.phase === 'thought' || step.phase === 'final') return step.content ?? '';
-  if (step.phase === 'action') return step.name ? `调用 ${step.name}` : '调用工具';
+  if (step.phase === 'action') return step.name ? `${step.retry ? '重试' : '调用'} ${step.name}${step.attempt && step.attempt > 1 ? `（第 ${step.attempt} 次）` : ''}` : '调用工具';
   if (step.ok) return step.name ? `${step.name} 已返回结果` : '工具已返回结果';
   return step.error_message ?? '工具执行失败';
 }

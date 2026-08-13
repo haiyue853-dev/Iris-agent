@@ -18,6 +18,7 @@ class AgentLoop:
     def run(self, messages: list[Message]) -> Iterator[AgentEvent]:
         working = list(messages)
         tool_rounds = 0
+        attempts: dict[str, int] = {}
         while True:
             response = self.provider.complete(working, self.tools.schemas())
             if not response.tool_calls:
@@ -41,12 +42,16 @@ class AgentLoop:
                 })
             working.append(Message(role="assistant", content=response.content, tool_calls=response.tool_calls))
             for call in response.tool_calls:
+                signature = self._call_signature(call)
+                attempts[signature] = attempts.get(signature, 0) + 1
                 yield AgentEvent("react_step", {
                     "phase": "action",
                     "call_id": call.id,
                     "name": call.name,
                     "arguments": call.arguments,
                     "round": tool_rounds,
+                    "attempt": attempts[signature],
+                    "retry": attempts[signature] > 1,
                 })
                 yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
                 if self.tools.requires_approval(call.name):
@@ -57,8 +62,13 @@ class AgentLoop:
                         "context": self.tools.approval_context(call.name),
                     })
                     return
-                if call.argument_error:
-                    from iris_agent.tools.base import ToolExecutionResult
+                if attempts[signature] > 2:
+                    result = ToolExecutionResult(
+                        False,
+                        error_code="repeated_tool_call",
+                        error_message="Repeated identical call; choose a different source, query, or tool.",
+                    )
+                elif call.argument_error:
                     result = ToolExecutionResult(False, error_code=call.argument_error, error_message="工具参数不是有效 JSON")
                 else:
                     result = self.tools.invoke(call.name, call.arguments)
@@ -71,6 +81,12 @@ class AgentLoop:
                 yield self._observation_event(call, result, tool_rounds)
                 content = json.dumps(result.value if result.ok else {"error": result.error_code, "message": result.error_message}, ensure_ascii=False)
                 working.append(Message(role="tool", content=content, tool_call_id=call.id, name=call.name))
+
+    @staticmethod
+    def _call_signature(call: ToolCall) -> str:
+        """Stable signature used to prevent an identical failed tool call from looping forever."""
+        arguments = json.dumps(call.arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return f"{call.name}:{arguments}"
 
     @staticmethod
     def _observation_event(call: ToolCall, result: ToolExecutionResult, round_number: int | None = None) -> AgentEvent:
