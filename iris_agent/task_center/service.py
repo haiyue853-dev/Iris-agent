@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from iris_agent.task_center.models import AgentTask, TaskEvent
@@ -14,6 +15,7 @@ from iris_agent.task_center.repository import TaskLedgerRepository
 MAX_TASKS = 100
 MAX_EVENTS = 100
 TERMINAL_STATUSES = frozenset({"completed", "failed", "stopped"})
+_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,120}\Z")
 
 
 def _now() -> str:
@@ -58,9 +60,11 @@ class TaskCenterService:
         return [task.without_events() for task in ordered[:bounded_limit]]
 
     def tool_started(self, task_id: str, tool_name: str, **_ignored: object) -> AgentTask:
+        tool_name = self._safe_tool_name(tool_name)
         return self._append(task_id, "tool_started", f"开始调用工具：{tool_name}", tool_name=tool_name)
 
     def approval_requested(self, task_id: str, call_id: str, tool_name: str, **_ignored: object) -> AgentTask:
+        tool_name = self._safe_tool_name(tool_name)
         task = self._append(
             task_id,
             "approval_requested",
@@ -72,6 +76,7 @@ class TaskCenterService:
         return task
 
     def record_approval(self, task_id: str, call_id: str, tool_name: str, approved: bool, **_ignored: object) -> AgentTask:
+        tool_name = self._safe_tool_name(tool_name)
         state = self._approval_states.get((task_id, call_id))
         if state is None or state[0] != "awaiting" or state[1] != tool_name:
             raise ValueError("审批调用 ID 无效")
@@ -91,6 +96,7 @@ class TaskCenterService:
         succeeded: bool = True,
         **_ignored: object,
     ) -> AgentTask:
+        tool_name = self._safe_tool_name(tool_name)
         with self.repository.transaction():
             if call_id is not None:
                 state = self._approval_states.get((task_id, call_id))
@@ -99,11 +105,11 @@ class TaskCenterService:
                 outcome, approved_tool_name = state
                 if approved_tool_name != tool_name:
                     raise ValueError("工具调用 ID 与工具不匹配")
-                if outcome == "rejected":
+                if outcome == "rejected" and succeeded:
                     raise ValueError("工具调用已被拒绝")
                 if outcome == "completed":
                     raise ValueError("工具调用已完成")
-                if outcome != "approved":
+                if outcome not in {"approved", "rejected"}:
                     raise ValueError("工具调用尚未获批")
             elif any(
                 pending_task_id == task_id and pending_tool_name == tool_name
@@ -121,6 +127,21 @@ class TaskCenterService:
             if call_id is not None:
                 self._approval_states[(task_id, call_id)] = ("completed", tool_name)
             return task
+
+    def touch(self, task_id: str, **_ignored: object) -> AgentTask:
+        """Record progress without persisting response text or adding a timeline event."""
+        with self.repository.transaction():
+            tasks = self.repository.load()
+            for index, task in enumerate(tasks):
+                if task.id != task_id:
+                    continue
+                if task.status in TERMINAL_STATUSES:
+                    return task
+                updated = replace(task, updated_at=_now())
+                tasks[index] = updated
+                self._save_bounded(tasks)
+                return updated
+            raise KeyError(task_id)
 
     def complete(self, task_id: str, **_ignored: object) -> AgentTask:
         return self._append(task_id, "reply_completed", "已生成回复", status="completed", terminal=True)
@@ -227,6 +248,11 @@ class TaskCenterService:
             tool_name=tool_name,
             duration_ms=max(0, int(duration_ms)) if duration_ms is not None else None,
         )
+
+    @staticmethod
+    def _safe_tool_name(tool_name: object) -> str:
+        candidate = str(tool_name)
+        return candidate if _SAFE_TOOL_NAME.fullmatch(candidate) else "unknown_tool"
 
     def _save_bounded(self, tasks: list[AgentTask]) -> None:
         bounded = sorted(tasks, key=lambda task: task.updated_at, reverse=True)[:MAX_TASKS]

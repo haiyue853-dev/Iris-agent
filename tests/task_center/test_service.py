@@ -6,6 +6,7 @@ import threading
 
 import pytest
 
+import iris_agent.task_center.service as task_service
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_center.repository import TaskLedgerError
 
@@ -180,8 +181,8 @@ def test_rejected_approval_call_cannot_finish_a_tool_and_approved_call_must_matc
     service.approval_requested(task.id, "call-rejected", "mcp__shell__run")
     service.record_approval(task.id, "call-rejected", "mcp__shell__run", approved=False)
 
-    with pytest.raises(ValueError, match="拒绝"):
-        service.tool_finished(task.id, "mcp__shell__run", call_id="call-rejected")
+    rejected = service.tool_finished(task.id, "mcp__shell__run", call_id="call-rejected", succeeded=False)
+    assert rejected.events[-1].type == "tool_failed"
 
     service.approval_requested(task.id, "call-approved", "mcp__shell__run")
     service.record_approval(task.id, "call-approved", "mcp__shell__run", approved=True)
@@ -190,6 +191,31 @@ def test_rejected_approval_call_cannot_finish_a_tool_and_approved_call_must_matc
     assert service.tool_finished(task.id, "mcp__shell__run", call_id="call-approved").events[-1].type == "tool_succeeded"
     with pytest.raises(ValueError, match="已完成"):
         service.tool_finished(task.id, "mcp__shell__run", call_id="call-approved")
+
+
+def test_touch_updates_timestamp_without_persisting_text_or_an_event(tmp_path, monkeypatch):
+    timestamps = iter(["created", "touched"])
+    monkeypatch.setattr(task_service, "_now", lambda: next(timestamps))
+    service = _build_service(tmp_path)
+    task = service.create_task("session", "request")
+
+    touched = service.touch(task.id, content="private response")
+
+    assert touched.updated_at == "touched"
+    assert len(touched.events) == 1
+    assert "private response" not in (tmp_path / "tasks" / "tasks.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("unsafe_name", ["tool\nforged", "x" * 121])
+def test_unsafe_tool_names_are_replaced_before_they_reach_the_ledger(tmp_path, unsafe_name):
+    service = _build_service(tmp_path)
+    task = service.create_task("session", "request")
+
+    updated = service.tool_started(task.id, unsafe_name)
+
+    assert updated.events[-1].tool_name == "unknown_tool"
+    raw = (tmp_path / "tasks" / "tasks.json").read_text(encoding="utf-8")
+    assert unsafe_name not in raw
 
 
 def test_concurrent_tool_finish_consumes_an_approved_call_once(tmp_path):
