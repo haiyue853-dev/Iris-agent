@@ -86,3 +86,10 @@ def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
     application = build_application(config)
 
     assert "mcp__browser__get_page" in [item["function"]["name"] for item in application.agent.loop.tools.schemas()]
+
+
+def test_server_entrypoint_loads_without_document_service(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    import importlib
+    server = importlib.import_module("server")
+    assert any(route.path == "/api/hot-radar/scan" for route in server.app.routes)
