@@ -75,6 +75,15 @@ class AutomationService:
             if item["id"] == task_id: item["enabled"] = bool(enabled); self._write(data); return AutomationTask(**item)
         raise KeyError(task_id)
 
+    def delete_task(self, task_id: str) -> None:
+        data = self._read()
+        remaining = [item for item in data["tasks"] if item["id"] != task_id]
+        if len(remaining) == len(data["tasks"]):
+            raise KeyError(task_id)
+        data["tasks"] = remaining
+        data["executions"] = [item for item in data["executions"] if item["task_id"] != task_id]
+        self._write(data)
+
     def claim(self, task_id: str, trigger: str) -> AutomationExecution:
         self._task(task_id); execution = AutomationExecution(uuid4().hex, task_id, trigger, "running")
         data = self._read(); data["executions"].append({"id": execution.id, "task_id": task_id, "trigger": trigger, "status": "running", "summary": ""}); self._write(data); return execution

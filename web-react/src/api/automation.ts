@@ -8,7 +8,7 @@ export type RadarItem = { id: string; title: string; url: string; source: string
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail?.message || '请求失败');
-  return response.json() as Promise<T>;
+  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -20,4 +20,6 @@ export const runAutomationTask = (id: string) => request<AutomationExecution>(`/
 export const listTaskExecutions = (id: string) => request<{ executions: AutomationExecution[] }>(`/api/automation/tasks/${encodeURIComponent(id)}/executions`);
 export const listRadarSubscriptions = () => request<{ subscriptions: RadarSubscription[] }>('/api/hot-radar/subscriptions');
 export const createRadarSubscription = (keyword: string) => request<RadarSubscription>('/api/hot-radar/subscriptions', json({ keyword }));
+export const deleteRadarSubscription = (id: string) => request<void>(`/api/hot-radar/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const listRadarItems = () => request<{ items: RadarItem[] }>('/api/hot-radar/items');
+export const deleteAutomationTask = (id: string) => request<void>(`/api/automation/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });

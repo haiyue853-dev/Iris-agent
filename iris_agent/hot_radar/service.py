@@ -73,6 +73,14 @@ class HotRadarService:
         self._write(data)
         return subscription
 
+    def delete_subscription(self, subscription_id: str) -> None:
+        data = self._read()
+        remaining = [item for item in data["subscriptions"] if item["id"] != subscription_id]
+        if len(remaining) == len(data["subscriptions"]):
+            raise KeyError(subscription_id)
+        data["subscriptions"] = remaining
+        self._write(data)
+
     def list_items(self) -> list[RadarItem]:
         return [RadarItem(**raw) for raw in self._read()["items"]]
 

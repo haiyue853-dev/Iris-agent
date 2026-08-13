@@ -15,6 +15,10 @@ def register_automation_routes(app, automation: AutomationService):
     def create(request: CreateTaskRequest):
         try: return asdict(automation.create_task(request.name, request.schedule))
         except ValueError as exc: raise HTTPException(422, detail={"code": "automation_validation", "message": str(exc)})
+    @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete(task_id: str):
+        try: automation.delete_task(task_id)
+        except KeyError: raise HTTPException(404, detail={"code": "automation_not_found", "message": "任务不存在"})
     @router.put("/tasks/{task_id}/enabled")
     def enabled(task_id: str, request: EnabledRequest):
         try: return asdict(automation.set_enabled(task_id, request.enabled))
