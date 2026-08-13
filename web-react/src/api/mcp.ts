@@ -1,7 +1,7 @@
 const API_BASE = 'http://localhost:8000';
 
 export type McpServer = { id: string; name: string; command: string; args: string[]; allowed_tools: string[]; env_keys: string[]; timeout_seconds: number; enabled: boolean; status: string; discovered_tools: McpTool[] };
-export type McpEvent = { server_id: string; kind: 'discovery' | 'tool_call'; tool_name?: string; ok: boolean; duration_ms: number; created_at: number };
+export type McpEvent = { server_id: string; kind: 'discovery' | 'tool_call'; tool_name?: string; ok: boolean; duration_ms: number; created_at: number; failure_kind?: 'startup_failed' | 'timeout' | 'protocol_error' | 'tool_error' | 'unknown' };
 export type McpTool = { name: string; description?: string; annotations?: { readOnlyHint?: boolean } };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

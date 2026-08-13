@@ -3578,6 +3578,7 @@ button.view-item {
 .mcp-tool-name { min-width: 0; flex: 1; color: var(--iris-text); font-size: 12.5px; font-weight: 700; }
 .mcp-tool-name small { display: block; overflow: hidden; margin-top: 2px; color: var(--iris-text-subtle); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-panel-empty { margin: 0; color: var(--iris-text-subtle); font-size: 12px; line-height: 1.7; }
+.mcp-failure-guide { margin: 0 0 11px; padding: 9px 10px; border: 1px solid color-mix(in srgb, #d65c5c 34%, var(--iris-border)); border-radius: 9px; background: color-mix(in srgb, #d65c5c 7%, var(--iris-surface)); color: #a33b3b; font-size: 11.5px; line-height: 1.55; }
 .mcp-activity-list { display: grid; gap: 9px; }
 .mcp-activity-list p { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--iris-text-muted); font-size: 12px; }
 .mcp-activity-list small { margin-left: auto; color: var(--iris-text-subtle); }

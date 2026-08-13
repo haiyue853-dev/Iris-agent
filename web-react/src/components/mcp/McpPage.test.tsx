@@ -70,6 +70,26 @@ describe('McpPage', () => {
     expect(screen.queryByText('secret')).not.toBeInTheDocument();
   });
 
+  it('shows a safe startup failure hint and retries discovery', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ servers: [server] }))
+      .mockResolvedValueOnce(response({ events: [{ server_id: 'browser', kind: 'discovery', ok: false, duration_ms: 28, created_at: 1, failure_kind: 'startup_failed', detail: 'top-secret' }] }))
+      .mockResolvedValueOnce(response({ tools: [], server }))
+      .mockResolvedValueOnce(response({ events: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<McpPage />);
+
+    expect(await screen.findByText(/无法启动 MCP 服务，请检查启动命令。/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新检测连接' })).toBeInTheDocument();
+    expect(screen.queryByText('top-secret')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新检测连接' }));
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/browser/discover'), expect.objectContaining({ method: 'POST' }));
+    expect(await screen.findByRole('button', { name: '检测连接' })).toBeInTheDocument();
+  });
+
   it('shows when authorized tools are available to the main conversation', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(response({ servers: [{ ...server, allowed_tools: ['read_page'], discovered_tools: [{ name: 'read_page', annotations: { readOnlyHint: true } }] }] }))
