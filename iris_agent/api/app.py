@@ -30,6 +30,8 @@ from iris_agent.core.errors import IrisError, SessionNotFoundError
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.automation.service import AutomationService
+from iris_agent.api.automation_api import register_automation_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -138,6 +140,7 @@ def create_app(
     mcp: McpCenterService | None = None,
     mcp_tools=None,
     hot_radar: HotRadarService | None = None,
+    automation: AutomationService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -159,6 +162,8 @@ def create_app(
         register_mcp_routes(app, mcp, mcp_tools)
     if hot_radar is not None:
         register_hot_radar_routes(app, hot_radar)
+    if automation is not None:
+        register_automation_routes(app, automation)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
