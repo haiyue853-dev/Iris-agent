@@ -8,12 +8,13 @@ import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
 import DocumentWorkbenchPage from './components/documents/DocumentWorkbenchPage';
+import InterviewKnowledgePage from './components/interview/InterviewKnowledgePage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar' | 'mcp';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar' | 'mcp' | 'interview-knowledge';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar', 'mcp'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar', 'mcp', 'interview-knowledge'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -118,6 +119,8 @@ function App() {
           <McpPage />
         ) : activeView === 'documents' ? (
           <DocumentWorkbenchPage />
+        ) : activeView === 'interview-knowledge' ? (
+          <InterviewKnowledgePage />
         ) : activeView === 'radar' ? (
           <div className="view-placeholder">
             <h2>热点雷达</h2>

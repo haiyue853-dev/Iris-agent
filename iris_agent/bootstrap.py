@@ -8,6 +8,7 @@ from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.documents.service import DocumentService
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
@@ -32,6 +33,7 @@ class ApplicationServices:
     hot_radar: HotRadarService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
+    interview_knowledge: InterviewKnowledgeRepository
     settings: Settings
 
 
@@ -40,6 +42,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
     provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
     registry = ToolRegistry()
+    interview_knowledge = InterviewKnowledgeRepository(settings.interview_knowledge.path)
     factories = {
         "current_time": lambda: build_current_time_tool(),
         "list_directory": lambda: build_list_directory_tool(settings.tools.workspace_root),
@@ -50,9 +53,11 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         if name in factories:
             registry.register(factories[name]())
     mcp = McpCenterService(settings.mcp.settings_file)
+    mcp.ensure_builtin_interview_server(settings.interview_knowledge.path)
     atexit.register(mcp.close)
     register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
+    mcp_tools.refresh()
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
     agent = AgentService(loop, sessions, settings.agent.system_prompt)
@@ -86,4 +91,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_text_chars=settings.documents.max_text_chars,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, documents, hot_radar, mcp, mcp_tools, interview_knowledge, settings)

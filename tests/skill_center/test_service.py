@@ -19,7 +19,7 @@ def _build_service(tmp_path: Path) -> SkillCenterService:
 def test_all_skills_enabled_by_default(tmp_path):
     service = _build_service(tmp_path)
     skills = service.list_skills()
-    assert len(skills) == 4
+    assert len(skills) == 5
     assert all(s.enabled for s in skills)
 
 

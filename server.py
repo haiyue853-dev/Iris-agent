@@ -15,6 +15,7 @@ app = create_app(
     documents=application.documents,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
+    interview_knowledge=application.interview_knowledge,
 )
 
 

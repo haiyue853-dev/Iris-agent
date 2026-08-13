@@ -8,16 +8,20 @@ from iris_agent.reports.service import DailyReportService
 
 def test_build_application_exposes_daily_report_service(tmp_path, monkeypatch):
     config = tmp_path / "agent.yaml"
+    sessions_directory = (tmp_path / "sessions").as_posix()
+    reports_directory = (tmp_path / "reports").as_posix()
+    attachments_directory = (tmp_path / "attachments").as_posix()
+    workspace_directory = (tmp_path / "workspace").as_posix()
     config.write_text(
         "llm:\n"
         "  model: test-model\n"
         "sessions:\n"
-        f"  directory: {str(tmp_path / 'sessions').replace('\\', '/')}\n"
+        f"  directory: {sessions_directory}\n"
         "reports:\n"
-        f"  directory: {str(tmp_path / 'reports').replace('\\', '/')}\n"
-        f"  attachments_directory: {str(tmp_path / 'attachments').replace('\\', '/')}\n"
+        f"  directory: {reports_directory}\n"
+        f"  attachments_directory: {attachments_directory}\n"
         "tools:\n"
-        f"  workspace_root: {str(tmp_path / 'workspace').replace('\\', '/')}\n",
+        f"  workspace_root: {workspace_directory}\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

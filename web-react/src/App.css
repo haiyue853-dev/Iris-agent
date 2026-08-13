@@ -295,6 +295,10 @@ body {
   container-type: inline-size;
 }
 
+.interview-knowledge-page { height: 100%; overflow-y: auto; padding: 36px max(24px, 8vw); background: #f7f7f8; }
+.interview-knowledge-page > header, .knowledge-filters, .knowledge-card-list, .knowledge-state { max-width: 900px; margin-left: auto; margin-right: auto; }
+.interview-knowledge-page > header { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 24px; }.interview-knowledge-page h1 { margin: 6px 0; }.interview-knowledge-page header p { color: #6e6e73; }.interview-knowledge-page button, .knowledge-filters input, .knowledge-filters select { padding: 9px 12px; border: 1px solid #d8d8da; border-radius: 8px; background: #fff; font: inherit; }.knowledge-filters { display: flex; gap: 10px; margin-bottom: 18px; }.knowledge-filters input { flex: 1; }.knowledge-card-list { display: grid; gap: 14px; }.knowledge-card { padding: 18px; border: 1px solid #e8e8ea; border-radius: 12px; background: #fff; }.knowledge-card small, .knowledge-card a { color: #58539e; }.knowledge-card h2 { font-size: 17px; }.knowledge-card p { white-space: pre-wrap; line-height: 1.65; }.knowledge-state { padding: 22px; background: #fff; border-radius: 10px; }
+
 /* ========== Welcome Page ========== */
 .welcome-container {
   flex: 1;

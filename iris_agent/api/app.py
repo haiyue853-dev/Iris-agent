@@ -39,6 +39,7 @@ from iris_agent.documents.errors import (
 )
 from iris_agent.documents.service import DocumentService
 from iris_agent.mcp_center.service import McpCenterService
+from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -147,6 +148,7 @@ def create_app(
     documents: DocumentService | None = None,
     mcp: McpCenterService | None = None,
     mcp_tools=None,
+    interview_knowledge: InterviewKnowledgeRepository | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -168,6 +170,10 @@ def create_app(
         register_documents_routes(app, documents)
     if mcp is not None:
         register_mcp_routes(app, mcp, mcp_tools)
+    if interview_knowledge is not None:
+        @app.get("/api/interview-knowledge")
+        def list_interview_knowledge(topic: str | None = None):
+            return {"items": interview_knowledge.list(topic)}
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):

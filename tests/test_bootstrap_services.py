@@ -9,22 +9,29 @@ from iris_agent.mcp_center.service import McpServer, McpCenterService
 
 def _write_config(tmp_path: Path) -> Path:
     config = tmp_path / "agent.yaml"
+    sessions_directory = (tmp_path / "sessions").as_posix()
+    reports_directory = (tmp_path / "reports").as_posix()
+    attachments_directory = (tmp_path / "attachments").as_posix()
+    skills_directory = (tmp_path / "skills").as_posix()
+    documents_directory = (tmp_path / "documents").as_posix()
+    hot_radar_directory = (tmp_path / "hot_radar").as_posix()
+    workspace_directory = (tmp_path / "workspace").as_posix()
     config.write_text(
         "llm:\n"
         "  model: test-model\n"
         "sessions:\n"
-        f"  directory: {str(tmp_path / 'sessions').replace('\\', '/')}\n"
+        f"  directory: {sessions_directory}\n"
         "reports:\n"
-        f"  directory: {str(tmp_path / 'reports').replace('\\', '/')}\n"
-        f"  attachments_directory: {str(tmp_path / 'attachments').replace('\\', '/')}\n"
+        f"  directory: {reports_directory}\n"
+        f"  attachments_directory: {attachments_directory}\n"
         "skills:\n"
-        f"  directory: {str(tmp_path / 'skills').replace('\\', '/')}\n"
+        f"  directory: {skills_directory}\n"
         "documents:\n"
-        f"  directory: {str(tmp_path / 'documents').replace('\\', '/')}\n"
+        f"  directory: {documents_directory}\n"
         "hot_radar:\n"
-        f"  directory: {str(tmp_path / 'hot_radar').replace('\\', '/')}\n"
+        f"  directory: {hot_radar_directory}\n"
         "tools:\n"
-        f"  workspace_root: {str(tmp_path / 'workspace').replace('\\', '/')}\n",
+        f"  workspace_root: {workspace_directory}\n",
         encoding="utf-8",
     )
     return config
@@ -82,10 +89,19 @@ def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     server = McpServer("browser", "Browser", "node", (), ("get_page",), True)
-    monkeypatch.setattr(McpCenterService, "enabled_tools", lambda _, **kwargs: ((server, {
+    monkeypatch.setattr(McpCenterService, "enabled_tools", lambda _, *args, **kwargs: ((server, {
         "name": "get_page", "description": "Read page", "inputSchema": {"type": "object", "properties": {}},
     }),))
 
     application = build_application(config)
 
     assert "mcp__browser__get_page" in [item["function"]["name"] for item in application.agent.loop.tools.schemas()]
+
+
+def test_build_application_registers_builtin_interview_mcp_tools(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    application = build_application(config)
+    names = [item["function"]["name"] for item in application.agent.loop.tools.schemas()]
+    assert "mcp__builtin-interview-web__search_interview_sources" in names
+    assert application.agent.loop.tools.requires_approval("mcp__builtin-interview-web__save_interview_qa")
