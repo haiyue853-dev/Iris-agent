@@ -31,6 +31,7 @@ class RadarItem:
 class ScanResult:
     new_count: int
     failed_sources: tuple[str, ...]
+    item_ids: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -86,7 +87,7 @@ class HotRadarService:
 
     def scan(self) -> ScanResult:
         data = self._read(); keywords = [item["keyword"] for item in data["subscriptions"]]
-        seen = {item["id"] for item in data["items"]}; failed: list[str] = []; added = 0
+        seen = {item["id"] for item in data["items"]}; failed: list[str] = []; added = 0; item_ids: list[str] = []
         for name, fetch in self.sources.items():
             try: candidates = fetch()
             except Exception: failed.append(name); continue
@@ -96,7 +97,7 @@ class HotRadarService:
                 if not keyword: continue
                 item_id = hashlib.sha256((url or title).encode("utf-8")).hexdigest()[:24]
                 if item_id in seen: continue
-                seen.add(item_id); added += 1
+                seen.add(item_id); added += 1; item_ids.append(item_id)
                 data["items"].append({"id": item_id, "title": title, "url": url, "source": str(raw.get("source", name)), "summary": summary[:500], "keyword": keyword})
         self._write(data)
-        return ScanResult(added, tuple(failed))
+        return ScanResult(added, tuple(failed), tuple(item_ids))

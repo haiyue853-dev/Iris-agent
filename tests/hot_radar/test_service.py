@@ -24,5 +24,6 @@ def test_scan_deduplicates_matching_news_and_reports_source_failure(tmp_path):
     result = service.scan()
 
     assert result.new_count == 1
+    assert len(result.item_ids) == 1
     assert result.failed_sources == ("world",)
     assert result.summary == "新增 1 条热点；1 个来源不可用"
