@@ -487,6 +487,21 @@ body {
 .tool-approval-card pre { margin: 12px 0; padding: 10px; overflow-x: auto; border-radius: 8px; background: var(--iris-bg-muted, #f4f4f6); color: var(--iris-text, #1d1c23); font-size: 12px; }
 .tool-approval-actions { display: flex; gap: 8px; }
 
+.react-trace {
+  width: min(680px, calc(100% - 48px));
+  margin: 0 auto 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--iris-border, #e8e8ea);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--iris-surface, #fff) 88%, #eff2ff);
+}
+.react-trace header { display: flex; justify-content: space-between; color: var(--iris-text, #1d1c23); font-size: 12px; font-weight: 700; }
+.react-trace header small { color: var(--iris-text-subtle, #8e8e93); font-weight: 500; }
+.react-trace ol { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.react-trace li { display: flex; gap: 9px; color: var(--iris-text-muted, #6e6e73); font-size: 12px; line-height: 1.5; }
+.react-trace li strong { flex: 0 0 34px; color: var(--iris-accent, #625bf6); font-size: 11px; }
+.react-trace-action strong { color: #2676a9 !important; }.react-trace-observation strong { color: #32845e !important; }
+
 /* ========== Messages ========== */
 .message {
   margin-bottom: 20px;

@@ -30,6 +30,7 @@ function App() {
     messages,
     isStreaming,
     streamingContent,
+    reactSteps,
     toast,
     pendingApproval,
     currentSessionId,
@@ -139,6 +140,7 @@ function App() {
           <ChatContainer
             messages={messages}
             streamingContent={streamingContent}
+            reactSteps={reactSteps}
             isStreaming={isStreaming}
             inputValue={chatInput}
             onInputChange={setChatInput}

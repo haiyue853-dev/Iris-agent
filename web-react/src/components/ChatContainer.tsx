@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import InputBox from './InputBox';
+import ReactTrace from './ReactTrace';
 import type { AgentEvent, Message } from '../types';
 
 interface ChatContainerProps {
   messages: Message[];
   streamingContent: string;
+  reactSteps: Extract<AgentEvent, { type: 'react_step' }>['data'][];
   isStreaming: boolean;
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -22,6 +24,7 @@ interface ChatContainerProps {
 const ChatContainer: React.FC<ChatContainerProps> = ({
   messages,
   streamingContent,
+  reactSteps,
   isStreaming,
   inputValue,
   onInputChange,
@@ -48,7 +51,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         containerRef.current.scrollTop = scrollHeight;
       }
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, reactSteps]);
 
   const handleScroll = () => {
     if (containerRef.current) {
@@ -120,13 +123,16 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             )}
           </React.Fragment>
         ))}
-        {isStreaming && (
-          <MessageBubble
-            role="assistant"
-            content={streamingContent}
-            isStreaming={true}
-            onCopy={onCopy}
-          />
+        {(isStreaming || (pendingApproval && reactSteps.length > 0)) && (
+          <>
+            <ReactTrace steps={reactSteps} />
+            <MessageBubble
+              role="assistant"
+              content={streamingContent}
+              isStreaming={true}
+              onCopy={onCopy}
+            />
+          </>
         )}
         {pendingApproval && (
           <section className="tool-approval-card" aria-label="Tool approval">

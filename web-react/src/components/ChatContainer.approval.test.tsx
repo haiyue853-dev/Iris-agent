@@ -11,6 +11,7 @@ describe('ChatContainer tool approval', () => {
     render(<ChatContainer
       messages={[]}
       streamingContent=""
+      reactSteps={[]}
       isStreaming={false}
       inputValue=""
       onInputChange={vi.fn()}
