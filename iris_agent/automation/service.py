@@ -88,14 +88,23 @@ class AutomationService:
         self._task(task_id); execution = AutomationExecution(uuid4().hex, task_id, trigger, "running")
         data = self._read(); data["executions"].append({"id": execution.id, "task_id": task_id, "trigger": trigger, "status": "running", "summary": ""}); self._write(data); return execution
 
-    def run_now(self, task_id: str) -> AutomationExecution:
-        execution = self.claim(task_id, "manual")
+    def _run(self, task_id: str, trigger: str) -> AutomationExecution:
+        execution = self.claim(task_id, trigger)
         try: result = self.radar.scan(); status, summary = "succeeded", result.summary
         except Exception: status, summary = "failed", "热点雷达扫描失败"
         data = self._read()
         for item in data["executions"]:
             if item["id"] == execution.id: item.update(status=status, summary=summary); self._write(data); return AutomationExecution(**item)
         raise RuntimeError("execution missing")
+
+    def run_now(self, task_id: str) -> AutomationExecution:
+        return self._run(task_id, "manual")
+
+    def run_scheduled(self, task_id: str, window: str) -> AutomationExecution | None:
+        trigger = f"schedule:{window}"
+        if any(item.trigger == trigger for item in self.list_executions(task_id)):
+            return None
+        return self._run(task_id, trigger)
 
 
 def _matches_cron_field(field: str, value: int, minimum: int, maximum: int) -> bool:
@@ -162,9 +171,9 @@ class AutomationScheduler:
         for task in self.automation.list_tasks():
             key = (task.id, window)
             if task.enabled and key not in self._last_window and schedule_matches(task.schedule, moment):
-                self.automation.run_now(task.id)
+                execution = self.automation.run_scheduled(task.id, window)
                 self._last_window.add(key)
-                ran += 1
+                ran += int(execution is not None)
         self._last_window = {key for key in self._last_window if key[1] == window}
         return ran
 

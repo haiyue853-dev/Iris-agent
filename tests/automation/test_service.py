@@ -54,6 +54,15 @@ def test_scheduler_supports_step_from_a_specific_start(tmp_path):
     assert service.list_executions(task.id)[0].task_id == task.id
 
 
+def test_scheduler_does_not_repeat_a_window_after_restart(tmp_path):
+    service = AutomationService(tmp_path / "automation", HotRadarService(tmp_path / "radar", sources={}))
+    service.create_task("hourly", "5 * * * *")
+    moment = datetime(2026, 8, 13, 9, 5)
+
+    assert AutomationScheduler(service).run_pending(moment) == 1
+    assert AutomationScheduler(AutomationService(tmp_path / "automation", service.radar)).run_pending(moment) == 0
+
+
 def test_task_rejects_cron_fields_the_scheduler_cannot_run(tmp_path):
     service = AutomationService(tmp_path / "automation", HotRadarService(tmp_path / "radar", sources={}))
 
