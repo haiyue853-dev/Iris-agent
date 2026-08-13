@@ -14,14 +14,15 @@ describe('AutomationPage', () => {
       if (url.includes('/tasks/') && url.includes('/executions')) return reply({ executions: [] });
       if (url.includes('/automation/tasks')) return reply({ tasks: [{ id: 'task-1', name: '热点雷达扫描', schedule: '0 9 * * *', enabled: true }] });
       if (url.includes('/subscriptions')) return reply({ subscriptions: [{ id: 'sub-1', keyword: 'MCP' }] });
-      return reply({ items: [] });
+      return reply({ items: [{ id: 'item-1', title: 'MCP 协议更新', url: 'https://example.test/mcp', source: 'Tech', summary: '工具互操作性的新进展', keyword: 'MCP' }] });
     });
   });
 
   it('shows subscriptions and runs a configured routine', async () => {
     render(<AutomationPage />);
     expect(await screen.findByText('热点雷达扫描')).toBeInTheDocument();
-    expect(screen.getByText('MCP')).toBeInTheDocument();
+    expect(screen.getAllByText('MCP')).not.toHaveLength(0);
+    expect(screen.getByText('MCP 协议更新').closest('a')).toHaveAttribute('href', 'https://example.test/mcp');
 
     fireEvent.click(screen.getByRole('button', { name: '立即运行' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
