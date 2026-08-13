@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
@@ -11,6 +12,9 @@ from uuid import uuid4
 
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.notifications.service import NotificationService
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,11 +106,15 @@ class AutomationService:
             result = self.radar.scan()
             status, summary = "succeeded", result.summary
             new_count, failed_sources, item_ids = result.new_count, result.failed_sources, result.item_ids
-            if new_count and self.notifications is not None:
-                task = self._task(task_id)
-                self.notifications.create(task.name, summary, task_id, item_ids)
         except Exception:
             status, summary, new_count, failed_sources, item_ids = "failed", "热点雷达扫描失败", 0, (), ()
+        else:
+            if new_count and self.notifications is not None:
+                try:
+                    task = self._task(task_id)
+                    self.notifications.create(task.name, summary, task_id, item_ids)
+                except Exception:
+                    logger.exception("Failed to create notification for automation task %s", task_id)
         data = self._read()
         for item in data["executions"]:
             if item["id"] == execution.id:

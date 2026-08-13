@@ -38,6 +38,28 @@ def test_zero_match_scan_does_not_create_notification(tmp_path):
     assert notifications.list_notifications() == []
 
 
+def test_notification_failure_does_not_fail_a_completed_scan(tmp_path, monkeypatch):
+    radar = HotRadarService(
+        tmp_path / "radar",
+        sources={"tech": lambda: [{"title": "MCP update", "url": "https://example.test/mcp", "source": "Tech", "summary": "details"}]},
+    )
+    radar.create_subscription("MCP")
+    notifications = NotificationService(tmp_path / "notifications")
+    service = AutomationService(tmp_path / "automation", radar, notifications)
+    task = service.create_task("radar", "0 * * * *")
+
+    def fail_to_create(*_args, **_kwargs):
+        raise OSError("notification storage unavailable")
+
+    monkeypatch.setattr(notifications, "create", fail_to_create)
+
+    execution = service.run_now(task.id)
+
+    assert execution.status == "succeeded"
+    assert execution.new_count == 1
+    assert len(execution.item_ids) == 1
+
+
 def test_running_execution_is_marked_unknown_on_restart_and_terminal_status_is_immutable(tmp_path):
     radar = HotRadarService(tmp_path / "radar", sources={})
     service = AutomationService(tmp_path / "automation", radar)
