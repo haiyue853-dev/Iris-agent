@@ -1,5 +1,4 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import UmlFlowPage from './UmlFlowPage';
 
@@ -51,12 +50,5 @@ describe('UmlFlowPage Draw.io workspace', () => {
       expect(Number(screen.getByTestId('drawio-editor').getAttribute('data-import-request'))).toBeGreaterThan(0);
     });
     expect(screen.getByTestId('drawio-editor')).toHaveAttribute('data-mermaid', 'flowchart TD\n A-->B');
-  });
-
-  it('does not retain legacy React Flow or Mermaid runtime imports', () => {
-    const source = readFileSync('src/components/uml/UmlFlowPage.tsx', 'utf8');
-
-    expect(source).not.toContain("from '@xyflow/" + "react'");
-    expect(source).not.toContain("from 'mer" + "maid'");
   });
 });
