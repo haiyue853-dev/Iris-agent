@@ -46,3 +46,6 @@ hot_radar:
 
 automation:
   directory: data/automation
+
+notifications:
+  directory: data/notifications

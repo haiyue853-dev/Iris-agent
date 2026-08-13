@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.notifications.service import NotificationService
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,11 +28,14 @@ class AutomationExecution:
     trigger: str
     status: str
     summary: str = ""
+    new_count: int = 0
+    failed_sources: tuple[str, ...] = ()
+    item_ids: tuple[str, ...] = ()
 
 
 class AutomationService:
-    def __init__(self, root: Path, radar: HotRadarService):
-        self.root, self.radar, self.path = root, radar, root / "automation.json"
+    def __init__(self, root: Path, radar: HotRadarService, notifications: NotificationService | None = None):
+        self.root, self.radar, self.notifications, self.path = root, radar, notifications, root / "automation.json"
         root.mkdir(parents=True, exist_ok=True)
         self._recover()
 
@@ -66,7 +70,11 @@ class AutomationService:
         return task
 
     def list_tasks(self): return [AutomationTask(**item) for item in self._read()["tasks"]]
-    def list_executions(self, task_id: str): return [AutomationExecution(**item) for item in reversed(self._read()["executions"]) if item["task_id"] == task_id]
+    @staticmethod
+    def _execution(raw):
+        return AutomationExecution(**{**raw, "failed_sources": tuple(raw.get("failed_sources", ())), "item_ids": tuple(raw.get("item_ids", ()))})
+
+    def list_executions(self, task_id: str): return [self._execution(item) for item in reversed(self._read()["executions"]) if item["task_id"] == task_id]
     def _task(self, task_id): return next(item for item in self.list_tasks() if item.id == task_id)
 
     def set_enabled(self, task_id: str, enabled: bool) -> AutomationTask:
@@ -86,15 +94,25 @@ class AutomationService:
 
     def claim(self, task_id: str, trigger: str) -> AutomationExecution:
         self._task(task_id); execution = AutomationExecution(uuid4().hex, task_id, trigger, "running")
-        data = self._read(); data["executions"].append({"id": execution.id, "task_id": task_id, "trigger": trigger, "status": "running", "summary": ""}); self._write(data); return execution
+        data = self._read(); data["executions"].append({"id": execution.id, "task_id": task_id, "trigger": trigger, "status": "running", "summary": "", "new_count": 0, "failed_sources": [], "item_ids": []}); self._write(data); return execution
 
     def _run(self, task_id: str, trigger: str) -> AutomationExecution:
         execution = self.claim(task_id, trigger)
-        try: result = self.radar.scan(); status, summary = "succeeded", result.summary
-        except Exception: status, summary = "failed", "热点雷达扫描失败"
+        try:
+            result = self.radar.scan()
+            status, summary = "succeeded", result.summary
+            new_count, failed_sources, item_ids = result.new_count, result.failed_sources, result.item_ids
+            if new_count and self.notifications is not None:
+                task = self._task(task_id)
+                self.notifications.create(task.name, summary, task_id, item_ids)
+        except Exception:
+            status, summary, new_count, failed_sources, item_ids = "failed", "热点雷达扫描失败", 0, (), ()
         data = self._read()
         for item in data["executions"]:
-            if item["id"] == execution.id: item.update(status=status, summary=summary); self._write(data); return AutomationExecution(**item)
+            if item["id"] == execution.id:
+                item.update(status=status, summary=summary, new_count=new_count, failed_sources=list(failed_sources), item_ids=list(item_ids))
+                self._write(data)
+                return self._execution(item)
         raise RuntimeError("execution missing")
 
     def run_now(self, task_id: str) -> AutomationExecution:

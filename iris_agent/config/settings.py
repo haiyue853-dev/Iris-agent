@@ -68,6 +68,11 @@ class AutomationSettings:
 
 
 @dataclass(slots=True)
+class NotificationSettings:
+    directory: Path = Path("data/notifications")
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -82,6 +87,7 @@ class Settings:
     skills: SkillSettings = field(default_factory=SkillSettings)
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
     automation: AutomationSettings = field(default_factory=AutomationSettings)
+    notifications: NotificationSettings = field(default_factory=NotificationSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -108,6 +114,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     skills = _section(raw, "skills")
     hot_radar = _section(raw, "hot_radar")
     automation = _section(raw, "automation")
+    notifications = _section(raw, "notifications")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -143,6 +150,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         automation=AutomationSettings(
             directory=Path(automation.get("directory", "data/automation")),
+        ),
+        notifications=NotificationSettings(
+            directory=Path(notifications.get("directory", "data/notifications")),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

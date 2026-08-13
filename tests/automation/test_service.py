@@ -4,20 +4,38 @@ import pytest
 
 from iris_agent.automation.service import AutomationScheduler, AutomationService
 from iris_agent.hot_radar.service import HotRadarService
+from iris_agent.notifications.service import NotificationService
 
 
 def test_task_and_execution_ledger_survive_restart(tmp_path):
     radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: [{"title": "AI 更新", "url": "https://example.test/ai", "source": "Tech", "summary": "摘要"}]})
     radar.create_subscription("AI")
-    service = AutomationService(tmp_path / "automation", radar)
+    notifications = NotificationService(tmp_path / "notifications")
+    service = AutomationService(tmp_path / "automation", radar, notifications)
 
     task = service.create_task("每小时扫描", "0 * * * *")
     execution = service.run_now(task.id)
 
     assert execution.status == "succeeded"
+    assert execution.new_count == 1
+    assert len(execution.item_ids) == 1
+    assert notifications.list_notifications()[0].read is False
     restarted = AutomationService(tmp_path / "automation", radar)
     assert restarted.list_tasks()[0].enabled is True
     assert restarted.list_executions(task.id)[0].summary == "新增 1 条热点"
+
+
+def test_zero_match_scan_does_not_create_notification(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: []})
+    notifications = NotificationService(tmp_path / "notifications")
+    service = AutomationService(tmp_path / "automation", radar, notifications)
+    task = service.create_task("radar", "0 * * * *")
+
+    execution = service.run_now(task.id)
+
+    assert execution.new_count == 0
+    assert execution.failed_sources == ()
+    assert notifications.list_notifications() == []
 
 
 def test_running_execution_is_marked_unknown_on_restart_and_terminal_status_is_immutable(tmp_path):

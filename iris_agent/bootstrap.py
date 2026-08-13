@@ -8,6 +8,7 @@ from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
+from iris_agent.notifications.service import NotificationService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
@@ -30,6 +31,7 @@ class ApplicationServices:
     skills: SkillCenterService
     hot_radar: HotRadarService
     automation: AutomationService
+    notifications: NotificationService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -78,5 +80,6 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         settings.skills.settings_file,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
-    automation = AutomationService(settings.automation.directory, hot_radar)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, mcp, mcp_tools, settings)
+    notifications = NotificationService(settings.notifications.directory)
+    automation = AutomationService(settings.automation.directory, hot_radar, notifications)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, mcp, mcp_tools, settings)
