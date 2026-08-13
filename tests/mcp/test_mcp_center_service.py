@@ -92,6 +92,8 @@ def test_mcp_missing_command_is_a_safe_discovery_failure(tmp_path: Path, monkeyp
         raise AssertionError("missing MCP command was not reported as a discovery error")
 
     assert service.events(server.id)[0]["ok"] is False
+    assert service.events(server.id)[0]["failure_kind"] == "startup_failed"
+    assert "error" not in service.events(server.id)[0]
 
 
 def test_mcp_uses_windows_node_fallback_when_node_is_not_on_path(tmp_path: Path, monkeypatch) -> None:
