@@ -92,4 +92,4 @@ def test_server_entrypoint_loads_without_document_service(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import importlib
     server = importlib.import_module("server")
-    assert any(route.path == "/api/hot-radar/scan" for route in server.app.routes)
+    assert any(getattr(route, "path", None) == "/api/hot-radar/scan" for route in server.app.routes)
