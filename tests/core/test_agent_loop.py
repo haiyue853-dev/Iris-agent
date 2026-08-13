@@ -20,7 +20,22 @@ def test_loop_executes_tool_then_returns_final_text():
     registry = ToolRegistry()
     registry.register(build_current_time_tool())
     events = list(AgentLoop(provider, registry, max_tool_rounds=2).run([Message(role="user", content="time?")]))
-    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
+    assert [event.type for event in events] == ["react_step", "tool_started", "tool_finished", "react_step", "react_step", "text_delta", "message_completed"]
+    assert [event.data["phase"] for event in events if event.type == "react_step"] == ["action", "observation", "final"]
+
+
+def test_loop_exposes_a_brief_thought_before_tool_actions():
+    provider = FakeProvider(
+        ProviderResponse(content="I will check the time.", tool_calls=[ToolCall("call-1", "current_time", {})]),
+        ProviderResponse(content="done"),
+    )
+    registry = ToolRegistry()
+    registry.register(build_current_time_tool())
+
+    events = list(AgentLoop(provider, registry, max_tool_rounds=2).run([]))
+
+    thought = next(event for event in events if event.type == "react_step" and event.data["phase"] == "thought")
+    assert thought.data["content"] == "I will check the time."
 
 
 def test_loop_emits_error_at_tool_round_limit():
@@ -53,6 +68,6 @@ def test_loop_requests_approval_before_executing_a_write_tool():
     from iris_agent.tools.base import Tool
     registry.register(Tool("write", "write", {"type": "object", "properties": {}}, lambda: calls.append(True), requires_approval=True))
     events = list(AgentLoop(FakeProvider(ProviderResponse(tool_calls=[ToolCall("c", "write", {})])), registry, 1).run([]))
-    assert [event.type for event in events] == ["tool_started", "tool_approval_requested"]
+    assert [event.type for event in events] == ["react_step", "tool_started", "tool_approval_requested"]
     assert events[-1].data["name"] == "write"
     assert calls == []

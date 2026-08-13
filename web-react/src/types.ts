@@ -144,6 +144,7 @@ export type GenerateReportInput = {
 };
 
 export type AgentEvent =
+  | { type: 'react_step'; data: { phase: 'thought' | 'action' | 'observation' | 'final'; content?: string; call_id?: string; name?: string; arguments?: Record<string, unknown>; ok?: boolean; result?: unknown; error_code?: string; error_message?: string; round?: number } }
   | { type: 'text_delta'; data: { content: string } }
   | { type: 'tool_started'; data: { call_id: string; name: string; arguments: Record<string, unknown> } }
   | { type: 'tool_approval_requested'; data: { call_id: string; name: string; arguments: Record<string, unknown>; context?: { server_name?: string; tool_name?: string } | null } }

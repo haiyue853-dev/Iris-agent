@@ -36,7 +36,7 @@ def test_agent_executes_an_allowlisted_read_only_mcp_tool_and_returns_its_result
 
     events = list(AgentLoop(provider, registry).run([Message(role="user", content="读取当前页面")]))
 
-    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
-    assert events[1].data["result"] == {"content": [{"type": "text", "text": "<title>Example Domain</title>"}]}
+    assert [event.type for event in events] == ["react_step", "tool_started", "tool_finished", "react_step", "react_step", "text_delta", "message_completed"]
+    assert events[2].data["result"] == {"content": [{"type": "text", "text": "<title>Example Domain</title>"}]}
     assert provider.messages[1][-1].role == "tool"
     assert "Example Domain" in provider.messages[1][-1].content

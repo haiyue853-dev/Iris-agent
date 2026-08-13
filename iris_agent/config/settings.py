@@ -20,7 +20,7 @@ class LLMSettings:
 
 @dataclass(slots=True)
 class AgentSettings:
-    system_prompt: str = "你是 Iris Agent，一个智能助手。始终使用中文与用户交流。"
+    system_prompt: str = "你是 Iris Agent，一个智能助手。始终使用中文与用户交流。需要调用工具时，先用一句简短的话说明计划；基于工具返回的结果继续行动，并在完成后给出直接、可验证的结论。"
     max_tool_rounds: int = 8
 
 

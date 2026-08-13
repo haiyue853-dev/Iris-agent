@@ -22,6 +22,10 @@ class AgentLoop:
             response = self.provider.complete(working, self.tools.schemas())
             if not response.tool_calls:
                 if response.content:
+                    yield AgentEvent("react_step", {
+                        "phase": "final",
+                        "content": response.content,
+                    })
                     yield AgentEvent("text_delta", {"content": response.content})
                 yield AgentEvent("message_completed", {"content": response.content})
                 return
@@ -29,8 +33,21 @@ class AgentLoop:
                 yield AgentEvent("error", {"code": "tool_round_limit", "message": "工具调用次数超过限制"})
                 return
             tool_rounds += 1
+            if response.content:
+                yield AgentEvent("react_step", {
+                    "phase": "thought",
+                    "content": response.content,
+                    "round": tool_rounds,
+                })
             working.append(Message(role="assistant", content=response.content, tool_calls=response.tool_calls))
             for call in response.tool_calls:
+                yield AgentEvent("react_step", {
+                    "phase": "action",
+                    "call_id": call.id,
+                    "name": call.name,
+                    "arguments": call.arguments,
+                    "round": tool_rounds,
+                })
                 yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
                 if self.tools.requires_approval(call.name):
                     yield AgentEvent("tool_approval_requested", {
@@ -51,8 +68,20 @@ class AgentLoop:
                 else:
                     data.update({"error_code": result.error_code, "error_message": result.error_message})
                 yield AgentEvent("tool_finished", data)
+                yield self._observation_event(call, result, tool_rounds)
                 content = json.dumps(result.value if result.ok else {"error": result.error_code, "message": result.error_message}, ensure_ascii=False)
                 working.append(Message(role="tool", content=content, tool_call_id=call.id, name=call.name))
+
+    @staticmethod
+    def _observation_event(call: ToolCall, result: ToolExecutionResult, round_number: int | None = None) -> AgentEvent:
+        data = {"phase": "observation", "call_id": call.id, "name": call.name, "ok": result.ok}
+        if round_number is not None:
+            data["round"] = round_number
+        if result.ok:
+            data["result"] = result.value
+        else:
+            data.update({"error_code": result.error_code, "error_message": result.error_message})
+        return AgentEvent("react_step", data)
 
 
 class AgentService:
@@ -81,6 +110,7 @@ class AgentService:
             event = self._tool_finished_event(call, result)
             self._persist_tool_result(session_id, event)
             yield event
+            yield self.loop._observation_event(call, result)
             session = self.sessions.get(session_id)
             messages = [Message(role="system", content=self.system_prompt), *session.messages]
             yield from self._run_loop(session_id, messages)

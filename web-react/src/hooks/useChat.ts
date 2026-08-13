@@ -23,6 +23,7 @@ export function useChat() {
     try {
       await streamChat(sessionId, message, controller.signal, (event: AgentEvent) => {
         if (event.type === 'text_delta') { fullText += event.data.content; setStreamingContent(fullText); }
+        if (event.type === 'react_step' && event.data.phase === 'action') showToast(`正在执行：${event.data.name ?? '工具'}`);
         if (event.type === 'tool_started') showToast(`正在调用工具：${event.data.name}`);
         if (event.type === 'tool_approval_requested') setPendingApproval(event.data);
         if (event.type === 'error') throw new Error(event.data.message);
@@ -42,6 +43,7 @@ export function useChat() {
     try {
       await streamToolApproval(currentSessionId, callId, approved, controller.signal, (event: AgentEvent) => {
         if (event.type === 'text_delta') { fullText += event.data.content; setStreamingContent(fullText); }
+        if (event.type === 'react_step' && event.data.phase === 'action') showToast(`正在执行：${event.data.name ?? '工具'}`);
         if (event.type === 'tool_finished') showToast(event.data.ok ? 'Tool executed' : 'Tool operation rejected');
         if (event.type === 'tool_approval_requested') setPendingApproval(event.data);
         if (event.type === 'error') throw new Error(event.data.message);

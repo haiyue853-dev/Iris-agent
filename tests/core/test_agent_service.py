@@ -42,8 +42,8 @@ def test_service_resumes_after_approved_tool_call(tmp_path):
     session = repo.create("test")
     service = AgentService(AgentLoop(ApprovalProvider(), registry), repo, "system")
 
-    assert [event.type for event in service.run(session.id, "go")] == ["tool_started", "tool_approval_requested"]
-    assert [event.type for event in service.resolve_tool_approval(session.id, "c1", True)] == ["tool_finished", "text_delta", "message_completed"]
+    assert [event.type for event in service.run(session.id, "go")] == ["react_step", "tool_started", "tool_approval_requested"]
+    assert [event.type for event in service.resolve_tool_approval(session.id, "c1", True)] == ["tool_finished", "react_step", "react_step", "text_delta", "message_completed"]
     assert [message.role for message in repo.get(session.id).messages] == ["user", "assistant", "tool", "assistant"]
 
 
