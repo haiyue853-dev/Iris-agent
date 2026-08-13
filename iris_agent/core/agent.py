@@ -1,4 +1,5 @@
 import json
+import threading
 from collections.abc import Iterator
 
 from iris_agent.core.errors import ToolApprovalNotFoundError
@@ -61,6 +62,7 @@ class AgentService:
         self.sessions = sessions
         self.system_prompt = system_prompt
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
+        self._approval_lock = threading.RLock()
 
     def run(self, session_id: str, user_message: str) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
@@ -71,7 +73,8 @@ class AgentService:
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
-            call = self._pending_approvals.pop((session_id, call_id), None)
+            with self._approval_lock:
+                call = self._pending_approvals.pop((session_id, call_id), None)
             if call is None:
                 raise ToolApprovalNotFoundError("待确认的工具调用不存在或已处理")
             if approved:
@@ -85,6 +88,11 @@ class AgentService:
             messages = [Message(role="system", content=self.system_prompt), *session.messages]
             yield from self._run_loop(session_id, messages)
 
+    def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
+        """Discard a pending approval without invoking its tool."""
+        with self._approval_lock:
+            return self._pending_approvals.pop((session_id, call_id), None) is not None
+
     def _run_loop(self, session_id: str, messages: list[Message]) -> Iterator[AgentEvent]:
         for event in self.loop.run(messages):
             if event.type == "tool_started":
@@ -92,7 +100,8 @@ class AgentService:
                 self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
             elif event.type == "tool_approval_requested":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
-                self._pending_approvals[(session_id, call.id)] = call
+                with self._approval_lock:
+                    self._pending_approvals[(session_id, call.id)] = call
             elif event.type == "tool_finished":
                 self._persist_tool_result(session_id, event)
             elif event.type == "message_completed":

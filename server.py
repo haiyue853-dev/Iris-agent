@@ -16,6 +16,7 @@ app = create_app(
     hot_radar=application.hot_radar,
     automation=application.automation,
     notifications=application.notifications,
+    task_center=application.task_center,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
 )
