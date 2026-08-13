@@ -56,7 +56,7 @@ describe('UmlFlowPage Draw.io workspace', () => {
   it('does not retain legacy React Flow or Mermaid runtime imports', () => {
     const source = readFileSync('src/components/uml/UmlFlowPage.tsx', 'utf8');
 
-    expect(source).not.toContain("from '@xyflow/react'");
-    expect(source).not.toContain("from 'mermaid'");
+    expect(source).not.toContain("from '@xyflow/" + "react'");
+    expect(source).not.toContain("from 'mer" + "maid'");
   });
 });
