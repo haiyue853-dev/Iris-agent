@@ -62,6 +62,20 @@ def test_malformed_arguments_do_not_execute_tool():
     assert next(event for event in events if event.type == "tool_finished").data["error_code"] == "invalid_tool_arguments"
 
 
+def test_loop_feeds_a_failed_observation_back_to_the_next_reasoning_round():
+    provider = FakeProvider(
+        ProviderResponse(tool_calls=[ToolCall("call-1", "missing", {})]),
+        ProviderResponse(content="The requested tool is unavailable, so I cannot complete it."),
+    )
+
+    events = list(AgentLoop(provider, ToolRegistry(), max_tool_rounds=2).run([]))
+
+    observation = next(event for event in events if event.type == "react_step" and event.data["phase"] == "observation")
+    assert observation.data["ok"] is False
+    assert observation.data["error_code"] == "unknown_tool"
+    assert provider.responses == []
+
+
 def test_loop_requests_approval_before_executing_a_write_tool():
     calls = []
     registry = ToolRegistry()

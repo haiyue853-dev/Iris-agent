@@ -16,6 +16,7 @@ describe('App workspace navigation', () => {
       messages: [],
       isStreaming: false,
       streamingContent: '',
+      reactSteps: [],
       toast: '',
       pendingApproval: null,
       currentSessionId: '',
