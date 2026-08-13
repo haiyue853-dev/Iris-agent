@@ -91,5 +91,6 @@ def test_build_application_registers_enabled_mcp_tools(tmp_path, monkeypatch):
 def test_server_entrypoint_loads_without_document_service(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import importlib
+    from fastapi.testclient import TestClient
     server = importlib.import_module("server")
-    assert any(getattr(route, "path", None) == "/api/hot-radar/scan" for route in server.app.routes)
+    assert TestClient(server.app).post("/api/hot-radar/scan").status_code == 200
