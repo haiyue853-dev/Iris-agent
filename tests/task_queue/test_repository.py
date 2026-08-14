@@ -128,13 +128,22 @@ def test_new_job_is_queued_with_the_requested_safe_values() -> None:
     assert job.created_at
 
 
-def test_transaction_persists_no_sidecar_files(tmp_path) -> None:
+def test_transaction_keeps_lock_file_internal_and_serializes_jobs_only_to_queue_json(tmp_path) -> None:
     repository = QueueRepository(tmp_path)
+    job = QueueJob(
+        task_id="task-1",
+        session_id="session-1",
+        message="message",
+        created_at="2026-08-14T10:00:00+00:00",
+        state="queued",
+    )
 
     with repository.transaction():
-        repository.save([])
+        repository.save([job])
 
-    assert {path.name for path in tmp_path.iterdir()} == {"queue.json"}
+    assert repository.load() == [job]
+    assert json.loads((tmp_path / "queue.json").read_text(encoding="utf-8")) == {"jobs": [job.to_dict()]}
+    assert (tmp_path / "queue.lock").read_bytes() == b""
 
 
 @pytest.mark.skipif(os.name != "nt", reason="queue ledger cross-process locking targets Windows")

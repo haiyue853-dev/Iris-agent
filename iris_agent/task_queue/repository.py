@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -27,6 +27,7 @@ class QueueRepository:
     def __init__(self, root: Path):
         self.root = root
         self.path = root / "queue.json"
+        self.lock_path = root / "queue.lock"
         self.root.mkdir(parents=True, exist_ok=True)
         with self._locks_guard:
             self._lock = self._locks.setdefault(self.path.resolve(), threading.RLock())
@@ -91,36 +92,21 @@ class QueueRepository:
 
     @contextmanager
     def _cross_process_lock(self) -> Iterator[None]:
-        if os.name != "nt":
-            yield
-            return
+        # The service currently targets Windows. This empty sidecar only
+        # supplies a one-byte OS lock; queue records remain in queue.json.
+        import msvcrt
 
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
-        kernel32.CreateMutexW.restype = wintypes.HANDLE
-        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-        kernel32.WaitForSingleObject.restype = wintypes.DWORD
-        kernel32.ReleaseMutex.argtypes = (wintypes.HANDLE,)
-        kernel32.ReleaseMutex.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel32.CloseHandle.restype = wintypes.BOOL
-
-        normalized_path = os.path.normcase(str(self.path.resolve()))
-        name = "Local\\iris-agent-queue-" + hashlib.sha256(normalized_path.encode("utf-8")).hexdigest()
-        handle = kernel32.CreateMutexW(None, False, name)
-        if not handle:
-            raise QueueLedgerError("unable to create queue mutex")
-        try:
-            result = kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
-            if result not in (0, 0x80):
-                raise QueueLedgerError("unable to acquire queue mutex")
+        self.lock_path.touch(exist_ok=True)
+        with self.lock_path.open("r+b") as handle:
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.01)
             try:
                 yield
             finally:
-                if not kernel32.ReleaseMutex(handle):
-                    raise QueueLedgerError("unable to release queue mutex")
-        finally:
-            kernel32.CloseHandle(handle)
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
