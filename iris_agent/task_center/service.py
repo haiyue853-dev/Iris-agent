@@ -152,6 +152,8 @@ class TaskCenterService:
             for index, task in enumerate(tasks):
                 if task.id != task_id:
                     continue
+                if task.status == "queued":
+                    raise ValueError("任务正在队列中，不能继续执行")
                 if task.status in TERMINAL_STATUSES:
                     return task
                 updated = replace(task, updated_at=_now())

@@ -99,6 +99,20 @@ def test_queued_task_rejects_stop_request_without_leaving_queue(tmp_path):
     assert [event.type for event in queued.events] == ["request_queued"]
 
 
+def test_queued_task_rejects_touch_without_updating_timestamp_or_events(tmp_path, monkeypatch):
+    timestamps = iter(["created", "touched"])
+    monkeypatch.setattr(task_service, "_now", lambda: next(timestamps))
+    service = _build_service(tmp_path)
+    task = service.create_queued_task("session", "wait")
+
+    with pytest.raises(ValueError, match="队列"):
+        service.touch(task.id)
+
+    queued = service.get_task(task.id)
+    assert queued.updated_at == "created"
+    assert [event.type for event in queued.events] == ["request_queued"]
+
+
 def test_failure_and_interruption_are_terminal_and_keep_only_safe_labels(tmp_path):
     service = _build_service(tmp_path)
 
