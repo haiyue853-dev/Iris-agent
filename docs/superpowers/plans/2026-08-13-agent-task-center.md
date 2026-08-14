@@ -23,30 +23,30 @@
 
 ## 任务 1：任务账本与状态服务
 
-- [ ] 编写失败测试，覆盖创建、工具/审批/完成/失败/中断、100 项裁剪、重启恢复和账本不含参数/结果/异常/回复正文。
-- [ ] 运行 `pytest tests/task_center/test_service.py -v`，确认失败。
-- [ ] 实现模型、原子 JSON 仓储和服务。
-- [ ] 运行同一测试文件，确认通过。
-- [ ] 提交 `feat: add task center ledger`。
+- [x] 编写失败测试，覆盖创建、工具/审批/完成/失败/中断、100 项裁剪、重启恢复和账本不含参数/结果/异常/回复正文。
+- [x] 运行 `pytest tests/task_center/test_service.py -v`，确认失败。
+- [x] 实现模型、原子 JSON 仓储和服务。
+- [x] 运行同一测试文件，确认通过。
+- [x] 提交 `feat: add task center ledger`。
 
 ## 任务 2：聊天流、审批流和只读 API
 
-- [ ] 编写失败 API 测试，覆盖 `task_started` 首事件、事件旁路、审批关联、列表过滤/上限、详情和稳定 404。
-- [ ] 运行 `pytest tests/api/test_tasks_api.py -v`，确认失败。
-- [ ] 注入任务中心，注册路由，给生成器添加 `GeneratorExit`/异常状态并映射安全事件。
-- [ ] 运行 API 测试及 `pytest tests/api/test_app.py -v`，确认通过。
-- [ ] 提交 `feat: expose task center APIs`。
+- [x] 编写失败 API 测试，覆盖 `task_started` 首事件、事件旁路、审批关联、列表过滤/上限、详情和稳定 404。
+- [x] 运行 `pytest tests/api/test_tasks_api.py -v`，确认失败。
+- [x] 注入任务中心，注册路由，给生成器添加 `GeneratorExit`/异常状态并映射安全事件。
+- [x] 运行 API 测试及 `pytest tests/api/test_app.py -v`，确认通过。
+- [x] 提交 `feat: expose task center APIs`。
 
 ## 任务 3：任务中心前端与聊天跳转
 
-- [ ] 编写失败 Vitest 测试，覆盖侧栏入口、列表和时间线、加载失败重试、`task_started` 后的查看任务跳转，且不渲染未知敏感字段。
-- [ ] 运行 `npm test -- --runInBand`（或对应任务测试），确认失败。
-- [ ] 实现任务 API、类型、任务页面、导航、聊天状态和跳转入口。
-- [ ] 运行前端测试与 `npm run build`，确认通过。
-- [ ] 提交 `feat: add task center workspace`。
+- [x] 编写失败 Vitest 测试，覆盖侧栏入口、列表和时间线、加载失败重试、`task_started` 后的查看任务跳转，且不渲染未知敏感字段。
+- [x] 运行 `npm test -- --runInBand`（或对应任务测试），确认失败。
+- [x] 实现任务 API、类型、任务页面、导航、聊天状态和跳转入口。
+- [x] 运行前端测试与 `npm run build`，确认通过。
+- [x] 提交 `feat: add task center workspace`。
 
 ## 任务 4：全量验证
 
-- [ ] 运行 `pytest -q`。
-- [ ] 运行 `npm test` 与 `npm run build`。
-- [ ] 检查 `git status --short`，仅保留任务中心相关变更。
+- [x] 运行 `pytest -q`。
+- [x] 运行 `npm test` 与 `npm run build`。
+- [x] 检查 `git status --short`，仅保留任务中心相关变更。
