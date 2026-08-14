@@ -1,7 +1,7 @@
 const API_BASE = 'http://localhost:8000';
 
 export type TaskEvent = { at: number; type: string; details: Record<string, unknown> };
-export type TaskStep = { id: string; title: string; instruction: string; status: string; approval_call_id: string | null; error: string | null; events: TaskEvent[] };
+export type TaskStep = { id: string; title: string; instruction: string; status: string; approval_call_id: string | null; result: string; error: string | null; events: TaskEvent[] };
 export type TaskPlan = { id: string; session_id: string; goal: string; status: string; steps: TaskStep[]; updated_at: number };
 export type Subagent = { id: string; parent_session_id: string; title: string; status: string; allowed_tools: string[]; result: string; error: string | null; updated_at: number };
 
