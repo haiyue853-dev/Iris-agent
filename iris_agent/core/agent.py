@@ -107,11 +107,13 @@ class AgentService:
         self.system_prompt = system_prompt
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
 
-    def run(self, session_id: str, user_message: str) -> Iterator[AgentEvent]:
+    def run(self, session_id: str, user_message: str, skill_instructions: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             self.sessions.append(session_id, Message(role="user", content=user_message))
             session = self.sessions.get(session_id)
             messages = [Message(role="system", content=self.system_prompt), *session.messages]
+            if skill_instructions:
+                messages.append(Message(role="user", content=f"Use this active Skill for the current request:\n{skill_instructions}"))
             yield from self._run_loop(session_id, messages)
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:

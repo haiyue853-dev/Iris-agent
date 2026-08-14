@@ -20,6 +20,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [welcomeInput, setWelcomeInput] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [activeChatSkill, setActiveChatSkill] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<AppView>(() => {
     const saved = localStorage.getItem('iris_active_view');
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
@@ -75,18 +76,23 @@ function App() {
     const msg = welcomeInput.trim();
     if (!msg) return;
     setWelcomeInput('');
-    handleSendWithSession(msg);
+    const skillId = activeChatSkill || undefined;
+    setActiveChatSkill(null);
+    handleSendWithSession(msg, skillId);
   };
 
   const handleChatSend = () => {
     const msg = chatInput.trim();
     if (!msg) return;
     setChatInput('');
-    handleSendWithSession(msg);
+    const skillId = activeChatSkill || undefined;
+    setActiveChatSkill(null);
+    handleSendWithSession(msg, skillId);
   };
 
   const handleNewChatFromSidebar = () => {
     setActiveView('chat');
+    setActiveChatSkill(null);
     handleNewChat();
   };
 
@@ -115,7 +121,7 @@ function App() {
         {activeView === 'uml' ? null : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (
-          <SkillsPage onNavigate={setActiveView} />
+          <SkillsPage onNavigate={setActiveView} onActivateChatSkill={setActiveChatSkill} />
         ) : activeView === 'mcp' ? (
           <McpPage />
         ) : activeView === 'interview-knowledge' ? (

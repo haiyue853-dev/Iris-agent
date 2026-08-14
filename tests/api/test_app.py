@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from iris_agent.api.app import create_app
 from iris_agent.core.agent import AgentLoop, AgentService
@@ -7,6 +8,7 @@ from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.tools.base import Tool
 from iris_agent.tools.registry import ToolRegistry
 from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
+from iris_agent.skill_center.service import SkillCenterService
 
 
 class EchoProvider:
@@ -53,6 +55,30 @@ def test_lists_interview_knowledge(tmp_path):
     client = TestClient(create_app(service, sessions, interview_knowledge=knowledge))
 
     assert client.get("/api/interview-knowledge?topic=Python").json()["items"][0]["question"] == "什么是 GIL？"
+
+
+def test_chat_uses_selected_skill_as_transient_task_context(tmp_path):
+    class RecordingProvider:
+        def __init__(self):
+            self.messages = []
+
+        def complete(self, messages, tools):
+            self.messages = messages
+            return ProviderResponse(content="done")
+
+    sessions = JsonSessionRepository(tmp_path / "sessions")
+    provider = RecordingProvider()
+    service = AgentService(AgentLoop(provider, ToolRegistry()), sessions, "system")
+    bundled = Path(__file__).resolve().parents[2] / "iris_agent" / "skill_center" / "bundled"
+    skills = SkillCenterService(bundled, tmp_path / "skills" / "settings.json")
+    client = TestClient(create_app(service, sessions, skills=skills))
+    session_id = client.post("/api/sessions", json={"name": "test"}).json()["id"]
+
+    response = client.post("/api/chat/stream", json={"session_id": session_id, "message": "collect Python questions", "skill_id": "interview-collection"})
+
+    assert response.status_code == 200
+    assert "search_interview_sources" in provider.messages[-1].content
+    assert [message.content for message in sessions.get(session_id).messages] == ["collect Python questions", "done"]
 
 
 def test_approved_tool_call_resumes_streaming_chat(tmp_path):

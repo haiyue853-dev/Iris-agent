@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from iris_agent.skill_center.catalog import SkillCatalog
-from iris_agent.skill_center.errors import SkillNotFoundError
+from iris_agent.skill_center.errors import SkillDisabledError, SkillNotFoundError
 from iris_agent.skill_center.repository import SkillStateRepository
 from iris_agent.skill_center.service import SkillCenterService
 
@@ -39,3 +39,12 @@ def test_unknown_id_raises_stable_error(tmp_path):
         service.set_enabled("no-such-skill", True)
     with pytest.raises(SkillNotFoundError):
         service.get_skill("../../etc/passwd")
+
+
+def test_loads_instructions_only_for_enabled_skill(tmp_path):
+    service = _build_service(tmp_path)
+
+    assert "search_interview_sources" in service.instructions_for("interview-collection")
+    service.set_enabled("interview-collection", False)
+    with pytest.raises(SkillDisabledError):
+        service.instructions_for("interview-collection")

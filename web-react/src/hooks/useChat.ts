@@ -17,7 +17,7 @@ export function useChat() {
   useEffect(() => { refreshSessions().catch(() => undefined); }, [refreshSessions]);
   const showToast = useCallback((text: string) => { setToast(text); window.setTimeout(() => setToast(''), 1800); }, []);
 
-  const run = useCallback(async (sessionId: string, message: string) => {
+  const run = useCallback(async (sessionId: string, message: string, skillId?: string) => {
     const controller = new AbortController();
     abortRef.current = controller; setIsStreaming(true); setStreamingContent(''); setReactSteps([]);
     let fullText = '';
@@ -30,7 +30,7 @@ export function useChat() {
         if (event.type === 'tool_started') showToast(`正在调用工具：${event.data.name}`);
         if (event.type === 'tool_approval_requested') { awaitingApproval = true; setPendingApproval(event.data); }
         if (event.type === 'error') throw new Error(event.data.message);
-      });
+      }, skillId);
       if (fullText) setMessages(prev => [...prev, { role: 'assistant', content: fullText }]);
       await refreshSessions();
     } catch (error) {
@@ -60,12 +60,12 @@ export function useChat() {
     } finally { setIsStreaming(false); setStreamingContent(''); setReactSteps([]); abortRef.current = null; }
   }, [currentSessionId, isStreaming, pendingApproval, refreshSessions, showToast]);
 
-  const handleSendWithSession = useCallback(async (message: string) => {
+  const handleSendWithSession = useCallback(async (message: string, skillId?: string) => {
     if (!message.trim() || isStreaming || pendingApproval) return;
     let id = currentSessionId;
     if (!id) { const session = await createSession(message.slice(0, 30)); id = session.id; setCurrentSessionId(id); }
     setMessages(prev => [...prev, { role: 'user', content: message }]);
-    await run(id, message);
+    await run(id, message, skillId);
   }, [currentSessionId, isStreaming, pendingApproval, run]);
 
   const handleSwitchSession = useCallback(async (id: string) => { const data = await getSession(id); setCurrentSessionId(id); setMessages(data.messages); }, []);

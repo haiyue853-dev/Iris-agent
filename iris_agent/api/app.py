@@ -2,7 +2,7 @@ import json
 import logging
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, Response, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +28,7 @@ from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
 from iris_agent.core.errors import IrisError, SessionNotFoundError
 from iris_agent.skill_center.service import SkillCenterService
+from iris_agent.skill_center.errors import SkillDisabledError, SkillNotFoundError
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
 from iris_agent.hot_radar.service import HotRadarService
@@ -224,10 +225,20 @@ def create_app(
     @app.post("/api/chat/stream")
     def chat_stream(request: ChatRequest):
         sessions.get(request.session_id)
+        skill_instructions = None
+        if request.skill_id:
+            if skills is None:
+                raise HTTPException(status_code=422, detail={"code": "skill_unavailable", "message": "Skills are unavailable"})
+            try:
+                skill_instructions = skills.instructions_for(request.skill_id)
+            except SkillNotFoundError as exc:
+                raise HTTPException(status_code=404, detail={"code": "skill_not_found", "message": "Skill was not found"}) from exc
+            except SkillDisabledError as exc:
+                raise HTTPException(status_code=422, detail={"code": "skill_disabled", "message": "Skill is disabled"}) from exc
 
         def generate():
             try:
-                for event in service.run(request.session_id, request.message):
+                for event in service.run(request.session_id, request.message, skill_instructions):
                     yield json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
             except IrisError as exc:
                 yield json.dumps({"type": "error", "data": {"code": exc.code, "message": exc.safe_message}}, ensure_ascii=False) + "\n"

@@ -5,6 +5,7 @@ import SkillCard from './SkillCard';
 
 interface SkillsPageProps {
   onNavigate: (view: AppView) => void;
+  onActivateChatSkill?: (skillId: string) => void;
 }
 
 const ENTRY_VIEWS = new Set<AppView>(['chat', 'aihot', 'uml', 'reports', 'radar', 'automation']);
@@ -13,11 +14,14 @@ function isEntryView(view: string): view is AppView {
   return ENTRY_VIEWS.has(view as AppView);
 }
 
-export default function SkillsPage({ onNavigate }: SkillsPageProps) {
+export default function SkillsPage({ onNavigate, onActivateChatSkill }: SkillsPageProps) {
   const { skills, loading, error, reload, toggleEnabled, togglingIds, processingIds } = useSkills();
 
   const handleOpen = (skill: SkillInfo) => {
-    if (skill.enabled && isEntryView(skill.entry_view)) {
+    if (skill.enabled && skill.entry_view === 'chat') {
+      onActivateChatSkill?.(skill.id);
+      onNavigate('chat');
+    } else if (skill.enabled && isEntryView(skill.entry_view)) {
       onNavigate(skill.entry_view);
     }
   };

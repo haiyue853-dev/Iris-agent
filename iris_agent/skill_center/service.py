@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from iris_agent.skill_center.catalog import SkillCatalog
-from iris_agent.skill_center.errors import SkillNotFoundError
+from iris_agent.skill_center.errors import SkillDisabledError, SkillNotFoundError
 from iris_agent.skill_center.models import SkillDefinition, SkillInfo
 from iris_agent.skill_center.repository import SkillStateRepository, now_iso
 
@@ -42,6 +42,19 @@ class SkillCenterService:
         states[definition.id] = {"enabled": bool(enabled), "updated_at": now_iso()}
         self._repository.save(states)
         return self._to_info(definition, states)
+
+    def instructions_for(self, skill_id: str) -> str:
+        """Load enabled Skill instructions for one agent task, not persistent context."""
+        definition = self._lookup(skill_id)
+        states = self._repository.load()
+        if not self._to_info(definition, states).enabled:
+            raise SkillDisabledError(f"Skill is disabled: {skill_id}")
+        skill_file = self.catalog_root / definition.id / "SKILL.md"
+        try:
+            _, body = skill_file.read_text(encoding="utf-8").split("\n---", 1)
+        except (OSError, ValueError) as exc:
+            raise SkillNotFoundError(f"Skill instructions are unavailable: {skill_id}") from exc
+        return body.strip()
 
     def _lookup(self, skill_id: str) -> SkillDefinition:
         # 严格 ID 校验：只允许安全字符，任何路径片段直接视为未找到
