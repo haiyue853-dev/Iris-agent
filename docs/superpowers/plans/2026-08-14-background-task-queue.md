@@ -111,7 +111,7 @@ class QueueRepository:
     def save(self, jobs: list[QueueJob]) -> None: ...
 ```
 
-复用 `TaskLedgerRepository` 的临时文件替换和 Windows 锁模式，固定写入 `queue.json`。只允许上述 5 个字段；拒绝未知状态及非字符串消息。
+复用 `TaskLedgerRepository` 的临时文件替换和 Windows 锁模式，账本数据固定写入 `queue.json`。允许同目录的内部 `queue.lock` 仅用于跨进程一字节文件锁；它不保存业务数据且不属于公开账本。只允许上述 5 个字段；拒绝未知状态及非字符串消息。
 
 - [ ] **步骤 4：验证并提交**
 
