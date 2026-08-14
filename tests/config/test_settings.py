@@ -101,37 +101,6 @@ def test_skill_settings_load_from_yaml(tmp_path):
     assert skills.settings_file == Path("custom/skills/state.json")
 
 
-def test_document_settings_defaults(tmp_path):
-    settings = load_settings(tmp_path / "missing.yaml")
-
-    assert settings.documents.directory == Path("data/documents")
-    assert settings.documents.max_file_bytes == 10_000_000
-    assert settings.documents.max_total_bytes == 50_000_000
-    assert settings.documents.max_count == 50
-    assert settings.documents.max_text_chars == 50_000
-
-
-def test_document_settings_load_from_yaml(tmp_path):
-    path = tmp_path / "agent.yaml"
-    path.write_text(
-        "documents:\n"
-        "  directory: custom/docs\n"
-        "  max_file_bytes: 123\n"
-        "  max_total_bytes: 456\n"
-        "  max_count: 5\n"
-        "  max_text_chars: 789\n",
-        encoding="utf-8",
-    )
-
-    docs = load_settings(path).documents
-
-    assert docs.directory == Path("custom/docs")
-    assert docs.max_file_bytes == 123
-    assert docs.max_total_bytes == 456
-    assert docs.max_count == 5
-    assert docs.max_text_chars == 789
-
-
 def test_hot_radar_settings_defaults(tmp_path):
     settings = load_settings(tmp_path / "missing.yaml")
 
@@ -155,3 +124,10 @@ def test_hot_radar_settings_load_from_yaml(tmp_path):
     assert radar.directory == Path("custom/radar")
     assert radar.poll_interval_seconds == 5
     assert radar.timezone == "UTC"
+
+
+def test_automation_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("automation:\n  directory: custom/automation\n", encoding="utf-8")
+
+    assert load_settings(path).automation.directory == Path("custom/automation")

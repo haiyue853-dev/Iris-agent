@@ -56,19 +56,20 @@ class SkillSettings:
 
 
 @dataclass(slots=True)
-class DocumentSettings:
-    directory: Path = Path("data/documents")
-    max_file_bytes: int = 10_000_000
-    max_total_bytes: int = 50_000_000
-    max_count: int = 50
-    max_text_chars: int = 50_000
-
-
-@dataclass(slots=True)
 class HotRadarSettings:
     directory: Path = Path("data/hot_radar")
     poll_interval_seconds: int = 60
     timezone: str = "Asia/Shanghai"
+
+
+@dataclass(slots=True)
+class AutomationSettings:
+    directory: Path = Path("data/automation")
+
+
+@dataclass(slots=True)
+class NotificationSettings:
+    directory: Path = Path("data/notifications")
 
 
 @dataclass(slots=True)
@@ -89,8 +90,9 @@ class Settings:
     reports: ReportSettings = field(default_factory=ReportSettings)
     tools: ToolSettings = field(default_factory=ToolSettings)
     skills: SkillSettings = field(default_factory=SkillSettings)
-    documents: DocumentSettings = field(default_factory=DocumentSettings)
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
+    automation: AutomationSettings = field(default_factory=AutomationSettings)
+    notifications: NotificationSettings = field(default_factory=NotificationSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
     interview_knowledge: InterviewKnowledgeSettings = field(default_factory=InterviewKnowledgeSettings)
 
@@ -116,8 +118,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     reports = _section(raw, "reports")
     tools = _section(raw, "tools")
     skills = _section(raw, "skills")
-    documents = _section(raw, "documents")
     hot_radar = _section(raw, "hot_radar")
+    automation = _section(raw, "automation")
+    notifications = _section(raw, "notifications")
     mcp = _section(raw, "mcp")
     interview_knowledge = _section(raw, "interview_knowledge")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
@@ -147,17 +150,16 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             directory=Path(skills.get("directory", "data/skills")),
             settings_file=Path(skills.get("settings_file", str(Path(str(skills.get("directory", "data/skills"))) / "settings.json"))),
         ),
-        documents=DocumentSettings(
-            directory=Path(documents.get("directory", "data/documents")),
-            max_file_bytes=int(documents.get("max_file_bytes", 10_000_000)),
-            max_total_bytes=int(documents.get("max_total_bytes", 50_000_000)),
-            max_count=int(documents.get("max_count", 50)),
-            max_text_chars=int(documents.get("max_text_chars", 50_000)),
-        ),
         hot_radar=HotRadarSettings(
             directory=Path(hot_radar.get("directory", "data/hot_radar")),
             poll_interval_seconds=int(hot_radar.get("poll_interval_seconds", 60)),
             timezone=str(hot_radar.get("timezone", "Asia/Shanghai")),
+        ),
+        automation=AutomationSettings(
+            directory=Path(automation.get("directory", "data/automation")),
+        ),
+        notifications=NotificationSettings(
+            directory=Path(notifications.get("directory", "data/notifications")),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
         interview_knowledge=InterviewKnowledgeSettings(path=Path(interview_knowledge.get("path", "data/interview_knowledge.json"))),
@@ -175,11 +177,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     ):
         raise ConfigurationError("日报输入限制和版本上限必须大于 0")
     if (
-        settings.documents.max_file_bytes < 1
-        or settings.documents.max_total_bytes < 1
-        or settings.documents.max_count < 1
-        or settings.documents.max_text_chars < 1
-        or settings.hot_radar.poll_interval_seconds < 1
+        settings.hot_radar.poll_interval_seconds < 1
     ):
-        raise ConfigurationError("文档配额与热点雷达轮询间隔必须大于 0")
+        raise ConfigurationError("热点雷达轮询间隔必须大于 0")
     return settings

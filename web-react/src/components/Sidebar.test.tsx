@@ -69,4 +69,13 @@ describe('Sidebar navigation', () => {
 
     expect(onViewChange).toHaveBeenCalledWith('skills');
   });
+
+  it('replaces document workbench with automation tasks', async () => {
+    const onViewChange = vi.fn();
+    render(<Sidebar collapsed={false} onToggle={vi.fn()} onNewChat={vi.fn()} currentSessionId="" sessions={[]} onSessionSwitch={vi.fn()} onSessionDelete={vi.fn()} activeView="chat" onViewChange={onViewChange} />);
+
+    expect(screen.queryByText('文档工作台')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '自动化任务' }));
+    expect(onViewChange).toHaveBeenCalledWith('automation');
+  });
 });

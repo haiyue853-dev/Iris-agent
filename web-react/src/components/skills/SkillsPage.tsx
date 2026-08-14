@@ -7,7 +7,7 @@ interface SkillsPageProps {
   onNavigate: (view: AppView) => void;
 }
 
-const ENTRY_VIEWS = new Set<AppView>(['chat', 'aihot', 'uml', 'reports', 'documents', 'radar']);
+const ENTRY_VIEWS = new Set<AppView>(['chat', 'aihot', 'uml', 'reports', 'radar', 'automation']);
 
 function isEntryView(view: string): view is AppView {
   return ENTRY_VIEWS.has(view as AppView);

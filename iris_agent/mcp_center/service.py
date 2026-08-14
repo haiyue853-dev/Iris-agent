@@ -157,8 +157,8 @@ class McpCenterService:
         started = time.perf_counter()
         try:
             tools = self._discover(server)
-        except ValueError:
-            self._record_event(server.id, "discovery", False, started)
+        except ValueError as exc:
+            self._record_event(server.id, "discovery", False, started, failure_kind=self._failure_kind(exc))
             raise
         self._tools[server.id] = tools
         self._save_tools()
@@ -174,7 +174,20 @@ class McpCenterService:
             self._close_session(server.id)
             raise ValueError("unable to discover MCP tools") from exc
 
-    def _record_event(self, server_id: str, kind: str, ok: bool, started: float, tool_name: str | None = None) -> None:
+    @staticmethod
+    def _failure_kind(error: ValueError) -> str:
+        current: BaseException | None = error
+        while current is not None:
+            if isinstance(current, FileNotFoundError):
+                return "startup_failed"
+            if isinstance(current, TimeoutError):
+                return "timeout"
+            if str(current) == "MCP tool returned an error":
+                return "tool_error"
+            current = current.__cause__
+        return "protocol_error"
+
+    def _record_event(self, server_id: str, kind: str, ok: bool, started: float, tool_name: str | None = None, failure_kind: str | None = None) -> None:
         event: dict[str, object] = {
             "server_id": server_id,
             "kind": kind,
@@ -184,6 +197,8 @@ class McpCenterService:
         }
         if tool_name is not None:
             event["tool_name"] = tool_name
+        if failure_kind is not None:
+            event["failure_kind"] = failure_kind
         self._events.append(event)
         self._save_events()
 
@@ -219,8 +234,8 @@ class McpCenterService:
             result = self._call(server, name, arguments)
             if isinstance(result, dict) and result.get("isError") is True:
                 raise ValueError("MCP tool returned an error")
-        except ValueError:
-            self._record_event(server.id, "tool_call", False, started, name)
+        except ValueError as exc:
+            self._record_event(server.id, "tool_call", False, started, name, self._failure_kind(exc))
             raise
         self._record_event(server.id, "tool_call", True, started, name)
         return result
@@ -350,7 +365,7 @@ class McpCenterService:
             if not isinstance(events, list):
                 return deque(maxlen=50)
             safe = [
-                {key: item[key] for key in ("server_id", "kind", "ok", "duration_ms", "created_at", "tool_name") if key in item}
+                {key: item[key] for key in ("server_id", "kind", "ok", "duration_ms", "created_at", "tool_name", "failure_kind") if key in item}
                 for item in events
                 if isinstance(item, dict)
                 and isinstance(item.get("server_id"), str)
@@ -359,6 +374,7 @@ class McpCenterService:
                 and isinstance(item.get("duration_ms"), (int, float))
                 and isinstance(item.get("created_at"), (int, float))
                 and ("tool_name" not in item or isinstance(item["tool_name"], str))
+                and ("failure_kind" not in item or item["failure_kind"] in {"startup_failed", "timeout", "protocol_error", "tool_error", "unknown"})
             ]
             return deque(safe[-50:], maxlen=50)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):

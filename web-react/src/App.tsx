@@ -7,14 +7,14 @@ import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
-import DocumentWorkbenchPage from './components/documents/DocumentWorkbenchPage';
 import InterviewKnowledgePage from './components/interview/InterviewKnowledgePage';
+import AutomationPage from './components/automation/AutomationPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'documents' | 'radar' | 'mcp' | 'interview-knowledge';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'interview-knowledge';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'documents', 'radar', 'mcp', 'interview-knowledge'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'interview-knowledge'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -106,7 +106,7 @@ function App() {
         onViewChange={setActiveView}
       />
 
-      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'documents' ? '文档工作台' : undefined}>
+      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'automation' ? '自动化任务' : undefined}>
         {umlVisited && (
           <div hidden={activeView !== 'uml'}>
             <UmlFlowPage />
@@ -118,15 +118,10 @@ function App() {
           <SkillsPage onNavigate={setActiveView} />
         ) : activeView === 'mcp' ? (
           <McpPage />
-        ) : activeView === 'documents' ? (
-          <DocumentWorkbenchPage />
         ) : activeView === 'interview-knowledge' ? (
           <InterviewKnowledgePage />
-        ) : activeView === 'radar' ? (
-          <div className="view-placeholder">
-            <h2>热点雷达</h2>
-            <p>按关键词订阅热点并生成每日摘要，即将上线。</p>
-          </div>
+        ) : activeView === 'automation' || activeView === 'radar' ? (
+          <AutomationPage />
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
         ) : !hasMessages ? (

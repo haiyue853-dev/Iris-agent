@@ -12,7 +12,7 @@ from iris_agent.skill_center.models import SkillDefinition
 _ALLOWED_FIELDS = {"id", "name", "description", "icon", "category", "entry_view", "version"}
 _REQUIRED_FIELDS = {"id", "name", "description", "icon", "category", "entry_view", "version"}
 # 允许跳转的视图（与前端视图保持一致）
-_ALLOWED_ENTRY_VIEWS = {"chat", "aihot", "uml", "reports", "documents", "radar"}
+_ALLOWED_ENTRY_VIEWS = {"chat", "aihot", "uml", "reports", "radar", "automation"}
 _ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 

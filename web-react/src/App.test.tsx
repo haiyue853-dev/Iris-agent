@@ -57,16 +57,16 @@ describe('App workspace navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens the document workbench from the left sidebar', async () => {
+  it('opens automation tasks from the left sidebar', async () => {
     const user = userEvent.setup();
 
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: '文档工作台' }));
+    await user.click(screen.getByRole('button', { name: '自动化任务' }));
 
-    expect(screen.getByRole('main', { name: '文档工作台' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '文档工作台' })).toBeInTheDocument();
-    expect(localStorage.getItem('iris_active_view')).toBe('documents');
+    expect(screen.getByRole('main', { name: '自动化任务' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '自动化任务' })).toBeInTheDocument();
+    expect(localStorage.getItem('iris_active_view')).toBe('automation');
   });
 
   it('restores the Skills center selected in local storage', async () => {

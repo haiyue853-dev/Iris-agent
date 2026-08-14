@@ -26,16 +26,6 @@ const SKILLS = [
     enabled: true,
   },
   {
-    id: 'document-workbench',
-    name: '文档工作台',
-    description: '上传资料',
-    icon: 'file-text',
-    category: 'productivity',
-    entry_view: 'documents',
-    version: 1,
-    enabled: false,
-  },
-  {
     id: 'hot-radar',
     name: '热点雷达',
     description: '热点订阅',
@@ -43,7 +33,7 @@ const SKILLS = [
     category: 'news',
     entry_view: 'radar',
     version: 1,
-    enabled: true,
+    enabled: false,
   },
 ];
 
@@ -91,7 +81,6 @@ describe('SkillsPage behavior', () => {
   it.each([
     ['AI 日报', 'reports'],
     ['UML 流程图', 'uml'],
-    ['文档工作台', 'documents'],
     ['热点雷达', 'radar'],
   ])('opens %s from its accessible action', async (name, view) => {
     const enabledSkills = SKILLS.map((skill) =>
@@ -134,17 +123,17 @@ describe('SkillsPage behavior', () => {
 
     render(<SkillsPage onNavigate={onNavigate} />);
 
-    const openButton = await screen.findByRole('button', { name: '打开 文档工作台' });
+    const openButton = await screen.findByRole('button', { name: '打开 热点雷达' });
     expect(openButton).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: '启用 文档工作台' }));
+    await user.click(screen.getByRole('button', { name: '启用 热点雷达' }));
 
     expect(onNavigate).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenLastCalledWith(
-      expect.stringContaining('/api/skills/document-workbench/enabled'),
+      expect.stringContaining('/api/skills/hot-radar/enabled'),
       expect.objectContaining({ method: 'PUT' }),
     );
-    expect(await screen.findByRole('button', { name: '打开 文档工作台' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: '打开 热点雷达' })).toBeEnabled();
   });
 
   it('disables an enabled skill without opening it and sends the disabled state to the API', async () => {

@@ -148,6 +148,7 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
   const automaticTools = tools.filter((tool) => tool.annotations?.readOnlyHint === true).map((tool) => tool.name);
   const connectedToolCount = server.enabled ? selected.length : 0;
   const isConnected = server.status === 'connected';
+  const latestFailure = events.find((event) => !event.ok);
   const [editingEnvironment, setEditingEnvironment] = useState(false);
   const [editingTimeout, setEditingTimeout] = useState(false);
   const [environmentText, setEnvironmentText] = useState('');
@@ -194,7 +195,7 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
     <div className="mcp-server-topline">
       <div className={`mcp-server-icon ${server.enabled ? 'is-online' : ''}`}>⌘</div>
       <div className="mcp-server-identity"><div><h3>{server.name}</h3><span data-testid="mcp-session-state" data-status={server.status} className={`mcp-server-state ${server.enabled ? 'is-online' : ''}`}>{isConnected ? '已连接' : server.enabled ? '已启用' : '未启用'}</span></div><code>{server.command} {server.args.join(' ')}</code>{connectedToolCount > 0 && <span className="mcp-conversation-ready">已接入主对话 · {connectedToolCount} 个工具</span>}{server.env_keys.length > 0 && <span className="mcp-environment-summary">变量：{server.env_keys.join(' · ')}</span>}</div>
-      <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={() => setEditingEnvironment((current) => !current)}>环境变量</button><button className="mcp-secondary-button" onClick={() => setEditingTimeout((current) => !current)}>超时 {server.timeout_seconds} 秒</button><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>检测连接</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
+      <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={() => setEditingEnvironment((current) => !current)}>环境变量</button><button className="mcp-secondary-button" onClick={() => setEditingTimeout((current) => !current)}>超时 {server.timeout_seconds} 秒</button><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>{latestFailure ? '重新检测连接' : '检测连接'}</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
     </div>
     {editingEnvironment && <section className="mcp-environment-editor"><div><h4>环境变量</h4><span>仅此处输入值；保存后只显示变量名，并会重新建立连接。</span></div><textarea aria-label={`环境变量 ${server.name}`} value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} placeholder="SEARCH_API_KEY=...\nREGION=cn" />{server.env_keys.length > 0 && <div className="mcp-environment-keys">{server.env_keys.map((key) => <span key={key}>{key}</span>)}</div>}{environmentError && <p role="alert">{environmentError}</p>}<button className="mcp-primary-button" onClick={() => void saveEnvironment()}>保存环境变量</button></section>}
     {editingTimeout && <section className="mcp-timeout-editor"><label>响应超时<input aria-label={`响应超时 ${server.name}`} type="number" min="1" max="120" value={timeoutText} onChange={(event) => setTimeoutText(event.target.value)} /> 秒</label><span>超时后会关闭当前连接；下次调用会自动重连。</span><button className="mcp-primary-button" onClick={() => void saveTimeout()}>保存超时</button></section>}
@@ -202,9 +203,20 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
       <section className="mcp-permissions"><div className="mcp-panel-heading"><div><h4>工具权限</h4><span>{tools.length ? `已发现 ${tools.length} 个工具` : '请先检测连接以发现工具'}</span></div>{tools.length > 0 && <div className="mcp-permission-actions"><button className="mcp-text-button" disabled={!server.enabled || automaticTools.length === 0} onClick={() => onSelectAutomaticTools(server.id, automaticTools)}>选择全部可自动执行工具</button><button className="mcp-text-button" disabled={!server.enabled} onClick={onSaveTools}>保存授权</button></div>}</div>
         {tools.length > 0 ? <div className="mcp-tool-list">{tools.map((tool) => <label key={tool.name} className="mcp-tool-row"><input type="checkbox" checked={selected.includes(tool.name)} disabled={!server.enabled} onChange={() => onToggleTool(server.id, tool.name)} /><span className="mcp-tool-name">{tool.name}<small>{tool.description || 'MCP 工具'}</small></span><span className={`mcp-tool-safety ${tool.annotations?.readOnlyHint === true ? 'is-read-only' : 'requires-approval'}`}>{tool.annotations?.readOnlyHint === true ? '自动执行' : '需确认'}</span></label>)}</div> : <p className="mcp-panel-empty">检测仅执行初始化与工具发现，不会调用工具。</p>}
       </section>
-      <section className="mcp-activity"><div className="mcp-panel-heading"><div><h4>最近活动</h4><span>不记录参数与结果</span></div></div><McpStatus events={events} /></section>
+      <section className="mcp-activity"><div className="mcp-panel-heading"><div><h4>最近活动</h4><span>不记录参数与结果</span></div></div>{latestFailure && <McpFailureGuide event={latestFailure} />}<McpStatus events={events} /></section>
     </div>
   </article>;
+}
+
+function McpFailureGuide({ event }: { event: McpEvent }) {
+  const messages = {
+    startup_failed: '无法启动 MCP 服务，请检查启动命令。',
+    timeout: 'MCP 服务响应超时，请检查服务状态后重新检测。',
+    protocol_error: 'MCP 服务返回了无效响应，请重新检测连接。',
+    tool_error: 'MCP 工具执行失败，请确认页面状态后重试。',
+    unknown: 'MCP 操作失败，请重新检测连接。',
+  };
+  return <p className="mcp-failure-guide" role="status">最近操作失败：{messages[event.failure_kind || 'unknown']}</p>;
 }
 
 function McpStatus({ events }: { events: McpEvent[] }) {

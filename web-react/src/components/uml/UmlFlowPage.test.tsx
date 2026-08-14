@@ -39,4 +39,16 @@ describe('UmlFlowPage Draw.io workspace', () => {
     });
     expect(screen.getByTestId('drawio-editor')).toHaveAttribute('data-mermaid', 'flowchart TD\n A-->B');
   });
+
+  it('reimports edited Mermaid into Draw.io on demand', async () => {
+    render(<UmlFlowPage />);
+
+    fireEvent.change(screen.getByLabelText('Mermaid 源码'), { target: { value: 'flowchart TD\n A-->B' } });
+    fireEvent.click(screen.getByRole('button', { name: '重新导入到专业画布' }));
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('drawio-editor').getAttribute('data-import-request'))).toBeGreaterThan(0);
+    });
+    expect(screen.getByTestId('drawio-editor')).toHaveAttribute('data-mermaid', 'flowchart TD\n A-->B');
+  });
 });
