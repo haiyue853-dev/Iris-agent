@@ -12,3 +12,5 @@ web-react/dist/
 diagrams/drafts/
 diagrams/exports/
 workspace/
+server.out.log
+server.err.log

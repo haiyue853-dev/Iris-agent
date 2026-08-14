@@ -157,6 +157,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             <button type="button" className={`view-item ${activeView === 'interview-knowledge' ? 'active' : ''}`} onClick={() => onViewChange('interview-knowledge')}>
               <span className="view-label">面试复习</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'task-plans' ? 'active' : ''}`} onClick={() => onViewChange('task-plans')}>
+              <span className="view-label">任务计划</span>
+            </button>
           </nav>
 
           <nav className="sidebar-menu">

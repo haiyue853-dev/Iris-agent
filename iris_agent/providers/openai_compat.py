@@ -29,7 +29,11 @@ class OpenAICompatibleProvider:
                 calls.append(ToolCall(call.id, call.function.name, arguments, argument_error))
             return ProviderResponse(message.content or "", calls)
         except Exception as exc:
-            raise ProviderError("模型服务调用失败") from exc
+            status_code = getattr(exc, "status_code", None)
+            detail = type(exc).__name__
+            if status_code is not None:
+                detail = f"{detail}, HTTP {status_code}"
+            raise ProviderError(f"模型服务调用失败（{detail}）") from exc
 
     @staticmethod
     def _encode_message(message: Message) -> dict[str, Any]:

@@ -244,6 +244,33 @@ def test_mcp_error_result_is_recorded_as_a_failed_tool_call(tmp_path: Path, monk
     assert service.events(server.id)[0]["ok"] is False
 
 
+def test_mcp_json_rpc_error_preserves_a_safe_diagnostic(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Browser", command="node", args=("server.js",), allowed_tools=("get_page",))
+    service.set_enabled(server.id, True)
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO(
+                '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"upstream unavailable"}}\n'
+            )
+
+        def poll(self): return None
+        def terminate(self): pass
+        def wait(self, timeout: float): pass
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: Process())
+
+    try:
+        service.call_tool(server.id, "get_page", {})
+    except ValueError as exc:
+        assert "upstream unavailable" in str(exc)
+    else:
+        raise AssertionError("MCP error was treated as a success")
+
+
 def test_mcp_events_survive_service_restart_without_sensitive_data(tmp_path: Path, monkeypatch) -> None:
     settings_file = tmp_path / "mcp.json"
     service = McpCenterService(settings_file)

@@ -1,6 +1,9 @@
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 
+from iris_agent.core.context import ContextEngine
+from iris_agent.memory.service import MemoryService
 from iris_agent.core.errors import ToolApprovalNotFoundError
 from iris_agent.core.models import AgentEvent, Message, ToolCall
 from iris_agent.tools.base import ToolExecutionResult
@@ -101,22 +104,22 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, context: ContextEngine | None = None, memory: MemoryService | None = None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
+        self.context = context
+        self.memory = memory
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
 
     def run(self, session_id: str, user_message: str, skill_instructions: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             self.sessions.append(session_id, Message(role="user", content=user_message))
             session = self.sessions.get(session_id)
-            messages = [Message(role="system", content=self.system_prompt), *session.messages]
-            if skill_instructions:
-                messages.append(Message(role="user", content=f"Use this active Skill for the current request:\n{skill_instructions}"))
+            messages = self._messages(session_id, session.messages, skill_instructions)
             yield from self._run_loop(session_id, messages)
 
-    def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:
+    def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool, skill_instructions: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             call = self._pending_approvals.pop((session_id, call_id), None)
             if call is None:
@@ -132,8 +135,28 @@ class AgentService:
             yield event
             yield self.loop._observation_event(call, result)
             session = self.sessions.get(session_id)
-            messages = [Message(role="system", content=self.system_prompt), *session.messages]
+            messages = self._messages(session_id, session.messages, skill_instructions)
             yield from self._run_loop(session_id, messages)
+
+    def _messages(self, session_id: str, history: list[Message], skill_instructions: str | None) -> list[Message]:
+        messages = self.context.build(session_id, self.system_prompt, history) if self.context else [Message(role="system", content=self.system_prompt), *history]
+        additions = []
+        if skill_instructions:
+            additions.append(f"Use this active Skill for the current request:\n{skill_instructions}")
+        if self.memory:
+            latest_user = next((message.content for message in reversed(history) if message.role == "user"), "")
+            memory_context = self.memory.context_for(latest_user, session_id)
+            if memory_context:
+                additions.append(memory_context)
+        if not additions:
+            return messages
+        additions_text = "\n\n".join(additions)
+        for index in range(len(messages) - 1, 0, -1):
+            if messages[index].role == "user":
+                messages[index] = replace(messages[index], content=f"{messages[index].content}\n\n{additions_text}")
+                return messages
+        messages.append(Message(role="user", content=additions_text))
+        return messages
 
     def _restore_pending_call(self, session_id: str, call_id: str) -> ToolCall | None:
         """Recover an approval request from durable conversation history after a restart."""

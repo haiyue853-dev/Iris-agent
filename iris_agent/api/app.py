@@ -6,7 +6,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, st
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from iris_agent.api.report_schemas import (
     ApplySuggestionRequest,
@@ -31,11 +31,18 @@ from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.skill_center.errors import SkillDisabledError, SkillNotFoundError
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
+from iris_agent.interview_knowledge.collector import InterviewCollectionService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
 from iris_agent.api.automation_api import register_automation_routes
 from iris_agent.api.notifications_api import register_notification_routes
 from iris_agent.notifications.service import NotificationService
+from iris_agent.task_planning.service import TaskPlanService
+from iris_agent.api.task_planning_api import register_task_planning_routes
+from iris_agent.memory.service import MemoryService
+from iris_agent.api.memory_api import register_memory_routes
+from iris_agent.subagents.service import SubagentService
+from iris_agent.api.subagents_api import register_subagent_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -61,6 +68,27 @@ logger = logging.getLogger(__name__)
 
 class ToolApprovalRequest(BaseModel):
     approved: bool
+
+
+class InterviewReviewRequest(BaseModel):
+    review_state: str
+
+
+class InterviewCollectionPreviewRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=120)
+    max_sources: int = Field(default=3, ge=1, le=5)
+    max_items_per_source: int = Field(default=10, ge=1, le=20)
+
+
+class InterviewCollectionItemRequest(BaseModel):
+    question: str = Field(min_length=4, max_length=1000)
+    answer: str = Field(min_length=20, max_length=4000)
+    source_url: str = Field(default="", max_length=2000)
+
+
+class InterviewCollectionSaveRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=120)
+    items: list[InterviewCollectionItemRequest] = Field(min_length=1, max_length=100)
 
 
 def _session_data(session: Session, include_messages: bool = True) -> dict:
@@ -144,6 +172,10 @@ def create_app(
     mcp: McpCenterService | None = None,
     mcp_tools=None,
     interview_knowledge: InterviewKnowledgeRepository | None = None,
+    interview_collector: InterviewCollectionService | None = None,
+    task_plans: TaskPlanService | None = None,
+    memory: MemoryService | None = None,
+    subagents: SubagentService | None = None,
     hot_radar: HotRadarService | None = None,
     automation: AutomationService | None = None,
     notifications: NotificationService | None = None,
@@ -170,6 +202,44 @@ def create_app(
         @app.get("/api/interview-knowledge")
         def list_interview_knowledge(topic: str | None = None):
             return {"items": interview_knowledge.list(topic)}
+
+        @app.get("/api/interview-knowledge/practice")
+        def get_interview_practice_question(topic: str | None = None):
+            item = interview_knowledge.next_review(topic)
+            return {"item": item}
+
+        @app.put("/api/interview-knowledge/{item_id}/review")
+        def review_interview_question(item_id: str, request: InterviewReviewRequest):
+            try:
+                return {"item": interview_knowledge.mark_reviewed(item_id, request.review_state)}
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail={"code": "interview_question_not_found", "message": "未找到该面试题"}) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail={"code": "interview_review_invalid", "message": str(exc)}) from exc
+        if interview_collector is not None:
+            @app.post("/api/interview-knowledge/collection-preview")
+            def preview_interview_collection(request: InterviewCollectionPreviewRequest):
+                try:
+                    return interview_collector.preview(
+                        request.topic,
+                        max_sources=request.max_sources,
+                        max_items_per_source=request.max_items_per_source,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=502, detail={"code": "interview_collection_failed", "message": str(exc)}) from exc
+
+            @app.post("/api/interview-knowledge/collection-save")
+            def save_interview_collection(request: InterviewCollectionSaveRequest):
+                try:
+                    return interview_collector.save(request.topic, [item.model_dump() for item in request.items])
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail={"code": "interview_collection_invalid", "message": str(exc)}) from exc
+    if task_plans is not None:
+        register_task_planning_routes(app, task_plans, sessions, skills)
+    if memory is not None:
+        register_memory_routes(app, memory)
+    if subagents is not None:
+        register_subagent_routes(app, subagents, sessions)
     if hot_radar is not None:
         register_hot_radar_routes(app, hot_radar)
     if automation is not None:

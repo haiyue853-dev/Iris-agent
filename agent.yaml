@@ -46,6 +46,14 @@ hot_radar:
 
 interview_knowledge:
   path: data/interview_knowledge.json
+memory:
+  directory: data/memory
+  enabled: false
+  max_results: 4
+subagents:
+  directory: data/subagents
+  max_concurrent: 2
+  max_tool_rounds: 4
 automation:
   directory: data/automation
 

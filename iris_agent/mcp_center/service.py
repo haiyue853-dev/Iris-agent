@@ -248,7 +248,7 @@ class McpCenterService:
             return response["result"]
         except (OSError, TimeoutError, ValueError) as exc:
             self._close_session(server.id)
-            raise ValueError("unable to call MCP tool") from exc
+            raise ValueError(f"unable to call MCP tool: {exc}") from exc
 
     def _request(self, server: McpServer, method: str, params: dict[str, object]) -> dict[str, object]:
         session = self._session(server)
@@ -326,7 +326,12 @@ class McpCenterService:
                 if not line: raise ValueError("MCP process ended")
                 message = json.loads(line)
                 if message.get("id") == expected_id:
-                    if "error" in message: raise ValueError("MCP returned an error")
+                    if "error" in message:
+                        error = message["error"]
+                        detail = error.get("message") if isinstance(error, dict) else None
+                        if not isinstance(detail, str) or not detail.strip():
+                            detail = "unknown MCP error"
+                        raise ValueError(f"MCP returned an error: {detail.strip()[:300]}")
                     return message
 
     def _load(self) -> dict[str, McpServer]:

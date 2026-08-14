@@ -7,7 +7,7 @@ from iris_agent.automation.service import AutomationScheduler
 from iris_agent.bootstrap import build_application
 from iris_agent.reports.extraction import LocalAttachmentExtractor
 
-load_dotenv()
+load_dotenv(override=True)
 application = build_application()
 app = create_app(
     application.agent, application.sessions, application.reports, application.attachments,
@@ -19,6 +19,10 @@ app = create_app(
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
     interview_knowledge=application.interview_knowledge,
+    interview_collector=application.interview_collector,
+    task_plans=application.task_plans,
+    memory=application.memory,
+    subagents=application.subagents,
 )
 scheduler = AutomationScheduler(application.automation)
 

@@ -8,6 +8,7 @@ from iris_agent.config.settings import Settings, load_settings
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.interview_knowledge.repository import InterviewKnowledgeRepository
+from iris_agent.interview_knowledge.collector import InterviewCollectionService
 from iris_agent.automation.service import AutomationService
 from iris_agent.notifications.service import NotificationService
 from iris_agent.mcp_center.service import McpCenterService
@@ -21,6 +22,14 @@ from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
 from iris_agent.tools.registry import ToolRegistry
+from iris_agent.task_planning.repository import JsonTaskPlanRepository
+from iris_agent.task_planning.service import TaskPlanService
+from iris_agent.core.context import ContextEngine, JsonContextSnapshotRepository
+from iris_agent.memory.json_provider import JsonMemoryProvider
+from iris_agent.memory.service import MemoryService
+from iris_agent.memory.tools import build_memory_tools
+from iris_agent.subagents.repository import JsonSubagentRepository
+from iris_agent.subagents.service import SubagentService
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +45,10 @@ class ApplicationServices:
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     interview_knowledge: InterviewKnowledgeRepository
+    interview_collector: InterviewCollectionService
+    task_plans: TaskPlanService
+    memory: MemoryService
+    subagents: SubagentService
     settings: Settings
 
 
@@ -44,6 +57,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
     provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
     registry = ToolRegistry()
+    memory = MemoryService(JsonMemoryProvider(settings.memory.directory / "memories.json"), settings.memory.max_results)
     interview_knowledge = InterviewKnowledgeRepository(settings.interview_knowledge.path)
     factories = {
         "current_time": lambda: build_current_time_tool(),
@@ -54,15 +68,22 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     for name in settings.tools.enabled:
         if name in factories:
             registry.register(factories[name]())
+    if settings.memory.enabled:
+        for tool in build_memory_tools(memory):
+            registry.register(tool)
     mcp = McpCenterService(settings.mcp.settings_file)
     mcp.ensure_builtin_interview_server(settings.interview_knowledge.path)
+    interview_collector = InterviewCollectionService(mcp, interview_knowledge)
     atexit.register(mcp.close)
     register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
     mcp_tools.refresh()
     sessions = JsonSessionRepository(settings.sessions.directory)
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt)
+    context = ContextEngine(JsonContextSnapshotRepository(settings.sessions.directory / "context"), settings.agent.max_context_chars)
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, context, memory if settings.memory.enabled else None)
+    subagents = SubagentService(JsonSubagentRepository(settings.subagents.directory), agent, settings.subagents.max_concurrent, settings.subagents.max_tool_rounds)
+    task_plans = TaskPlanService(JsonTaskPlanRepository(settings.task_planning.directory), agent, subagents)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -87,4 +108,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, mcp, mcp_tools, interview_knowledge, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, mcp, mcp_tools, interview_knowledge, interview_collector, task_plans, memory, subagents, settings)

@@ -1,6 +1,31 @@
 export type Message = { role: 'user' | 'assistant'; content: string };
 export type Session = { id: string; name: string; created_at: number; updated_at: number };
-export type InterviewKnowledgeItem = { topic: string; question: string; answer: string; source_url: string; saved_at: number };
+  export type InterviewReviewState = 'new' | 'known' | 'learning' | 'review';
+  export type InterviewKnowledgeItem = {
+    id: string;
+    topic: string;
+    question: string;
+    answer: string;
+    source_url: string;
+    saved_at: number;
+    review_state: InterviewReviewState;
+    reviewed_at: number | null;
+    next_review_at: number;
+  };
+  export type InterviewCollectionItem = Pick<InterviewKnowledgeItem, 'question' | 'answer' | 'source_url'>;
+  export type InterviewCollectionSource = {
+    url: string;
+    title: string;
+    status: 'ok' | 'failed';
+    count: number;
+    error?: string;
+  };
+  export type InterviewCollectionPreview = {
+    topic: string;
+    items: InterviewCollectionItem[];
+    sources: InterviewCollectionSource[];
+    summary: { sources: number; found: number; duplicates: number };
+  };
 
 // ---------- AI HOT 每日资讯日报 ----------
 export type AihotDailyItem = {

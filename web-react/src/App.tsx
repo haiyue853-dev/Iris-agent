@@ -9,12 +9,13 @@ import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
 import InterviewKnowledgePage from './components/interview/InterviewKnowledgePage';
 import AutomationPage from './components/automation/AutomationPage';
+import TaskPlansPage from './components/tasks/TaskPlansPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'interview-knowledge';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'interview-knowledge' | 'task-plans';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'interview-knowledge'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'interview-knowledge', 'task-plans'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -126,6 +127,8 @@ function App() {
           <McpPage />
         ) : activeView === 'interview-knowledge' ? (
           <InterviewKnowledgePage />
+        ) : activeView === 'task-plans' ? (
+          <TaskPlansPage sessionId={currentSessionId} />
         ) : activeView === 'automation' || activeView === 'radar' ? (
           <AutomationPage />
         ) : activeView === 'aihot' ? (

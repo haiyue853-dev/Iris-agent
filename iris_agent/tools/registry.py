@@ -25,6 +25,15 @@ class ToolRegistry:
     def tools_with_prefix(self, prefix: str) -> list[Tool]:
         return [tool for name, tool in self._tools.items() if name.startswith(prefix)]
 
+    def filtered(self, names: list[str] | tuple[str, ...]) -> "ToolRegistry":
+        selected = ToolRegistry()
+        unknown = [name for name in names if name not in self._tools]
+        if unknown:
+            raise ValueError(f"unknown tools: {', '.join(unknown)}")
+        for name in names:
+            selected.register(self._tools[name])
+        return selected
+
     def requires_approval(self, name: str) -> bool:
         tool = self._tools.get(name)
         return tool is not None and tool.requires_approval

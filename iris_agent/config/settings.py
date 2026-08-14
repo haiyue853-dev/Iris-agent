@@ -22,6 +22,7 @@ class LLMSettings:
 class AgentSettings:
     system_prompt: str = "你是 Iris Agent，一个智能助手。始终使用中文与用户交流。需要调用工具时，先用一句简短的话说明计划；基于工具返回的结果继续行动，并在完成后给出直接、可验证的结论。"
     max_tool_rounds: int = 8
+    max_context_chars: int = 80_000
 
 
 @dataclass(slots=True)
@@ -83,6 +84,25 @@ class InterviewKnowledgeSettings:
 
 
 @dataclass(slots=True)
+class TaskPlanningSettings:
+    directory: Path = Path("data/task_plans")
+
+
+@dataclass(slots=True)
+class MemorySettings:
+    directory: Path = Path("data/memory")
+    enabled: bool = False
+    max_results: int = 4
+
+
+@dataclass(slots=True)
+class SubagentSettings:
+    directory: Path = Path("data/subagents")
+    max_concurrent: int = 2
+    max_tool_rounds: int = 4
+
+
+@dataclass(slots=True)
 class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
@@ -95,6 +115,9 @@ class Settings:
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
     interview_knowledge: InterviewKnowledgeSettings = field(default_factory=InterviewKnowledgeSettings)
+    task_planning: TaskPlanningSettings = field(default_factory=TaskPlanningSettings)
+    memory: MemorySettings = field(default_factory=MemorySettings)
+    subagents: SubagentSettings = field(default_factory=SubagentSettings)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -123,6 +146,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     notifications = _section(raw, "notifications")
     mcp = _section(raw, "mcp")
     interview_knowledge = _section(raw, "interview_knowledge")
+    task_planning = _section(raw, "task_planning")
+    memory = _section(raw, "memory")
+    subagents = _section(raw, "subagents")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
     api_key = overrides.get("api_key") or os.getenv("OPENAI_API_KEY", "")
@@ -132,7 +158,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             base_url=str(base_url), api_key=str(api_key),
             temperature=float(llm.get("temperature", 0.2)), timeout_seconds=float(llm.get("timeout_seconds", 60)),
         ),
-        agent=AgentSettings(system_prompt=str(agent.get("system_prompt", raw.get("system_prompt", AgentSettings().system_prompt))), max_tool_rounds=int(agent.get("max_tool_rounds", 8))),
+        agent=AgentSettings(system_prompt=str(agent.get("system_prompt", raw.get("system_prompt", AgentSettings().system_prompt))), max_tool_rounds=int(agent.get("max_tool_rounds", 8)), max_context_chars=int(agent.get("max_context_chars", 80_000))),
         sessions=SessionSettings(directory=Path(sessions.get("directory", raw.get("session_path", "data/sessions")))),
         reports=ReportSettings(
             directory=Path(reports.get("directory", "data/reports")),
@@ -163,8 +189,11 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
         interview_knowledge=InterviewKnowledgeSettings(path=Path(interview_knowledge.get("path", "data/interview_knowledge.json"))),
+        task_planning=TaskPlanningSettings(directory=Path(task_planning.get("directory", "data/task_plans"))),
+        memory=MemorySettings(directory=Path(memory.get("directory", "data/memory")), enabled=bool(memory.get("enabled", False)), max_results=int(memory.get("max_results", 4))),
+        subagents=SubagentSettings(directory=Path(subagents.get("directory", "data/subagents")), max_concurrent=int(subagents.get("max_concurrent", 2)), max_tool_rounds=int(subagents.get("max_tool_rounds", 4))),
     )
-    if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:
+    if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1 or settings.agent.max_context_chars < 1_000 or not 1 <= settings.memory.max_results <= 10 or settings.subagents.max_concurrent < 1 or settings.subagents.max_tool_rounds < 1:
         raise ConfigurationError("模型名称不能为空，且 max_tool_rounds 必须大于 0")
     if (
         settings.reports.max_input_chars < 1
