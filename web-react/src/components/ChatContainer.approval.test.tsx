@@ -30,4 +30,12 @@ describe('ChatContainer tool approval', () => {
     expect(onApprove).toHaveBeenCalledWith('call-1');
     expect(onReject).toHaveBeenCalledWith('call-1');
   });
+
+  it('opens the current task from the chat workspace', () => {
+    const onViewTask = vi.fn();
+    render(<ChatContainer messages={[]} streamingContent="" isStreaming={false} inputValue="" onInputChange={vi.fn()} onSend={vi.fn()} onStop={vi.fn()} onCopy={vi.fn()} onRegenerate={vi.fn()} onEdit={vi.fn()} currentTaskId="task-1" onViewTask={onViewTask} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查看任务' }));
+    expect(onViewTask).toHaveBeenCalledWith('task-1');
+  });
 });

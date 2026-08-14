@@ -8,12 +8,13 @@ import DailyReportPage from './components/reports/DailyReportPage';
 import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
 import AutomationPage from './components/automation/AutomationPage';
+import TaskCenterPage from './components/tasks/TaskCenterPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'tasks';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -24,6 +25,7 @@ function App() {
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
   const [umlVisited, setUmlVisited] = useState(() => activeView === 'uml');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const {
     messages,
@@ -32,6 +34,7 @@ function App() {
     toast,
     pendingApproval,
     currentSessionId,
+    currentTaskId,
     sessions,
     handleSendWithSession,
     resolvePendingApproval,
@@ -110,7 +113,9 @@ function App() {
             <UmlFlowPage />
           </div>
         )}
-        {activeView === 'uml' ? null : activeView === 'reports' ? (
+        {activeView === 'uml' ? null : activeView === 'tasks' ? (
+          <TaskCenterPage selectedTaskId={selectedTaskId} />
+        ) : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (
           <SkillsPage onNavigate={setActiveView} />
@@ -142,6 +147,8 @@ function App() {
             pendingApproval={pendingApproval}
             onApproveTool={(callId) => void resolvePendingApproval(callId, true)}
             onRejectTool={(callId) => void resolvePendingApproval(callId, false)}
+            currentTaskId={currentTaskId}
+            onViewTask={(taskId) => { setSelectedTaskId(taskId); setActiveView('tasks'); }}
           />
         )}
       </main>

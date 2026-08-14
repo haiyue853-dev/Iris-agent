@@ -9,6 +9,7 @@ export function useChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [toast, setToast] = useState('');
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<Extract<AgentEvent, { type: 'tool_approval_requested' }>['data'] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -22,6 +23,7 @@ export function useChat() {
     let fullText = '';
     try {
       await streamChat(sessionId, message, controller.signal, (event: AgentEvent) => {
+        if (event.type === 'task_started') setCurrentTaskId(event.data.task_id);
         if (event.type === 'text_delta') { fullText += event.data.content; setStreamingContent(fullText); }
         if (event.type === 'tool_started') showToast(`正在调用工具：${event.data.name}`);
         if (event.type === 'tool_approval_requested') setPendingApproval(event.data);
@@ -70,5 +72,5 @@ export function useChat() {
   const handleRegenerate = useCallback(() => showToast('当前版本暂不支持重新生成'), [showToast]);
   const handleEditMessage = useCallback((_index: number, _content: string) => showToast('当前版本暂不支持编辑历史消息'), [showToast]);
 
-  return { messages, isStreaming, streamingContent, toast, pendingApproval, currentSessionId, sessions, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleDeleteSession };
+  return { messages, isStreaming, streamingContent, toast, pendingApproval, currentSessionId, currentTaskId, sessions, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleDeleteSession };
 }

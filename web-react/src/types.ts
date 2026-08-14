@@ -143,12 +143,36 @@ export type GenerateReportInput = {
 };
 
 export type AgentEvent =
+  | { type: 'task_started'; data: { task_id: string } }
   | { type: 'text_delta'; data: { content: string } }
   | { type: 'tool_started'; data: { call_id: string; name: string; arguments: Record<string, unknown> } }
   | { type: 'tool_approval_requested'; data: { call_id: string; name: string; arguments: Record<string, unknown>; context?: { server_name?: string; tool_name?: string } | null } }
   | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string } }
   | { type: 'message_completed'; data: { content: string } }
   | { type: 'error'; data: { code: string; message: string } };
+
+export type TaskStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'stopped';
+
+export type AgentTask = {
+  id: string;
+  session_id: string;
+  request_summary: string;
+  status: TaskStatus;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string;
+};
+
+export type TaskTimelineEvent = {
+  id: string;
+  type: string;
+  label: string;
+  created_at: string;
+  tool_name?: string;
+  duration_ms?: number;
+};
+
+export type TaskDetail = AgentTask & { events: TaskTimelineEvent[] };
 
 // ---------- 文档工作台 ----------
 export type DocumentExtractionStatus = 'pending' | 'ready' | 'failed';

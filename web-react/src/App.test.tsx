@@ -19,6 +19,7 @@ describe('App workspace navigation', () => {
       toast: '',
       pendingApproval: null,
       currentSessionId: '',
+      currentTaskId: null,
       sessions: [],
       handleSendWithSession: vi.fn(),
       resolvePendingApproval: vi.fn(),
