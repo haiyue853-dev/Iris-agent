@@ -87,17 +87,16 @@ def test_queued_task_cannot_continue_tool_or_approval_execution(tmp_path, operat
         operation(service, task.id)
 
 
-def test_queued_task_can_request_stop_without_leaving_queue_and_can_be_stopped(tmp_path):
+def test_queued_task_rejects_stop_request_without_leaving_queue(tmp_path):
     service = _build_service(tmp_path)
     task = service.create_queued_task("session", "wait")
 
-    requested = service.request_stop(task.id)
-    stopped = service.stop(task.id)
+    with pytest.raises(ValueError, match="队列"):
+        service.request_stop(task.id)
 
-    assert requested.status == "queued"
-    assert requested.events[-1].type == "stop_requested"
-    assert requested.events[-1].label == "已请求停止"
-    assert stopped.status == "stopped"
+    queued = service.get_task(task.id)
+    assert queued.status == "queued"
+    assert [event.type for event in queued.events] == ["request_queued"]
 
 
 def test_failure_and_interruption_are_terminal_and_keep_only_safe_labels(tmp_path):

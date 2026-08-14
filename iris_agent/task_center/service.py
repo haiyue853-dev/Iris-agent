@@ -249,7 +249,6 @@ class TaskCenterService:
     def _validate_transition(current_status: str, event_type: str) -> None:
         if current_status == "queued" and event_type not in {
             "execution_started",
-            "stop_requested",
             "reply_completed",
             "execution_failed",
             "execution_interrupted",
