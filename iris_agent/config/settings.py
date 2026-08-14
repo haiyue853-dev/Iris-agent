@@ -74,6 +74,11 @@ class NotificationSettings:
 
 
 @dataclass(slots=True)
+class TaskCenterSettings:
+    directory: Path = Path("data/tasks")
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -113,6 +118,7 @@ class Settings:
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
     automation: AutomationSettings = field(default_factory=AutomationSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
+    task_center: TaskCenterSettings = field(default_factory=TaskCenterSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
     interview_knowledge: InterviewKnowledgeSettings = field(default_factory=InterviewKnowledgeSettings)
     task_planning: TaskPlanningSettings = field(default_factory=TaskPlanningSettings)
@@ -144,6 +150,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     hot_radar = _section(raw, "hot_radar")
     automation = _section(raw, "automation")
     notifications = _section(raw, "notifications")
+    task_center = _section(raw, "task_center")
     mcp = _section(raw, "mcp")
     interview_knowledge = _section(raw, "interview_knowledge")
     task_planning = _section(raw, "task_planning")
@@ -187,6 +194,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         notifications=NotificationSettings(
             directory=Path(notifications.get("directory", "data/notifications")),
         ),
+        task_center=TaskCenterSettings(directory=Path(task_center.get("directory", "data/tasks"))),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
         interview_knowledge=InterviewKnowledgeSettings(path=Path(interview_knowledge.get("path", "data/interview_knowledge.json"))),
         task_planning=TaskPlanningSettings(directory=Path(task_planning.get("directory", "data/task_plans"))),

@@ -1,4 +1,5 @@
 import json
+import threading
 from collections.abc import Iterator
 from dataclasses import replace
 
@@ -111,6 +112,7 @@ class AgentService:
         self.context = context
         self.memory = memory
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
+        self._approval_lock = threading.RLock()
 
     def run(self, session_id: str, user_message: str, skill_instructions: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
@@ -121,7 +123,8 @@ class AgentService:
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool, skill_instructions: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
-            call = self._pending_approvals.pop((session_id, call_id), None)
+            with self._approval_lock:
+                call = self._pending_approvals.pop((session_id, call_id), None)
             if call is None:
                 call = self._restore_pending_call(session_id, call_id)
             if call is None:
@@ -158,6 +161,23 @@ class AgentService:
         messages.append(Message(role="user", content=additions_text))
         return messages
 
+    def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
+        """Discard a pending approval without invoking its tool."""
+        with self.sessions.session_lock(session_id):
+            with self._approval_lock:
+                call = self._pending_approvals.pop((session_id, call_id), None)
+            if call is None:
+                call = self._restore_pending_call(session_id, call_id)
+            if call is None:
+                return False
+            cancelled = ToolExecutionResult(
+                False,
+                error_code="tool_approval_cancelled",
+                error_message="工具调用已取消",
+            )
+            self._persist_tool_result(session_id, self._tool_finished_event(call, cancelled))
+            return True
+
     def _restore_pending_call(self, session_id: str, call_id: str) -> ToolCall | None:
         """Recover an approval request from durable conversation history after a restart."""
         session = self.sessions.get(session_id)
@@ -177,7 +197,8 @@ class AgentService:
                 self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
             elif event.type == "tool_approval_requested":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
-                self._pending_approvals[(session_id, call.id)] = call
+                with self._approval_lock:
+                    self._pending_approvals[(session_id, call.id)] = call
             elif event.type == "tool_finished":
                 self._persist_tool_result(session_id, event)
             elif event.type == "message_completed":

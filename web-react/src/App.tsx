@@ -10,12 +10,13 @@ import McpPage from './components/mcp/McpPage';
 import InterviewKnowledgePage from './components/interview/InterviewKnowledgePage';
 import AutomationPage from './components/automation/AutomationPage';
 import TaskPlansPage from './components/tasks/TaskPlansPage';
+import TaskCenterPage from './components/tasks/TaskCenterPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'interview-knowledge' | 'task-plans';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'interview-knowledge' | 'task-plans' | 'tasks';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'interview-knowledge', 'task-plans'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'interview-knowledge', 'task-plans', 'tasks'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -27,6 +28,7 @@ function App() {
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
   const [umlVisited, setUmlVisited] = useState(() => activeView === 'uml');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const {
     messages,
@@ -36,6 +38,7 @@ function App() {
     toast,
     pendingApproval,
     currentSessionId,
+    currentTaskId,
     sessions,
     handleSendWithSession,
     resolvePendingApproval,
@@ -119,7 +122,9 @@ function App() {
             <UmlFlowPage />
           </div>
         )}
-        {activeView === 'uml' ? null : activeView === 'reports' ? (
+        {activeView === 'uml' ? null : activeView === 'tasks' ? (
+          <TaskCenterPage selectedTaskId={selectedTaskId} />
+        ) : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (
           <SkillsPage onNavigate={setActiveView} onActivateChatSkill={setActiveChatSkill} />
@@ -156,6 +161,8 @@ function App() {
             pendingApproval={pendingApproval}
             onApproveTool={(callId) => void resolvePendingApproval(callId, true)}
             onRejectTool={(callId) => void resolvePendingApproval(callId, false)}
+            currentTaskId={currentTaskId}
+            onViewTask={(taskId) => { setSelectedTaskId(taskId); setActiveView('tasks'); }}
           />
         )}
       </main>

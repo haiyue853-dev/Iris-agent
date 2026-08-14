@@ -1,5 +1,7 @@
 import json
 import logging
+from time import monotonic
+import threading
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, status
@@ -43,6 +45,8 @@ from iris_agent.memory.service import MemoryService
 from iris_agent.api.memory_api import register_memory_routes
 from iris_agent.subagents.service import SubagentService
 from iris_agent.api.subagents_api import register_subagent_routes
+from iris_agent.task_center.service import TaskCenterService
+from iris_agent.api.tasks_api import register_task_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -179,6 +183,7 @@ def create_app(
     hot_radar: HotRadarService | None = None,
     automation: AutomationService | None = None,
     notifications: NotificationService | None = None,
+    task_center: TaskCenterService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -246,6 +251,32 @@ def create_app(
         register_automation_routes(app, automation)
     if notifications is not None:
         register_notification_routes(app, notifications)
+    if task_center is not None:
+        register_task_routes(app, task_center)
+
+    approval_tasks: dict[tuple[str, str], str] = {}
+    approval_tool_names: dict[tuple[str, str], str] = {}
+    tool_started_at: dict[tuple[str, str], float] = {}
+    processing_approvals: set[tuple[str, str]] = set()
+    approval_lock = threading.Lock()
+
+    def clear_approval(session_id: str, call_id: str) -> None:
+        with approval_lock:
+            approval_tasks.pop((session_id, call_id), None)
+            approval_tool_names.pop((session_id, call_id), None)
+            tool_started_at.pop((session_id, call_id), None)
+            processing_approvals.discard((session_id, call_id))
+        service.cancel_tool_approval(session_id, call_id)
+
+    def clear_task_approvals(task_id: str) -> None:
+        with approval_lock:
+            keys = [key for key, value in approval_tasks.items() if value == task_id]
+            for session_id, call_id in keys:
+                approval_tasks.pop((session_id, call_id), None)
+                approval_tool_names.pop((session_id, call_id), None)
+                tool_started_at.pop((session_id, call_id), None)
+                processing_approvals.discard((session_id, call_id))
+                service.cancel_tool_approval(session_id, call_id)
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
@@ -307,12 +338,56 @@ def create_app(
                 raise HTTPException(status_code=422, detail={"code": "skill_disabled", "message": "Skill is disabled"}) from exc
 
         def generate():
+            task_id: str | None = None
+            terminal = False
             try:
+                if task_center is not None:
+                    task_id = task_center.create_task(request.session_id, request.message).id
+                    yield json.dumps({"type": "task_started", "data": {"task_id": task_id}}, ensure_ascii=False) + "\n"
                 for event in service.run(request.session_id, request.message, skill_instructions):
+                    if task_id is not None:
+                        if event.type == "tool_started":
+                            task_center.tool_started(task_id, str(event.data["name"]))
+                            with approval_lock:
+                                tool_started_at[(request.session_id, str(event.data["call_id"]))] = monotonic()
+                        elif event.type == "tool_approval_requested":
+                            call_id = str(event.data["call_id"])
+                            tool_name = str(event.data["name"])
+                            task_center.approval_requested(task_id, call_id, tool_name)
+                            with approval_lock:
+                                approval_tasks[(request.session_id, call_id)] = task_id
+                                approval_tool_names[(request.session_id, call_id)] = tool_name
+                        elif event.type == "tool_finished":
+                            with approval_lock:
+                                started_at = tool_started_at.pop((request.session_id, str(event.data["call_id"])), None)
+                            duration_ms = None if started_at is None else int((monotonic() - started_at) * 1000)
+                            task_center.tool_finished(task_id, str(event.data["name"]), duration_ms, succeeded=bool(event.data.get("ok")))
+                        elif event.type == "text_delta":
+                            task_center.touch(task_id)
+                        elif event.type == "message_completed":
+                            task_center.complete(task_id)
+                            terminal = True
+                        elif event.type == "error":
+                            task_center.fail(task_id)
+                            terminal = True
                     yield json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
+                if task_id is not None and not terminal and task_center.get_task(task_id).status == "running":
+                    task_center.fail(task_id)
+                    terminal = True
+            except GeneratorExit:
+                if task_id is not None and not terminal:
+                    task_center.stop(task_id)
+                    clear_task_approvals(task_id)
+                raise
             except IrisError as exc:
+                if task_id is not None and not terminal:
+                    task_center.fail(task_id)
+                    clear_task_approvals(task_id)
                 yield json.dumps({"type": "error", "data": {"code": exc.code, "message": exc.safe_message}}, ensure_ascii=False) + "\n"
             except Exception:
+                if task_id is not None and not terminal:
+                    task_center.fail(task_id)
+                    clear_task_approvals(task_id)
                 logger.exception("流式对话发生未处理异常")
                 yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "服务内部错误"}}, ensure_ascii=False) + "\n"
 
@@ -323,14 +398,77 @@ def create_app(
         sessions.get(session_id)
 
         def generate():
+            with approval_lock:
+                task_id = approval_tasks.pop((session_id, call_id), None) if task_center is not None else None
+                tool_name = approval_tool_names.pop((session_id, call_id), None)
+                already_processing = (session_id, call_id) in processing_approvals
+                if task_id is not None:
+                    processing_approvals.add((session_id, call_id))
+            terminal = False
             try:
+                if task_center is not None and task_id is None:
+                    yield json.dumps({"type": "error", "data": {"code": "tool_approval_not_found", "message": "待确认的工具调用不存在或已处理"}}, ensure_ascii=False) + "\n"
+                    return
+                if task_id is not None:
+                    task_center.record_approval(task_id, call_id, tool_name, request.approved)
+                    with approval_lock:
+                        tool_started_at.setdefault((session_id, call_id), monotonic())
                 for event in service.resolve_tool_approval(session_id, call_id, request.approved):
+                    if task_id is not None:
+                        if event.type == "tool_finished":
+                            with approval_lock:
+                                started_at = tool_started_at.pop((session_id, call_id), None)
+                            duration_ms = None if started_at is None else int((monotonic() - started_at) * 1000)
+                            task_center.tool_finished(
+                                task_id,
+                                str(event.data["name"]),
+                                call_id=call_id,
+                                duration_ms=duration_ms,
+                                succeeded=bool(event.data.get("ok")),
+                            )
+                        elif event.type == "tool_started":
+                            task_center.tool_started(task_id, str(event.data["name"]))
+                            with approval_lock:
+                                tool_started_at[(session_id, str(event.data["call_id"]))] = monotonic()
+                        elif event.type == "text_delta":
+                            task_center.touch(task_id)
+                        elif event.type == "tool_approval_requested":
+                            next_call_id = str(event.data["call_id"])
+                            tool_name = str(event.data["name"])
+                            task_center.approval_requested(task_id, next_call_id, tool_name)
+                            with approval_lock:
+                                approval_tasks[(session_id, next_call_id)] = task_id
+                                approval_tool_names[(session_id, next_call_id)] = tool_name
+                        elif event.type == "message_completed":
+                            task_center.complete(task_id)
+                            terminal = True
+                        elif event.type == "error":
+                            task_center.fail(task_id)
+                            terminal = True
                     yield json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
+                if task_id is not None and not terminal and task_center.get_task(task_id).status == "running":
+                    task_center.fail(task_id)
+                    terminal = True
+                clear_approval(session_id, call_id)
+            except GeneratorExit:
+                if task_id is not None and not terminal:
+                    task_center.stop(task_id)
+                    clear_task_approvals(task_id)
+                raise
             except IrisError as exc:
+                if task_id is not None and not terminal:
+                    task_center.fail(task_id)
+                    clear_task_approvals(task_id)
                 yield json.dumps({"type": "error", "data": {"code": exc.code, "message": exc.safe_message}}, ensure_ascii=False) + "\n"
             except Exception:
+                if task_id is not None and not terminal:
+                    task_center.fail(task_id)
+                    clear_task_approvals(task_id)
                 logger.exception("Tool approval handling failed")
                 yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "Internal server error"}}, ensure_ascii=False) + "\n"
+            finally:
+                if task_id is not None:
+                    clear_approval(session_id, call_id)
 
         return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

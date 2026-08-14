@@ -19,6 +19,8 @@ interface ChatContainerProps {
   pendingApproval?: Extract<AgentEvent, { type: 'tool_approval_requested' }>['data'] | null;
   onApproveTool?: (callId: string) => void;
   onRejectTool?: (callId: string) => void;
+  currentTaskId?: string | null;
+  onViewTask?: (taskId: string) => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -36,6 +38,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   pendingApproval,
   onApproveTool,
   onRejectTool,
+  currentTaskId,
+  onViewTask,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -91,6 +95,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   return (
     <div className="chat-layout">
       <div className="chat-container" ref={containerRef} onScroll={handleScroll}>
+        {currentTaskId && <button className="view-task-btn" onClick={() => onViewTask?.(currentTaskId)}>查看任务</button>}
         {messages.map((msg, index) => (
           <React.Fragment key={index}>
             {editingIndex === index ? (

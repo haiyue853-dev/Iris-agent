@@ -70,6 +70,15 @@ describe('Sidebar navigation', () => {
     expect(onViewChange).toHaveBeenCalledWith('skills');
   });
 
+  it('opens the task center from the left sidebar', async () => {
+    const onViewChange = vi.fn();
+    render(<Sidebar collapsed={false} onToggle={vi.fn()} onNewChat={vi.fn()} currentSessionId="" sessions={[]} onSessionSwitch={vi.fn()} onSessionDelete={vi.fn()} activeView="chat" onViewChange={onViewChange} />);
+
+    await userEvent.click(screen.getByRole('button', { name: '任务中心' }));
+
+    expect(onViewChange).toHaveBeenCalledWith('tasks');
+  });
+
   it('replaces document workbench with automation tasks', async () => {
     const onViewChange = vi.fn();
     render(<Sidebar collapsed={false} onToggle={vi.fn()} onNewChat={vi.fn()} currentSessionId="" sessions={[]} onSessionSwitch={vi.fn()} onSessionDelete={vi.fn()} activeView="chat" onViewChange={onViewChange} />);

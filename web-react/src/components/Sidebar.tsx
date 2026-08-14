@@ -150,6 +150,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>
               <span className="view-label">自动化任务</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'tasks' ? 'active' : ''}`} onClick={() => onViewChange('tasks')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>
+              <span className="view-label">任务中心</span>
+            </button>
             <button type="button" className={`view-item ${activeView === 'mcp' ? 'active' : ''}`} onClick={() => onViewChange('mcp')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v4m8-4v4M6 7h12v14H6zM9 11h6m-6 4h6" /></svg>
               <span className="view-label">MCP</span>
