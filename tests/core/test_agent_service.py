@@ -47,6 +47,30 @@ def test_service_resumes_after_approved_tool_call(tmp_path):
     assert [message.role for message in repo.get(session.id).messages] == ["user", "assistant", "tool", "assistant"]
 
 
+def test_service_recovers_pending_approval_after_restart(tmp_path):
+    class WaitingProvider:
+        def complete(self, messages, tools):
+            return ProviderResponse(tool_calls=[ToolCall("c1", "write", {"value": "x"})])
+
+    class ResumedProvider:
+        def complete(self, messages, tools):
+            assert messages[-1].role == "tool"
+            return ProviderResponse(content="done")
+
+    registry = ToolRegistry()
+    registry.register(Tool("write", "write", {"type": "object", "properties": {"value": {"type": "string"}}}, lambda value: value, requires_approval=True))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    first_service = AgentService(AgentLoop(WaitingProvider(), registry), repo, "system")
+
+    assert [event.type for event in first_service.run(session.id, "go")] == ["react_step", "tool_started", "tool_approval_requested"]
+
+    restarted_service = AgentService(AgentLoop(ResumedProvider(), registry), repo, "system")
+    events = list(restarted_service.resolve_tool_approval(session.id, "c1", True))
+
+    assert [event.type for event in events] == ["tool_finished", "react_step", "react_step", "text_delta", "message_completed"]
+
+
 def test_service_does_not_execute_rejected_tool_call(tmp_path):
     class ApprovalProvider:
         def __init__(self):

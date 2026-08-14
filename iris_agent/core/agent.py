@@ -118,6 +118,8 @@ class AgentService:
         with self.sessions.session_lock(session_id):
             call = self._pending_approvals.pop((session_id, call_id), None)
             if call is None:
+                call = self._restore_pending_call(session_id, call_id)
+            if call is None:
                 raise ToolApprovalNotFoundError("待确认的工具调用不存在或已处理")
             if approved:
                 result = self.loop.tools.invoke(call.name, call.arguments)
@@ -130,6 +132,18 @@ class AgentService:
             session = self.sessions.get(session_id)
             messages = [Message(role="system", content=self.system_prompt), *session.messages]
             yield from self._run_loop(session_id, messages)
+
+    def _restore_pending_call(self, session_id: str, call_id: str) -> ToolCall | None:
+        """Recover an approval request from durable conversation history after a restart."""
+        session = self.sessions.get(session_id)
+        completed = {message.tool_call_id for message in session.messages if message.role == "tool" and message.tool_call_id}
+        if call_id in completed:
+            return None
+        for message in reversed(session.messages):
+            for call in message.tool_calls:
+                if call.id == call_id and self.loop.tools.requires_approval(call.name):
+                    return call
+        return None
 
     def _run_loop(self, session_id: str, messages: list[Message]) -> Iterator[AgentEvent]:
         for event in self.loop.run(messages):
