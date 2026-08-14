@@ -49,6 +49,57 @@ def test_task_lifecycle_records_a_safe_tool_and_approval_timeline(tmp_path):
         assert secret not in raw_ledger.lower()
 
 
+def test_queued_task_starts_then_stops(tmp_path):
+    service = TaskCenterService(tmp_path)
+    task = service.create_queued_task('session-1', '整理项目状态')
+    assert task.status == 'queued'
+    assert service.start(task.id).status == 'running'
+    assert service.request_stop(task.id).status == 'running'
+    assert service.stop(task.id).status == 'stopped'
+
+
+def test_queued_task_records_safe_queue_events_and_keeps_legacy_creation_running(tmp_path):
+    service = _build_service(tmp_path)
+
+    queued = service.create_queued_task("session-1", "  Queue this request.  ")
+    running = service.create_task("session-2", "legacy request")
+
+    assert queued.request_summary == "Queue this request."
+    assert [(event.type, event.label) for event in queued.events] == [("request_queued", "已加入队列")]
+    assert running.status == "running"
+    started = service.start(queued.id)
+    assert [(event.type, event.label) for event in started.events][-1] == ("execution_started", "开始执行")
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda service, task_id: service.tool_started(task_id, "mcp__files__read"),
+        lambda service, task_id: service.approval_requested(task_id, "call-1", "mcp__shell__run"),
+        lambda service, task_id: service.tool_finished(task_id, "mcp__shell__run"),
+    ],
+)
+def test_queued_task_cannot_continue_tool_or_approval_execution(tmp_path, operation):
+    service = _build_service(tmp_path)
+    task = service.create_queued_task("session", "wait")
+
+    with pytest.raises(ValueError, match="队列"):
+        operation(service, task.id)
+
+
+def test_queued_task_can_request_stop_without_leaving_queue_and_can_be_stopped(tmp_path):
+    service = _build_service(tmp_path)
+    task = service.create_queued_task("session", "wait")
+
+    requested = service.request_stop(task.id)
+    stopped = service.stop(task.id)
+
+    assert requested.status == "queued"
+    assert requested.events[-1].type == "stop_requested"
+    assert requested.events[-1].label == "已请求停止"
+    assert stopped.status == "stopped"
+
+
 def test_failure_and_interruption_are_terminal_and_keep_only_safe_labels(tmp_path):
     service = _build_service(tmp_path)
 

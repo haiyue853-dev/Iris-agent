@@ -48,6 +48,23 @@ class TaskCenterService:
             self._save_bounded(tasks)
             return task
 
+    def create_queued_task(self, session_id: str, user_message: str) -> AgentTask:
+        with self.repository.transaction():
+            timestamp = _now()
+            task = AgentTask(
+                id=f"task_{uuid4().hex}",
+                session_id=session_id,
+                request_summary=user_message.strip()[:120],
+                status="queued",
+                created_at=timestamp,
+                updated_at=timestamp,
+                events=(self._event("request_queued", "已加入队列", timestamp=timestamp),),
+            )
+            tasks = self.repository.load()
+            tasks.append(task)
+            self._save_bounded(tasks)
+            return task
+
     def get_task(self, task_id: str) -> AgentTask | None:
         return next((task for task in self.repository.load() if task.id == task_id), None)
 
@@ -143,6 +160,12 @@ class TaskCenterService:
                 return updated
             raise KeyError(task_id)
 
+    def start(self, task_id: str) -> AgentTask:
+        return self._append(task_id, "execution_started", "开始执行", status="running")
+
+    def request_stop(self, task_id: str) -> AgentTask:
+        return self._append(task_id, "stop_requested", "已请求停止")
+
     def complete(self, task_id: str, **_ignored: object) -> AgentTask:
         return self._append(task_id, "reply_completed", "已生成回复", status="completed", terminal=True)
 
@@ -224,9 +247,20 @@ class TaskCenterService:
 
     @staticmethod
     def _validate_transition(current_status: str, event_type: str) -> None:
+        if current_status == "queued" and event_type not in {
+            "execution_started",
+            "stop_requested",
+            "reply_completed",
+            "execution_failed",
+            "execution_interrupted",
+        }:
+            raise ValueError("任务正在队列中，不能继续执行")
+        if event_type == "execution_started" and current_status != "queued":
+            raise ValueError("任务不在队列中，不能开始执行")
         if current_status == "awaiting_approval" and event_type not in {
             "approval_approved",
             "approval_rejected",
+            "stop_requested",
             "execution_failed",
             "execution_interrupted",
         }:
