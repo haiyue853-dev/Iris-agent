@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from iris_agent.api.app import create_app
@@ -191,3 +193,63 @@ def test_successful_writes_do_not_fail_when_follow_up_position_read_fails(tmp_pa
     assert approved.status_code == 200
     assert approved.json()["queue_position"] is None
     assert queue.approvals == [(approvable.id, "call-1", True)]
+
+
+def test_startup_migrates_legacy_queued_message_before_list_and_detail_are_exposed(tmp_path):
+    secret = "legacy private queue message"
+    root = tmp_path / "tasks"
+    root.mkdir()
+    (root / "tasks.json").write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "id": "task-queued",
+                        "session_id": "session-1",
+                        "request_summary": secret,
+                        "status": "queued",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "updated_at": "2026-01-01T00:00:00+00:00",
+                        "events": [{
+                            "id": "event-queued",
+                            "type": "request_queued",
+                            "label": "已加入队列",
+                            "created_at": "2026-01-01T00:00:00+00:00",
+                        }],
+                    },
+                    {
+                        "id": "task-normal",
+                        "session_id": "session-2",
+                        "request_summary": "normal task summary",
+                        "status": "completed",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "updated_at": "2026-01-01T00:00:00+00:00",
+                        "finished_at": "2026-01-01T00:00:00+00:00",
+                        "events": [{
+                            "id": "event-normal",
+                            "type": "request_submitted",
+                            "label": "已提交请求",
+                            "created_at": "2026-01-01T00:00:00+00:00",
+                        }],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    sessions = JsonSessionRepository(tmp_path / "sessions")
+    agent = AgentService(AgentLoop(Provider(), ToolRegistry()), sessions, "system")
+    task_center = TaskCenterService(root)
+    client = TestClient(create_app(agent, sessions, task_center=task_center, task_queue=RecordingQueue(task_center)))
+
+    listed = client.get("/api/tasks")
+    detail = client.get("/api/tasks/task-queued")
+
+    assert listed.status_code == 200
+    assert detail.status_code == 200
+    assert secret not in listed.text
+    assert secret not in detail.text
+    assert secret not in (root / "tasks.json").read_text(encoding="utf-8")
+    assert detail.json()["request_summary"] == "后台任务"
+    assert task_center.get_task("task-normal").request_summary == "normal task summary"

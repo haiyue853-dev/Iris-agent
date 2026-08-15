@@ -15,6 +15,7 @@ from iris_agent.task_center.repository import TaskLedgerRepository
 MAX_TASKS = 100
 MAX_EVENTS = 100
 TERMINAL_STATUSES = frozenset({"completed", "failed", "stopped"})
+QUEUED_TASK_REQUEST_SUMMARY = "后台任务"
 _SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,120}\Z")
 
 
@@ -28,6 +29,7 @@ class TaskCenterService:
     def __init__(self, root: Path, *, recover_unfinished: bool = True):
         self.repository = TaskLedgerRepository(root)
         self._approval_states: dict[tuple[str, str], tuple[str, str]] = {}
+        self._migrate_queued_request_summaries()
         if recover_unfinished:
             self._recover_unfinished()
 
@@ -54,7 +56,7 @@ class TaskCenterService:
             task = AgentTask(
                 id=f"task_{uuid4().hex}",
                 session_id=session_id,
-                request_summary="后台任务",
+                request_summary=QUEUED_TASK_REQUEST_SUMMARY,
                 status="queued",
                 created_at=timestamp,
                 updated_at=timestamp,
@@ -215,6 +217,20 @@ class TaskCenterService:
                 recovered = True
             if recovered:
                 self._save_bounded(tasks)
+
+    def _migrate_queued_request_summaries(self) -> None:
+        """Remove pre-security-fix queue messages from the public task ledger."""
+        with self.repository.transaction():
+            tasks = self.repository.load()
+            migrated = [
+                replace(task, request_summary=QUEUED_TASK_REQUEST_SUMMARY)
+                if any(event.type == "request_queued" for event in task.events)
+                and task.request_summary != QUEUED_TASK_REQUEST_SUMMARY
+                else task
+                for task in tasks
+            ]
+            if migrated != tasks:
+                self.repository.save(migrated)
 
     def _append(
         self,

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from iris_agent.api.schemas import QueueTaskRequest, ToolApprovalRequest
 from iris_agent.sessions.base import SessionRepository
-from iris_agent.task_center.service import TaskCenterService
+from iris_agent.task_center.service import QUEUED_TASK_REQUEST_SUMMARY, TaskCenterService
 from iris_agent.task_queue.repository import QueueLedgerError
 from iris_agent.task_queue.service import TaskQueueService
 
@@ -20,7 +20,7 @@ def register_task_routes(
     def task_data(task, *, include_events: bool, include_queue_position: bool = True) -> dict:
         data = task.to_dict()
         if any(event.type == "request_queued" for event in task.events):
-            data["request_summary"] = "后台任务"
+            data["request_summary"] = QUEUED_TASK_REQUEST_SUMMARY
         if not include_events:
             data.pop("events", None)
         if task_queue is not None:
