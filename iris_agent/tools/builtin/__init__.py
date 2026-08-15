@@ -1,4 +1,5 @@
 from .files import build_list_directory_tool, build_read_file_tool
+from .knowledge_tools import build_add_knowledge_tool, build_search_knowledge_tool
 from .memory_tool import build_remember_tool
 from .recall_tool import build_recall_tool
 from .skill_tools import build_save_skill_tool, build_use_skill_tool
@@ -17,4 +18,6 @@ __all__ = [
     "build_delegate_task_tool",
     "build_web_search_tool",
     "build_fetch_page_tool",
+    "build_add_knowledge_tool",
+    "build_search_knowledge_tool",
 ]
