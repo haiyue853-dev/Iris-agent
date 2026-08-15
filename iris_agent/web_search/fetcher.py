@@ -19,13 +19,14 @@ _HEADERS = {
 }
 
 _REMOVED_TAGS = ("script", "style", "nav", "header", "footer", "aside", "noscript", "iframe")
+_BODY_SELECTORS = ("article", "#article_content", "#content_views", "main", ".article-content", ".post-content", ".markdown-body")
 
 
 class PageFetcher:
     def __init__(
         self,
         timeout: float = 15,
-        max_page_chars: int = 8000,
+        max_page_chars: int = 30000,
         enabled: bool = True,
         http_client: httpx.Client | None = None,
     ):
@@ -75,8 +76,17 @@ class PageFetcher:
     @staticmethod
     def _extract_text(html: str) -> str:
         soup = BeautifulSoup(html, "html.parser")
+        for selector in _BODY_SELECTORS:
+            node = soup.select_one(selector)
+            if node is not None:
+                for tag in node(_REMOVED_TAGS):
+                    tag.decompose()
+                return PageFetcher._clean_text(node.get_text(separator="\n", strip=True))
         for tag in soup(_REMOVED_TAGS):
             tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
+        return PageFetcher._clean_text(soup.get_text(separator="\n", strip=True))
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         return "\n".join(lines)

@@ -133,7 +133,7 @@ class WebSearchSettings:
     timeout_seconds: float = 15
     max_results: int = 5
     max_snippet_chars: int = 300
-    max_page_chars: int = 8000
+    max_page_chars: int = 30000
 
 
 @dataclass(slots=True)
@@ -285,7 +285,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             timeout_seconds=float(web_search.get("timeout_seconds", 15)),
             max_results=int(web_search.get("max_results", 5)),
             max_snippet_chars=int(web_search.get("max_snippet_chars", 300)),
-            max_page_chars=int(web_search.get("max_page_chars", 8000)),
+            max_page_chars=int(web_search.get("max_page_chars", 30000)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )
