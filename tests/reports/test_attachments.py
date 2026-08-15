@@ -349,6 +349,8 @@ def _make_directory_symlink(link: Path, target: Path) -> None:
         os.symlink(target, link, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"symlink creation is unavailable: {exc}")
+    if not link.is_symlink():
+        pytest.skip("symlink creation was silently downgraded by the platform")
 
 
 def test_rejects_external_attachments_directory_symlink_during_load(tmp_path: Path) -> None:
