@@ -92,3 +92,62 @@ def test_fetch_disabled_raises():
 
     with pytest.raises(ValueError):
         fetcher.fetch("https://example.com/page")
+
+
+def _fetcher_with_sequence(responses) -> PageFetcher:
+    def handler(request):
+        return responses.pop(0)
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    return PageFetcher(http_client=http, max_retries=2)
+
+
+def test_fetch_retries_on_antibot_status():
+    fetcher = _fetcher_with_sequence([
+        httpx.Response(521, text="antibot"),
+        httpx.Response(200, text=PAGE_HTML),
+    ])
+
+    text = fetcher.fetch("https://example.com/page")
+
+    assert "正文第一段" in text
+
+
+def test_fetch_switches_user_agent_on_retry():
+    seen_agents = []
+    def handler(request):
+        seen_agents.append(request.headers.get("User-Agent", ""))
+        return responses.pop(0)
+    responses = [
+        httpx.Response(521, text="antibot"),
+        httpx.Response(200, text=PAGE_HTML),
+    ]
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    fetcher = PageFetcher(http_client=http, max_retries=2)
+
+    fetcher.fetch("https://example.com/page")
+
+    assert len(seen_agents) == 2
+    assert seen_agents[0] != seen_agents[1]
+
+
+def test_fetch_raises_after_retries_exhausted():
+    fetcher = _fetcher_with_sequence([
+        httpx.Response(521, text="antibot"),
+        httpx.Response(521, text="antibot"),
+        httpx.Response(521, text="antibot"),
+    ])
+
+    with pytest.raises(ValueError) as exc:
+        fetcher.fetch("https://example.com/page")
+
+    assert "521" in str(exc.value)
+
+
+def test_fetch_does_not_retry_on_404():
+    responses = [httpx.Response(404, text="not found")]
+    fetcher = _fetcher_with_sequence(responses)
+
+    with pytest.raises(ValueError) as exc:
+        fetcher.fetch("https://example.com/page")
+
+    assert "404" in str(exc.value)

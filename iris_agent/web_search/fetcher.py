@@ -18,6 +18,13 @@ _HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
 }
 
+_MOBILE_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+)
+
+_RETRY_STATUS = frozenset({521, 403, 429})
+
 _REMOVED_TAGS = ("script", "style", "nav", "header", "footer", "aside", "noscript", "iframe")
 _BODY_SELECTORS = ("article", "#article_content", "#content_views", "main", ".article-content", ".post-content", ".markdown-body")
 
@@ -28,27 +35,42 @@ class PageFetcher:
         timeout: float = 15,
         max_page_chars: int = 30000,
         enabled: bool = True,
+        max_retries: int = 2,
         http_client: httpx.Client | None = None,
     ):
         self.timeout = timeout
         self.max_page_chars = max_page_chars
         self.enabled = enabled
+        self.max_retries = max_retries
         self._client = http_client or httpx.Client(timeout=timeout, follow_redirects=True)
 
     def fetch(self, url: str) -> str:
         if not self.enabled:
             raise ValueError("联网抓取已禁用")
         self._validate_url(url)
+        last_detail: object | None = None
+        for attempt in range(self.max_retries + 1):
+            headers = self._headers_for(attempt, url)
+            try:
+                response = self._client.get(url, headers=headers)
+            except Exception as exc:
+                last_detail = exc
+                continue
+            if response.status_code in _RETRY_STATUS:
+                last_detail = f"HTTP {response.status_code}"
+                continue
+            if response.status_code >= 400:
+                raise ValueError(f"网页抓取失败: HTTP {response.status_code}")
+            return self._extract_text(response.text)[: self.max_page_chars]
+        raise ValueError(f"网页抓取失败: {last_detail}")
+
+    @staticmethod
+    def _headers_for(attempt: int, url: str) -> dict[str, str]:
         headers = dict(_HEADERS)
-        headers["Referer"] = self._referer(url)
-        try:
-            response = self._client.get(url, headers=headers)
-            response.raise_for_status()
-        except ValueError:
-            raise
-        except Exception as exc:
-            raise ValueError(f"网页抓取失败: {exc}") from exc
-        return self._extract_text(response.text)[: self.max_page_chars]
+        if attempt > 0:
+            headers["User-Agent"] = _MOBILE_UA
+        headers["Referer"] = PageFetcher._referer(url)
+        return headers
 
     @staticmethod
     def _referer(url: str) -> str:
