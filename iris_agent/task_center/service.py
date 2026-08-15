@@ -54,7 +54,7 @@ class TaskCenterService:
             task = AgentTask(
                 id=f"task_{uuid4().hex}",
                 session_id=session_id,
-                request_summary=user_message.strip()[:120],
+                request_summary="后台任务",
                 status="queued",
                 created_at=timestamp,
                 updated_at=timestamp,

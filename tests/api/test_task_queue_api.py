@@ -56,6 +56,11 @@ class UnavailableQueue(RecordingQueue):
         raise self.error
 
 
+class PositionReadFailsQueue(RecordingQueue):
+    def queue_position(self, task_id: str) -> int | None:
+        raise QueueLedgerError("position lookup unavailable")
+
+
 def _client(tmp_path):
     sessions = JsonSessionRepository(tmp_path / "sessions")
     agent = AgentService(AgentLoop(Provider(), ToolRegistry()), sessions, "system")
@@ -76,8 +81,16 @@ def _unavailable_client(tmp_path):
     return client, sessions, task_center
 
 
-def test_submit_returns_accepted_safe_task_summary(tmp_path):
-    client, sessions, _, queue = _client(tmp_path)
+def _position_read_failure_client(tmp_path):
+    sessions = JsonSessionRepository(tmp_path / "sessions")
+    agent = AgentService(AgentLoop(Provider(), ToolRegistry()), sessions, "system")
+    task_center = TaskCenterService(tmp_path / "tasks")
+    queue = PositionReadFailsQueue(task_center)
+    return TestClient(create_app(agent, sessions, task_center=task_center, task_queue=queue)), sessions, task_center, queue
+
+
+def test_submit_returns_accepted_safe_task_summary_without_persisting_user_message(tmp_path):
+    client, sessions, task_center, queue = _client(tmp_path)
     session = sessions.create("chat")
 
     response = client.post("/api/tasks", json={"session_id": session.id, "message": "私有问题"})
@@ -85,6 +98,12 @@ def test_submit_returns_accepted_safe_task_summary(tmp_path):
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
     assert "message" not in response.json()
+    assert "私有问题" not in response.text
+    task_id = response.json()["id"]
+    assert "私有问题" not in client.get("/api/tasks").text
+    assert "私有问题" not in client.get(f"/api/tasks/{task_id}").text
+    assert "私有问题" not in (tmp_path / "tasks" / "tasks.json").read_text(encoding="utf-8")
+    assert task_center.get_task(task_id).request_summary == "后台任务"
     assert queue.submissions == [(session.id, "私有问题")]
 
 
@@ -151,3 +170,24 @@ def test_queue_ledger_failure_returns_safe_503_for_cancellation(tmp_path):
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "task_queue_unavailable"
     assert "private" not in response.text
+
+
+def test_successful_writes_do_not_fail_when_follow_up_position_read_fails(tmp_path):
+    client, sessions, task_center, queue = _position_read_failure_client(tmp_path)
+    session = sessions.create("chat")
+
+    submitted = client.post("/api/tasks", json={"session_id": session.id, "message": "private"})
+    cancellable = task_center.create_queued_task(session.id, "private")
+    cancelled = client.delete(f"/api/tasks/{cancellable.id}")
+    approvable = task_center.create_queued_task(session.id, "private")
+    approved = client.post(f"/api/tasks/{approvable.id}/tool-approvals/call-1", json={"approved": True})
+
+    assert submitted.status_code == 202
+    assert submitted.json()["queue_position"] is None
+    assert queue.submissions == [(session.id, "private")]
+    assert cancelled.status_code == 200
+    assert cancelled.json()["queue_position"] is None
+    assert queue.cancelled == [cancellable.id]
+    assert approved.status_code == 200
+    assert approved.json()["queue_position"] is None
+    assert queue.approvals == [(approvable.id, "call-1", True)]

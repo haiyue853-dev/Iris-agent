@@ -58,15 +58,17 @@ def test_queued_task_starts_then_stops(tmp_path):
     assert service.stop(task.id).status == 'stopped'
 
 
-def test_queued_task_records_safe_queue_events_and_keeps_legacy_creation_running(tmp_path):
+def test_queued_task_records_safe_queue_events_without_persisting_message_and_keeps_legacy_creation_running(tmp_path):
     service = _build_service(tmp_path)
 
-    queued = service.create_queued_task("session-1", "  Queue this request.  ")
+    queued = service.create_queued_task("session-1", "  private request with a secret  ")
     running = service.create_task("session-2", "legacy request")
 
-    assert queued.request_summary == "Queue this request."
+    assert queued.request_summary == "后台任务"
     assert [(event.type, event.label) for event in queued.events] == [("request_queued", "已加入队列")]
     assert running.status == "running"
+    assert running.request_summary == "legacy request"
+    assert "private request with a secret" not in (tmp_path / "tasks" / "tasks.json").read_text(encoding="utf-8")
     started = service.start(queued.id)
     assert [(event.type, event.label) for event in started.events][-1] == ("execution_started", "开始执行")
 

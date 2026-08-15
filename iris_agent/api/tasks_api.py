@@ -17,15 +17,19 @@ def register_task_routes(
 ) -> None:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-    def task_data(task, *, include_events: bool) -> dict:
+    def task_data(task, *, include_events: bool, include_queue_position: bool = True) -> dict:
         data = task.to_dict()
+        if any(event.type == "request_queued" for event in task.events):
+            data["request_summary"] = "后台任务"
         if not include_events:
             data.pop("events", None)
         if task_queue is not None:
-            try:
-                data["queue_position"] = task_queue.queue_position(task.id)
-            except QueueLedgerError:
-                raise _queue_unavailable() from None
+            data["queue_position"] = None
+            if include_queue_position:
+                try:
+                    data["queue_position"] = task_queue.queue_position(task.id)
+                except QueueLedgerError:
+                    raise _queue_unavailable() from None
         return data
 
     def get_existing(task_id: str):
@@ -58,7 +62,7 @@ def register_task_routes(
         sessions.get(request.session_id)
         try:
             task = require_queue().submit(request.session_id, request.message)
-            return task_data(task, include_events=False)
+            return task_data(task, include_events=False, include_queue_position=False)
         except QueueLedgerError:
             raise _queue_unavailable() from None
 
@@ -68,7 +72,7 @@ def register_task_routes(
         if task.status in {"completed", "failed", "stopped"}:
             raise HTTPException(409, detail={"code": "task_not_active", "message": "任务已结束，不能取消"})
         try:
-            return task_data(require_queue().cancel(task_id), include_events=True)
+            return task_data(require_queue().cancel(task_id), include_events=True, include_queue_position=False)
         except KeyError:
             raise HTTPException(404, detail={"code": "task_not_found", "message": "任务不存在"}) from None
         except QueueLedgerError:
@@ -82,7 +86,11 @@ def register_task_routes(
         if task.status in {"completed", "failed", "stopped"}:
             raise HTTPException(409, detail={"code": "task_not_active", "message": "任务已结束，不能审批"})
         try:
-            return task_data(require_queue().resolve_approval(task_id, call_id, request.approved), include_events=True)
+            return task_data(
+                require_queue().resolve_approval(task_id, call_id, request.approved),
+                include_events=True,
+                include_queue_position=False,
+            )
         except KeyError:
             raise HTTPException(404, detail={"code": "task_not_found", "message": "任务不存在"}) from None
         except QueueLedgerError:
