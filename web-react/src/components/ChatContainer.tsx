@@ -21,6 +21,7 @@ interface ChatContainerProps {
   currentTaskStatus?: TaskStatus | null;
   queuePosition?: number | null;
   approvalCallId?: string | null;
+  approvalSubmitting?: boolean;
   onViewTask?: (taskId: string) => void;
 }
 
@@ -42,6 +43,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   currentTaskStatus,
   queuePosition,
   approvalCallId,
+  approvalSubmitting,
   onViewTask,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -137,8 +139,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         {currentTaskStatus === 'awaiting_approval' && approvalCallId && <section className="tool-approval-card" aria-label="任务工具审批">
           <p className="tool-approval-eyebrow">需要确认工具操作</p>
           <div className="tool-approval-actions">
-            <button className="skill-card-open" onClick={() => onApproveTool?.(approvalCallId)}>批准执行</button>
-            <button className="skill-card-action" onClick={() => onRejectTool?.(approvalCallId)}>拒绝</button>
+            <button className="skill-card-open" disabled={approvalSubmitting} onClick={() => onApproveTool?.(approvalCallId)}>批准执行</button>
+            <button className="skill-card-action" disabled={approvalSubmitting} onClick={() => onRejectTool?.(approvalCallId)}>拒绝</button>
           </div>
         </section>}
         {isStreaming && streamingContent && (

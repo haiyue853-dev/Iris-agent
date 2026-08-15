@@ -23,6 +23,7 @@ describe('App workspace navigation', () => {
       currentTaskStatus: null,
       queuePosition: null,
       approvalCallId: null,
+      approvalSubmitting: false,
       sessions: [],
       handleSendWithSession: vi.fn(),
       resolvePendingApproval: vi.fn(),

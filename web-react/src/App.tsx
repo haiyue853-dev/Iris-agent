@@ -38,6 +38,7 @@ function App() {
     currentTaskStatus,
     queuePosition,
     approvalCallId,
+    approvalSubmitting,
     sessions,
     handleSendWithSession,
     resolvePendingApproval,
@@ -154,6 +155,7 @@ function App() {
             currentTaskStatus={currentTaskStatus}
             queuePosition={queuePosition}
             approvalCallId={approvalCallId}
+            approvalSubmitting={approvalSubmitting}
             onViewTask={(taskId) => { setSelectedTaskId(taskId); setActiveView('tasks'); }}
           />
         )}

@@ -58,4 +58,10 @@ describe('ChatContainer tool approval', () => {
     expect(onApprove).toHaveBeenCalledWith('call-1');
     expect(onReject).toHaveBeenCalledWith('call-1');
   });
+
+  it('disables both task approval choices while one is submitting', () => {
+    render(<ChatContainer messages={[]} streamingContent="" isStreaming={true} inputValue="" onInputChange={vi.fn()} onSend={vi.fn()} onStop={vi.fn()} onCopy={vi.fn()} onRegenerate={vi.fn()} onEdit={vi.fn()} currentTaskId="task-1" currentTaskStatus="awaiting_approval" approvalCallId="call-1" approvalSubmitting onApproveTool={vi.fn()} onRejectTool={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '批准执行' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+  });
 });
