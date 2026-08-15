@@ -355,6 +355,29 @@ def test_startup_recovers_active_job_but_keeps_queued_job_available(tmp_path) ->
         service.stop()
 
 
+def test_startup_requeues_active_ledger_entry_when_task_never_started(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    queue = QueueRepository(tmp_path / "queue")
+    queued_task = tasks.create_queued_task("session", "crash-window")
+    queue.save([
+        QueueJob(
+            task_id=queued_task.id,
+            session_id="session",
+            message="crash-window",
+            created_at="2026-08-14T00:00:00+00:00",
+            state="active",
+        )
+    ])
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    try:
+        service.start()
+        _wait_for(lambda: tasks.get_task(queued_task.id).status == "completed")
+        assert agent.calls == ["crash-window"]
+    finally:
+        service.stop()
+
+
 def test_queue_position_and_ledger_shape_remain_minimal(queue_service) -> None:
     service, _, _, queue = queue_service
     first = service.submit("session-a", "first")

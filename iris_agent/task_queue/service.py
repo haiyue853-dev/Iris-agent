@@ -284,11 +284,28 @@ class TaskQueueService:
     def _recover_active_jobs(self) -> None:
         with self.repository.transaction():
             jobs = self.repository.load()
-            active_ids = [job.task_id for job in jobs if job.state == "active"]
-            for task_id in active_ids:
-                self._recover_interrupted_if_unfinished(task_id)
-            if active_ids:
-                self.repository.save([job for job in jobs if job.state != "active"])
+            recovered_jobs: list[QueueJob] = []
+            changed = False
+            for job in jobs:
+                if job.state != "active":
+                    recovered_jobs.append(job)
+                    continue
+                task = self.task_center.get_task(job.task_id)
+                if task is not None and task.status == "queued":
+                    # The process died after making the ledger active but
+                    # before TaskCenter.start().  This job never began, so
+                    # put it back at the same FIFO position.
+                    recovered_jobs.append(replace(job, state="queued"))
+                    changed = True
+                elif task is not None and task.status in {"running", "awaiting_approval"}:
+                    self.task_center.recover_interrupted(job.task_id)
+                    changed = True
+                else:
+                    # Terminal or missing tasks cannot be resumed; discard
+                    # only their stale active ledger entry.
+                    changed = True
+            if changed:
+                self.repository.save(recovered_jobs)
 
     def _remove_job(self, task_id: str) -> None:
         with self.repository.transaction():
@@ -319,12 +336,6 @@ class TaskQueueService:
         if task is None or task.status in TERMINAL_STATUSES:
             return task  # type: ignore[return-value]
         return self.task_center.stop(task_id)
-
-    def _recover_interrupted_if_unfinished(self, task_id: str) -> AgentTask:
-        task = self.task_center.get_task(task_id)
-        if task is None or task.status in TERMINAL_STATUSES:
-            return task  # type: ignore[return-value]
-        return self.task_center.recover_interrupted(task_id)
 
     def _fail_if_unfinished(self, task_id: str) -> None:
         task = self.task_center.get_task(task_id)

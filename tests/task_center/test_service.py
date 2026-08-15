@@ -174,6 +174,16 @@ def test_explicit_recovery_interruption_uses_the_safe_restart_reason(tmp_path):
     assert recovered.events[-1].label == "服务重启，执行未完成"
 
 
+def test_recovery_interruption_rejects_a_task_that_has_not_started(tmp_path):
+    service = TaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    queued = service.create_queued_task("session", "not started")
+
+    with pytest.raises(ValueError, match="未开始"):
+        service.recover_interrupted(queued.id)
+
+    assert service.get_task(queued.id).status == "queued"
+
+
 def test_list_filter_persistence_and_missing_task(tmp_path):
     service = _build_service(tmp_path)
     first = service.create_task("session-a", "one")

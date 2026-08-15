@@ -179,13 +179,20 @@ class TaskCenterService:
 
     def recover_interrupted(self, task_id: str) -> AgentTask:
         """Safely stop an unfinished task discovered during service recovery."""
-        return self._append(
-            task_id,
-            "execution_interrupted",
-            "服务重启，执行未完成",
-            status="stopped",
-            terminal=True,
-        )
+        with self.repository.transaction():
+            tasks = self.repository.load()
+            task = next((item for item in tasks if item.id == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            if task.status not in {"running", "awaiting_approval"}:
+                raise ValueError("任务尚未开始或已结束，不能按重启恢复中断")
+            return self._append_locked(
+                task_id,
+                "execution_interrupted",
+                "服务重启，执行未完成",
+                status="stopped",
+                terminal=True,
+            )
 
     def _recover_unfinished(self) -> None:
         with self.repository.transaction():
