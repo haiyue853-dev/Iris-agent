@@ -24,7 +24,7 @@ from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -102,7 +102,11 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     skills = SkillCenterService(
         Path(__file__).parent / "skill_center" / "bundled",
         settings.skills.settings_file,
+        user_directory=settings.skills.user_directory,
+        max_body_chars=settings.skills.max_body_chars,
     )
+    registry.register(build_use_skill_tool(skills))
+    registry.register(build_save_skill_tool(skills))
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)

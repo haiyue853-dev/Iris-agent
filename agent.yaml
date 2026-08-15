@@ -38,6 +38,8 @@ tools:
 skills:
   directory: data/skills
   settings_file: data/skills/settings.json
+  user_directory: data/skills/user
+  max_body_chars: 4000
 
 hot_radar:
   directory: data/hot_radar

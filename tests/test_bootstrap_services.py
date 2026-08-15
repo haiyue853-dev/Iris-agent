@@ -111,6 +111,17 @@ def test_build_application_exposes_session_search_and_recall_tool(tmp_path, monk
     assert "recall" in tool_names
 
 
+def test_build_application_registers_skill_tools(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
+    assert "use_skill" in tool_names
+    assert "save_skill" in tool_names
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

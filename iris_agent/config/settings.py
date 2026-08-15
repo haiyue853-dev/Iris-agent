@@ -53,6 +53,8 @@ class ToolSettings:
 class SkillSettings:
     directory: Path = Path("data/skills")
     settings_file: Path = Path("data/skills/settings.json")
+    user_directory: Path = Path("data/skills/user")
+    max_body_chars: int = 4000
 
 
 @dataclass(slots=True)
@@ -175,6 +177,8 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         skills=SkillSettings(
             directory=Path(skills.get("directory", "data/skills")),
             settings_file=Path(skills.get("settings_file", str(Path(str(skills.get("directory", "data/skills"))) / "settings.json"))),
+            user_directory=Path(skills.get("user_directory", "data/skills/user")),
+            max_body_chars=int(skills.get("max_body_chars", 4000)),
         ),
         hot_radar=HotRadarSettings(
             directory=Path(hot_radar.get("directory", "data/hot_radar")),
