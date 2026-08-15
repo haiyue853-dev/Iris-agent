@@ -32,6 +32,20 @@ class ProfileService:
     def get(self) -> UserProfile:
         return self.repository.load()
 
+    def replace(self, name: str, preferences: list[str], goals: list[str], style: str, facts: list[str]) -> UserProfile:
+        """Fully replace the profile, applying per-item truncation and list caps."""
+        with self.repository.lock:
+            profile = UserProfile(
+                name=name.strip()[: self.max_item_chars],
+                preferences=[item[: self.max_item_chars] for item in preferences if item.strip()][: self.max_items_per_field],
+                goals=[item[: self.max_item_chars] for item in goals if item.strip()][: self.max_items_per_field],
+                style=style.strip()[: self.max_item_chars],
+                facts=[item[: self.max_item_chars] for item in facts if item.strip()][: self.max_items_per_field],
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.repository.save(profile)
+            return profile
+
     def apply_patch(self, patch: ProfilePatch) -> UserProfile:
         with self.repository.lock:
             profile = self.repository.load()

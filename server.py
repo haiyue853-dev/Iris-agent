@@ -20,6 +20,7 @@ app = create_app(
     task_queue=application.task_queue,
     memory=application.memory,
     search=application.session_search,
+    profile=application.profile,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
 )

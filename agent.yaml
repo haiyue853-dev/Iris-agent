@@ -73,3 +73,10 @@ subagent:
   default_max_rounds: 6
   allowed_tools: current_time,list_directory,read_file,recall,use_skill
 
+profile:
+  directory: data/profile
+  max_items_per_field: 20
+  max_item_chars: 200
+  extract_interval_rounds: 10
+  enabled: true
+

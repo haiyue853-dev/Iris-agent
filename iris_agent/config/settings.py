@@ -111,6 +111,15 @@ class SubagentSettings:
 
 
 @dataclass(slots=True)
+class ProfileSettings:
+    directory: Path = Path("data/profile")
+    max_items_per_field: int = 20
+    max_item_chars: int = 200
+    extract_interval_rounds: int = 10
+    enabled: bool = True
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -131,6 +140,7 @@ class Settings:
     memory: MemorySettings = field(default_factory=MemorySettings)
     session_search: SessionSearchSettings = field(default_factory=SessionSearchSettings)
     subagent: SubagentSettings = field(default_factory=SubagentSettings)
+    profile: ProfileSettings = field(default_factory=ProfileSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -174,6 +184,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     memory = _section(raw, "memory")
     session_search = _section(raw, "session_search")
     subagent = _section(raw, "subagent")
+    profile = _section(raw, "profile")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -234,6 +245,13 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_result_chars=int(subagent.get("max_result_chars", 4000)),
             default_max_rounds=int(subagent.get("default_max_rounds", 6)),
             allowed_tools=_split_tools(subagent.get("allowed_tools")),
+        ),
+        profile=ProfileSettings(
+            directory=Path(profile.get("directory", "data/profile")),
+            max_items_per_field=int(profile.get("max_items_per_field", 20)),
+            max_item_chars=int(profile.get("max_item_chars", 200)),
+            extract_interval_rounds=int(profile.get("extract_interval_rounds", 10)),
+            enabled=bool(profile.get("enabled", True)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

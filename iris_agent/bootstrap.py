@@ -13,6 +13,9 @@ from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.memory.repository import MemoryRepository
 from iris_agent.memory.service import MemoryService
+from iris_agent.profile.extractor import ProfileExtractor
+from iris_agent.profile.repository import ProfileRepository
+from iris_agent.profile.service import ProfileService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
@@ -44,6 +47,7 @@ class ApplicationServices:
     memory: MemoryService
     session_search: SessionSearchService
     subagent: SubagentRunner
+    profile: ProfileService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -82,8 +86,16 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         default_limit=settings.session_search.default_limit,
     )
     registry.register(build_recall_tool(session_search))
+    profile = ProfileService(
+        ProfileRepository(settings.profile.directory),
+        ProfileExtractor(provider),
+        max_items_per_field=settings.profile.max_items_per_field,
+        max_item_chars=settings.profile.max_item_chars,
+        extract_interval_rounds=settings.profile.extract_interval_rounds,
+        enabled=settings.profile.enabled,
+    )
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory)
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -125,4 +137,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, mcp, mcp_tools, settings)

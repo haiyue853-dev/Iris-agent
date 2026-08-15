@@ -24,3 +24,11 @@ class ToolApprovalRequest(BaseModel):
 class MemoryCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=500)
     category: Literal["preference", "fact", "project", "other"] = "fact"
+
+
+class ProfileUpdateRequest(BaseModel):
+    name: str = Field(default="", max_length=200)
+    preferences: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    style: str = Field(default="", max_length=500)
+    facts: list[str] = Field(default_factory=list)

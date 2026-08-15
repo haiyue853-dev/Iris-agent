@@ -139,6 +139,17 @@ def test_build_application_exposes_subagent_runner_and_delegate_tool(tmp_path, m
     assert "save_skill" not in sub_tool_names
 
 
+def test_build_application_exposes_profile_service_and_wires_into_agent(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.profile is not None
+    assert application.agent.profile_service is application.profile
+    assert application.profile.repository.root == Path("data/profile")
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
