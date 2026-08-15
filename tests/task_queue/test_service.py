@@ -98,6 +98,23 @@ class FailFirstRemovalQueueRepository(QueueRepository):
         super().save(jobs)
 
 
+class BlockingCreateTaskCenterService(TaskCenterService):
+    """Pause a submit after its task exists but before its queue record exists."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.created = threading.Event()
+        self.release = threading.Event()
+        self.last_task_id: str | None = None
+
+    def create_queued_task(self, session_id: str, user_message: str):
+        task = super().create_queued_task(session_id, user_message)
+        self.last_task_id = task.id
+        self.created.set()
+        assert self.release.wait(2)
+        return task
+
+
 @pytest.fixture
 def queue_service(tmp_path):
     tasks = TaskCenterService(tmp_path / "tasks")
@@ -196,6 +213,34 @@ def test_submit_fails_created_task_when_queue_ledger_write_fails(tmp_path) -> No
     created = tasks.list_tasks()
     assert len(created) == 1
     assert created[0].status == "failed"
+
+
+def test_submit_and_cancel_cannot_leave_a_stopped_task_in_the_queue_ledger(tmp_path) -> None:
+    tasks = BlockingCreateTaskCenterService(tmp_path / "tasks")
+    queue = QueueRepository(tmp_path / "queue")
+    service = TaskQueueService(ControlledAgentService(), tasks, queue)
+    submitted: list[object] = []
+
+    submission = threading.Thread(
+        target=lambda: submitted.append(service.submit("session-a", "race-free submit"))
+    )
+    submission.start()
+    assert tasks.created.wait(1)
+    assert tasks.last_task_id is not None
+
+    cancellation = threading.Thread(target=service.cancel, args=(tasks.last_task_id,))
+    cancellation.start()
+    time.sleep(0.05)
+    tasks.release.set()
+    submission.join(timeout=1)
+    cancellation.join(timeout=1)
+
+    assert not submission.is_alive()
+    assert not cancellation.is_alive()
+    task_id = tasks.last_task_id
+    assert tasks.get_task(task_id).status == "stopped"
+    assert all(job.task_id != task_id for job in queue.load())
+    assert len(submitted) == 1
 
 
 def test_worker_continues_to_later_jobs_when_completed_job_cleanup_fails_once(tmp_path) -> None:

@@ -47,23 +47,26 @@ class TaskQueueService:
 
     def submit(self, session_id: str, message: str) -> AgentTask:
         """Create a queued task and persist only its safe queue record."""
-        task = self.task_center.create_queued_task(session_id, message)
-        job = QueueJob.new(session_id, message, task_id=task.id)
-        try:
-            with self.repository.transaction():
-                self.repository.save([*self.repository.load(), job])
-        except Exception:
-            # A task without a durable queue job can never be executed.  Keep
-            # the ledger failure as the caller-visible error while making the
-            # already-created task terminal and visible to the user.
-            try:
-                self.task_center.fail(task.id)
-            except Exception:
-                pass
-            raise
+        # This lock is also held by worker claims and queued cancellation, so
+        # those operations never observe the TaskCenter record without its
+        # matching durable queue entry (or its terminal write-failure state).
         with self._condition:
+            task = self.task_center.create_queued_task(session_id, message)
+            job = QueueJob.new(session_id, message, task_id=task.id)
+            try:
+                with self.repository.transaction():
+                    self.repository.save([*self.repository.load(), job])
+            except Exception:
+                # A task without a durable queue job can never be executed.
+                # Keep the ledger failure as the caller-visible error while
+                # making the already-created task terminal and visible.
+                try:
+                    self.task_center.fail(task.id)
+                except Exception:
+                    pass
+                raise
             self._condition.notify_all()
-        return task
+            return task
 
     def start(self) -> None:
         """Recover an interrupted active job and start the sole worker."""
