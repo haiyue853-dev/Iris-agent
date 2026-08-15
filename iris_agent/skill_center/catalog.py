@@ -49,11 +49,11 @@ class SkillCatalog:
             text = skill_file.read_text(encoding="utf-8")
         except OSError as exc:
             raise SkillValidationError(f"无法读取 {directory.name}/SKILL.md: {exc}") from exc
-        front = self._extract_front_matter(text, directory.name)
-        return self._validate(front, directory.name)
+        front, body = self._extract_front_matter(text, directory.name)
+        return self._validate(front, body, directory.name)
 
     @staticmethod
-    def _extract_front_matter(text: str, name: str) -> dict[str, object]:
+    def _extract_front_matter(text: str, name: str) -> tuple[dict[str, object], str]:
         if not text.startswith("---"):
             raise SkillValidationError(f"{name}/SKILL.md 缺少 YAML front matter")
         end = text.find("\n---", 3)
@@ -65,9 +65,10 @@ class SkillCatalog:
             raise SkillValidationError(f"{name}/SKILL.md front matter 解析失败: {exc}") from exc
         if not isinstance(parsed, dict):
             raise SkillValidationError(f"{name}/SKILL.md front matter 必须是对象")
-        return parsed
+        body = text[end + 4:].lstrip("\n")
+        return parsed, body
 
-    def _validate(self, front: dict[str, object], name: str) -> SkillDefinition:
+    def _validate(self, front: dict[str, object], body: str, name: str) -> SkillDefinition:
         # 只允许白名单字段；任何额外字段（含命令/脚本/路径类键名）一律拒绝
         for key in front:
             if key not in _ALLOWED_FIELDS:
@@ -97,4 +98,6 @@ class SkillCatalog:
             category=str(front["category"]).strip(),
             entry_view=entry_view,
             version=version,
+            body=body,
+            source="bundled",
         )

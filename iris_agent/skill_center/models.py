@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class SkillDefinition:
-    """受信任的打包 Skill 元数据（仅白名单字段，不含任何可执行内容）。"""
+    """受信任的 Skill 定义（白名单元数据 + 正文指令 + 来源）。"""
 
     id: str
     name: str
@@ -14,6 +14,8 @@ class SkillDefinition:
     category: str
     entry_view: str
     version: int
+    body: str = ""
+    source: str = "bundled"
 
 
 @dataclass(frozen=True, slots=True)
