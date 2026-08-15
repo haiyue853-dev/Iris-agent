@@ -46,16 +46,17 @@ class QueueRepository:
                     self._save_validated_unlocked(jobs)
 
     def _save_validated_unlocked(self, jobs: list[QueueJob]) -> None:
-        if self.path.is_file():
-            self._load_unlocked()
+        self._load_unlocked()
         self._save_unlocked(jobs)
 
     def _load_unlocked(self) -> list[QueueJob]:
-        if not self.path.is_file():
+        if not self.path.exists():
             return []
+        if not self.path.is_file():
+            raise QueueLedgerError("invalid queue ledger format")
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             raise QueueLedgerError("unable to read queue ledger") from exc
         except json.JSONDecodeError as exc:
             raise QueueLedgerError("invalid queue ledger format") from exc

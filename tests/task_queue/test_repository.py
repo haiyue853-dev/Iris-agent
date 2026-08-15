@@ -126,6 +126,40 @@ def test_save_rejects_invalid_source_without_replacing_its_bytes(tmp_path, paylo
     assert path.read_bytes() == payload
 
 
+@pytest.mark.parametrize("operation", ["load", "save"])
+def test_non_utf8_ledger_raises_queue_ledger_error_without_replacing_source(tmp_path, operation: str) -> None:
+    path = tmp_path / "queue.json"
+    payload = b"\xff\xfe\x00"
+    path.write_bytes(payload)
+    repository = QueueRepository(tmp_path)
+
+    with pytest.raises(QueueLedgerError):
+        if operation == "load":
+            repository.load()
+        else:
+            repository.save([])
+
+    assert path.read_bytes() == payload
+
+
+@pytest.mark.parametrize("operation", ["load", "save"])
+def test_queue_ledger_directory_raises_queue_ledger_error_without_replacing_source(tmp_path, operation: str) -> None:
+    path = tmp_path / "queue.json"
+    path.mkdir()
+    sentinel = path / "preserve-me"
+    sentinel.write_text("unchanged", encoding="utf-8")
+    repository = QueueRepository(tmp_path)
+
+    with pytest.raises(QueueLedgerError):
+        if operation == "load":
+            repository.load()
+        else:
+            repository.save([])
+
+    assert path.is_dir()
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
+
+
 def test_to_dict_has_exactly_the_safe_persisted_keys() -> None:
     job = QueueJob(
         task_id="task-1",
