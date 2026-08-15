@@ -136,6 +136,9 @@ class WebSearchSettings:
     max_page_chars: int = 30000
     max_retries: int = 2
     enable_duckduckgo: bool = False
+    enable_browser_fallback: bool = False
+    browser_channel: str = "msedge"
+    min_text_chars: int = 200
 
 
 @dataclass(slots=True)
@@ -290,6 +293,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_page_chars=int(web_search.get("max_page_chars", 30000)),
             max_retries=int(web_search.get("max_retries", 2)),
             enable_duckduckgo=bool(web_search.get("enable_duckduckgo", False)),
+            enable_browser_fallback=bool(web_search.get("enable_browser_fallback", False)),
+            browser_channel=str(web_search.get("browser_channel", "msedge")),
+            min_text_chars=int(web_search.get("min_text_chars", 200)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

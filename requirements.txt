@@ -11,6 +11,7 @@ openpyxl>=3.1.0,<4
 xlrd>=2.0,<3
 pillow>=10.0.0,<12
 beautifulsoup4>=4.12,<5
+playwright>=1.40,<2
 
 # Development and API tests
 pytest>=8.0,<10

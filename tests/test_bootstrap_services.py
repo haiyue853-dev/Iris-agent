@@ -180,6 +180,8 @@ def test_build_application_default_search_sources_are_bing_only(tmp_path, monkey
 
     assert application.settings.web_search.enable_duckduckgo is False
     assert application.settings.web_search.max_retries == 2
+    assert application.settings.web_search.enable_browser_fallback is False
+    assert application.settings.web_search.browser_channel == "msedge"
 
 
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):

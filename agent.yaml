@@ -101,4 +101,7 @@ web_search:
   max_page_chars: 30000
   max_retries: 2
   enable_duckduckgo: false
+  enable_browser_fallback: false
+  browser_channel: msedge
+  min_text_chars: 200
 

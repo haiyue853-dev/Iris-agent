@@ -30,6 +30,7 @@ from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
 from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_web_search_tool, build_fetch_page_tool
+from iris_agent.web_search.browser_fetcher import BrowserFetcher
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
 from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSource
@@ -159,11 +160,19 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         enabled=settings.web_search.enabled,
         sources=search_sources,
     )
+    browser_fetcher = None
+    if settings.web_search.enable_browser_fallback:
+        browser_fetcher = BrowserFetcher(
+            channel=settings.web_search.browser_channel,
+            max_page_chars=settings.web_search.max_page_chars,
+        )
     page_fetcher = PageFetcher(
         timeout=settings.web_search.timeout_seconds,
         max_page_chars=settings.web_search.max_page_chars,
         enabled=settings.web_search.enabled,
         max_retries=settings.web_search.max_retries,
+        min_text_chars=settings.web_search.min_text_chars,
+        browser_fetcher=browser_fetcher,
     )
     registry.register(build_web_search_tool(web_search_client))
     registry.register(build_fetch_page_tool(page_fetcher))
