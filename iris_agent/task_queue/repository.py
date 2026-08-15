@@ -84,7 +84,7 @@ class QueueRepository:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_path, self.path)
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise QueueLedgerError("unable to write queue ledger") from exc
         finally:
             if temporary_path and os.path.exists(temporary_path):
@@ -130,20 +130,34 @@ class QueueRepository:
 
         try:
             self.lock_path.touch(exist_ok=True)
-            with self.lock_path.open("r+b") as handle:
-                while True:
-                    try:
-                        handle.seek(0)
-                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                        break
-                    except OSError as exc:
-                        if exc.errno != errno.EACCES and getattr(exc, "winerror", None) != 33:
-                            raise
-                        time.sleep(0.01)
-                try:
-                    yield
-                finally:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            handle = self.lock_path.open("r+b")
         except OSError as exc:
             raise QueueLedgerError("unable to lock queue ledger") from exc
+
+        try:
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as exc:
+                    if exc.errno != errno.EACCES and getattr(exc, "winerror", None) != 33:
+                        raise
+                    time.sleep(0.01)
+        except OSError as exc:
+            raise QueueLedgerError("unable to lock queue ledger") from exc
+
+        try:
+            try:
+                yield
+            finally:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError as exc:
+                    raise QueueLedgerError("unable to lock queue ledger") from exc
+        finally:
+            try:
+                handle.close()
+            except OSError as exc:
+                raise QueueLedgerError("unable to lock queue ledger") from exc

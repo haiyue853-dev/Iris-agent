@@ -204,6 +204,36 @@ def test_save_raises_queue_ledger_error_immediately_for_non_contention_lock_fail
     assert attempts == 1
 
 
+def test_transaction_propagates_body_oserror_without_relabeling_it_as_a_lock_failure(tmp_path) -> None:
+    repository = QueueRepository(tmp_path)
+    body_error = OSError("simulated transaction body failure")
+
+    with pytest.raises(OSError) as captured:
+        with repository.transaction():
+            raise body_error
+
+    assert captured.value is body_error
+
+
+def test_save_wraps_surrogate_encoding_failure_without_replacing_ledger(tmp_path) -> None:
+    path = tmp_path / "queue.json"
+    source = json.dumps({"jobs": []}).encode("utf-8")
+    path.write_bytes(source)
+    repository = QueueRepository(tmp_path)
+    job = QueueJob(
+        task_id="task-1",
+        session_id="session-1",
+        message="\ud800",
+        created_at="2026-08-14T10:00:00+00:00",
+        state="queued",
+    )
+
+    with pytest.raises(QueueLedgerError):
+        repository.save([job])
+
+    assert path.read_bytes() == source
+
+
 def test_to_dict_has_exactly_the_safe_persisted_keys() -> None:
     job = QueueJob(
         task_id="task-1",
