@@ -83,5 +83,5 @@ def test_rejects_duplicate_ids(tmp_path):
 def test_catalog_parses_body_and_source(tmp_path):
     _write_skill(tmp_path, "demo-skill", _VALID + "# Demo\n这是正文指令\n")
     skill = SkillCatalog(tmp_path).get("demo-skill")
-    assert skill.body == "# Demo\n这是正文指令\n"
+    assert skill.body == "# Demo\n这是正文指令"
     assert skill.source == "bundled"

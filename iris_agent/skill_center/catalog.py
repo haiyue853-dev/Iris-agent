@@ -19,8 +19,9 @@ _ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 class SkillCatalog:
     """从固定根目录加载受信任的 Skill 定义（只读）。"""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, source: str = "bundled"):
         self.root = root
+        self.source = source
 
     def list(self) -> list[SkillDefinition]:
         if not self.root.is_dir():
@@ -65,7 +66,7 @@ class SkillCatalog:
             raise SkillValidationError(f"{name}/SKILL.md front matter 解析失败: {exc}") from exc
         if not isinstance(parsed, dict):
             raise SkillValidationError(f"{name}/SKILL.md front matter 必须是对象")
-        body = text[end + 4:].lstrip("\n")
+        body = text[end + 4:].strip("\n")
         return parsed, body
 
     def _validate(self, front: dict[str, object], body: str, name: str) -> SkillDefinition:
@@ -99,5 +100,5 @@ class SkillCatalog:
             entry_view=entry_view,
             version=version,
             body=body,
-            source="bundled",
+            source=self.source,
         )
