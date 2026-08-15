@@ -65,3 +65,11 @@ memory:
 session_search:
   max_hit_chars: 300
   default_limit: 5
+
+subagent:
+  max_goal_chars: 2000
+  max_context_chars: 4000
+  max_result_chars: 4000
+  default_max_rounds: 6
+  allowed_tools: current_time,list_directory,read_file,recall,use_skill
+

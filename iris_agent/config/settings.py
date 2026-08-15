@@ -100,6 +100,17 @@ class SessionSearchSettings:
 
 
 @dataclass(slots=True)
+class SubagentSettings:
+    max_goal_chars: int = 2000
+    max_context_chars: int = 4000
+    max_result_chars: int = 4000
+    default_max_rounds: int = 6
+    allowed_tools: list[str] = field(
+        default_factory=lambda: ["current_time", "list_directory", "read_file", "recall", "use_skill"]
+    )
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -119,6 +130,7 @@ class Settings:
     task_queue: TaskQueueSettings = field(default_factory=TaskQueueSettings)
     memory: MemorySettings = field(default_factory=MemorySettings)
     session_search: SessionSearchSettings = field(default_factory=SessionSearchSettings)
+    subagent: SubagentSettings = field(default_factory=SubagentSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -127,6 +139,17 @@ def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigurationError(f"配置节 {name} 必须是对象")
     return value
+
+
+def _split_tools(value: Any) -> list[str]:
+    if value is None:
+        return SubagentSettings().allowed_tools
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        return parts if parts else SubagentSettings().allowed_tools
+    return SubagentSettings().allowed_tools
 
 
 def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> Settings:
@@ -150,6 +173,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     task_queue = _section(raw, "task_queue")
     memory = _section(raw, "memory")
     session_search = _section(raw, "session_search")
+    subagent = _section(raw, "subagent")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -203,6 +227,13 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         session_search=SessionSearchSettings(
             max_hit_chars=int(session_search.get("max_hit_chars", 300)),
             default_limit=int(session_search.get("default_limit", 5)),
+        ),
+        subagent=SubagentSettings(
+            max_goal_chars=int(subagent.get("max_goal_chars", 2000)),
+            max_context_chars=int(subagent.get("max_context_chars", 4000)),
+            max_result_chars=int(subagent.get("max_result_chars", 4000)),
+            default_max_rounds=int(subagent.get("default_max_rounds", 6)),
+            allowed_tools=_split_tools(subagent.get("allowed_tools")),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

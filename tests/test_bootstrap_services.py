@@ -122,6 +122,23 @@ def test_build_application_registers_skill_tools(tmp_path, monkeypatch):
     assert "save_skill" in tool_names
 
 
+def test_build_application_exposes_subagent_runner_and_delegate_tool(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.subagent is not None
+    tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
+    assert "delegate_task" in tool_names
+    # 子代理默认工具集不含写工具与 delegate_task（防递归）
+    sub_tools = application.subagent.tool_subset(application.subagent.default_allowed_tools)
+    sub_tool_names = {schema["function"]["name"] for schema in sub_tools.schemas()}
+    assert "delegate_task" not in sub_tool_names
+    assert "remember" not in sub_tool_names
+    assert "save_skill" not in sub_tool_names
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

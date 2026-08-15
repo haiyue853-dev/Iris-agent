@@ -21,10 +21,11 @@ from iris_agent.session_search.service import SessionSearchService
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
+from iris_agent.subagent.runner import SubagentRunner
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -42,6 +43,7 @@ class ApplicationServices:
     task_queue: TaskQueueService
     memory: MemoryService
     session_search: SessionSearchService
+    subagent: SubagentRunner
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -107,9 +109,20 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     )
     registry.register(build_use_skill_tool(skills))
     registry.register(build_save_skill_tool(skills))
+    subagent = SubagentRunner(
+        provider,
+        registry.subset,
+        "你是主 Agent 委派的子代理，负责独立完成一个子任务。专注于任务目标，完成后把最终结论作为回复返回。始终使用中文。",
+        max_goal_chars=settings.subagent.max_goal_chars,
+        max_context_chars=settings.subagent.max_context_chars,
+        max_result_chars=settings.subagent.max_result_chars,
+        default_max_rounds=settings.subagent.default_max_rounds,
+        default_allowed_tools=settings.subagent.allowed_tools,
+    )
+    registry.register(build_delegate_task_tool(subagent))
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, mcp, mcp_tools, settings)
