@@ -128,6 +128,15 @@ class ContextSettings:
 
 
 @dataclass(slots=True)
+class WebSearchSettings:
+    enabled: bool = True
+    timeout_seconds: float = 15
+    max_results: int = 5
+    max_snippet_chars: int = 300
+    max_page_chars: int = 8000
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -150,6 +159,7 @@ class Settings:
     subagent: SubagentSettings = field(default_factory=SubagentSettings)
     profile: ProfileSettings = field(default_factory=ProfileSettings)
     context: ContextSettings = field(default_factory=ContextSettings)
+    web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -195,6 +205,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     subagent = _section(raw, "subagent")
     profile = _section(raw, "profile")
     context = _section(raw, "context")
+    web_search = _section(raw, "web_search")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -268,6 +279,13 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             keep_recent=int(context.get("keep_recent", 10)),
             max_summary_chars=int(context.get("max_summary_chars", 2000)),
             enabled=bool(context.get("enabled", True)),
+        ),
+        web_search=WebSearchSettings(
+            enabled=bool(web_search.get("enabled", True)),
+            timeout_seconds=float(web_search.get("timeout_seconds", 15)),
+            max_results=int(web_search.get("max_results", 5)),
+            max_snippet_chars=int(web_search.get("max_snippet_chars", 300)),
+            max_page_chars=int(web_search.get("max_page_chars", 8000)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

@@ -161,6 +161,17 @@ def test_build_application_wires_compressor_into_agent(tmp_path, monkeypatch):
     assert application.agent.compressor.keep_recent == 10
 
 
+def test_build_application_registers_web_search_tools(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
+    assert "web_search" in tool_names
+    assert "fetch_page" in tool_names
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

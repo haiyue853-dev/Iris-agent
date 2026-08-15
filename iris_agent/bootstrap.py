@@ -29,7 +29,9 @@ from iris_agent.subagent.runner import SubagentRunner
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_web_search_tool, build_fetch_page_tool
+from iris_agent.web_search.fetcher import PageFetcher
+from iris_agent.web_search.search import WebSearchClient
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -140,6 +142,19 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         default_allowed_tools=settings.subagent.allowed_tools,
     )
     registry.register(build_delegate_task_tool(subagent))
+    web_search_client = WebSearchClient(
+        timeout=settings.web_search.timeout_seconds,
+        max_results=settings.web_search.max_results,
+        max_snippet_chars=settings.web_search.max_snippet_chars,
+        enabled=settings.web_search.enabled,
+    )
+    page_fetcher = PageFetcher(
+        timeout=settings.web_search.timeout_seconds,
+        max_page_chars=settings.web_search.max_page_chars,
+        enabled=settings.web_search.enabled,
+    )
+    registry.register(build_web_search_tool(web_search_client))
+    registry.register(build_fetch_page_tool(page_fetcher))
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
