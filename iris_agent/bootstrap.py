@@ -17,13 +17,14 @@ from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
 from iris_agent.reports.service import DailyReportService
+from iris_agent.session_search.service import SessionSearchService
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -40,6 +41,7 @@ class ApplicationServices:
     task_center: TaskCenterService
     task_queue: TaskQueueService
     memory: MemoryService
+    session_search: SessionSearchService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -72,6 +74,12 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_injected_entries=settings.memory.max_injected_entries,
     )
     registry.register(build_remember_tool(memory))
+    session_search = SessionSearchService(
+        sessions,
+        max_hit_chars=settings.session_search.max_hit_chars,
+        default_limit=settings.session_search.default_limit,
+    )
+    registry.register(build_recall_tool(session_search))
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
     agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory)
     report_repository = JsonDailyReportRepository(
@@ -100,4 +108,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, mcp, mcp_tools, settings)

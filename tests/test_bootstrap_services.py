@@ -99,6 +99,18 @@ def test_build_application_exposes_memory_service_and_remember_tool(tmp_path, mo
     assert "remember" in tool_names
 
 
+def test_build_application_exposes_session_search_and_recall_tool(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.session_search is not None
+    assert application.session_search.sessions is application.sessions
+    tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
+    assert "recall" in tool_names
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

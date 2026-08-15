@@ -92,6 +92,12 @@ class MemorySettings:
 
 
 @dataclass(slots=True)
+class SessionSearchSettings:
+    max_hit_chars: int = 300
+    default_limit: int = 5
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -110,6 +116,7 @@ class Settings:
     task_center: TaskCenterSettings = field(default_factory=TaskCenterSettings)
     task_queue: TaskQueueSettings = field(default_factory=TaskQueueSettings)
     memory: MemorySettings = field(default_factory=MemorySettings)
+    session_search: SessionSearchSettings = field(default_factory=SessionSearchSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -140,6 +147,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     task_center = _section(raw, "task_center")
     task_queue = _section(raw, "task_queue")
     memory = _section(raw, "memory")
+    session_search = _section(raw, "session_search")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -187,6 +195,10 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_chars=int(memory.get("max_chars", 500)),
             max_injected_chars=int(memory.get("max_injected_chars", 2000)),
             max_injected_entries=int(memory.get("max_injected_entries", 20)),
+        ),
+        session_search=SessionSearchSettings(
+            max_hit_chars=int(session_search.get("max_hit_chars", 300)),
+            default_limit=int(session_search.get("default_limit", 5)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

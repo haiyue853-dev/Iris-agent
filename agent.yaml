@@ -59,3 +59,7 @@ memory:
   max_chars: 500
   max_injected_chars: 2000
   max_injected_entries: 20
+
+session_search:
+  max_hit_chars: 300
+  default_limit: 5
