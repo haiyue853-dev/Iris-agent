@@ -9,12 +9,13 @@ import SkillsPage from './components/skills/SkillsPage';
 import McpPage from './components/mcp/McpPage';
 import AutomationPage from './components/automation/AutomationPage';
 import TaskCenterPage from './components/tasks/TaskCenterPage';
+import MemoryPage from './components/memory/MemoryPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'tasks';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'tasks' | 'memory';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks', 'memory'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -119,6 +120,8 @@ function App() {
         )}
         {activeView === 'uml' ? null : activeView === 'tasks' ? (
           <TaskCenterPage selectedTaskId={selectedTaskId} />
+        ) : activeView === 'memory' ? (
+          <MemoryPage />
         ) : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (

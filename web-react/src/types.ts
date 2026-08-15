@@ -227,3 +227,15 @@ export type SkillInfo = {
   version: number;
   enabled: boolean;
 };
+
+// ---------- 记忆系统 ----------
+export type MemoryCategory = 'preference' | 'fact' | 'project' | 'other';
+
+export type MemoryEntry = {
+  id: string;
+  content: string;
+  category: MemoryCategory;
+  created_at: string;
+  updated_at: string;
+  source_session_id: string | null;
+};
