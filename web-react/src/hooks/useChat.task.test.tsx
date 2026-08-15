@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { cancelTask, createTask, getTask, resolveTaskApproval } from '../api/tasks';
-import { getSession, streamChat } from '../api/chat';
+import { deleteSession, getSession, streamChat } from '../api/chat';
 import { useChat } from './useChat';
 
 vi.mock('../api/chat', () => ({
@@ -216,6 +216,48 @@ describe('useChat background task support', () => {
     expect(result.current.approvalCallId).toBeNull();
     unmount();
     vi.useRealTimers();
+  });
+
+  it('stops and clears the current task when its session is deleted', async () => {
+    vi.useFakeTimers();
+    vi.mocked(createTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
+    vi.mocked(getTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'awaiting_approval', approval_call_id: 'call-1', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
+    vi.mocked(deleteSession).mockResolvedValue();
+    const { result, unmount } = renderHook(() => useChat());
+
+    await act(async () => { await result.current.handleSendWithSession('删除我'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.currentTaskStatus).toBe('awaiting_approval');
+    await act(async () => { await result.current.handleDeleteSession('session-1'); });
+    expect(result.current.currentSessionId).toBe('');
+    expect(result.current.currentTaskId).toBeNull();
+    expect(result.current.currentTaskStatus).toBeNull();
+    expect(result.current.queuePosition).toBeNull();
+    expect(result.current.approvalCallId).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    vi.mocked(getTask).mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(getTask).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it('keeps the newest session when an earlier switch request resolves late', async () => {
+    let resolveA!: (value: { messages: [{ role: 'assistant'; content: 'A 回复' }] }) => void;
+    let resolveB!: (value: { messages: [{ role: 'assistant'; content: 'B 回复' }] }) => void;
+    vi.mocked(getSession).mockImplementation((id) => new Promise((resolve) => {
+      if (id === 'session-a') resolveA = resolve as typeof resolveA;
+      else resolveB = resolve as typeof resolveB;
+    }));
+    const { result } = renderHook(() => useChat());
+
+    const switchA = result.current.handleSwitchSession('session-a');
+    const switchB = result.current.handleSwitchSession('session-b');
+    await act(async () => { resolveB({ messages: [{ role: 'assistant', content: 'B 回复' }] }); await switchB; });
+    await act(async () => { resolveA({ messages: [{ role: 'assistant', content: 'A 回复' }] }); await switchA; });
+
+    expect(result.current.currentSessionId).toBe('session-b');
+    expect(result.current.messages).toEqual([{ role: 'assistant', content: 'B 回复' }]);
   });
 
 });

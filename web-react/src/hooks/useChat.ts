@@ -29,6 +29,7 @@ export function useChat() {
   const currentTaskRef = useRef<string | null>(null);
   const pollersRef = useRef(new Map<string, TaskPoller>());
   const approvalRequestsRef = useRef(new Set<string>());
+  const sessionSwitchRequestRef = useRef(0);
 
   const refreshSessions = useCallback(async () => setSessions(await listSessions()), []);
   useEffect(() => { refreshSessions().catch(() => undefined); }, [refreshSessions]);
@@ -44,6 +45,24 @@ export function useChat() {
     });
   }, []);
   useEffect(() => () => { clearPollers(); pollersRef.current.clear(); }, [clearPollers]);
+
+  const clearCurrentTaskState = useCallback(() => {
+    currentTaskRef.current = null;
+    setCurrentTaskId(null);
+    setCurrentTaskStatus(null);
+    setQueuePosition(null);
+    setApprovalCallId(null);
+    setApprovalSubmitting(false);
+    setIsStreaming(false);
+  }, []);
+
+  const discardSessionTasks = useCallback((sessionId: string) => {
+    pollersRef.current.forEach((poller, taskId) => {
+      if (poller.sessionId !== sessionId) return;
+      if (poller.timer !== null) window.clearInterval(poller.timer);
+      pollersRef.current.delete(taskId);
+    });
+  }, []);
 
   const restoreSessionTask = useCallback((sessionId: string) => {
     const active = [...pollersRef.current.entries()].filter(([, poller]) => poller.sessionId === sessionId).at(-1);
@@ -82,8 +101,8 @@ export function useChat() {
         const session = await getSession(sessionId);
         if (currentSessionRef.current === sessionId) setMessages(session.messages);
       }
-      if (task.status === 'failed') showToast('任务执行失败');
-      if (task.status === 'stopped') showToast('任务已停止');
+      if (currentSessionRef.current === sessionId && task.status === 'failed') showToast('任务执行失败');
+      if (currentSessionRef.current === sessionId && task.status === 'stopped') showToast('任务已停止');
       await refreshSessions();
     } catch (error) {
       showToast(error instanceof Error ? error.message : '任务状态查询失败');
@@ -144,7 +163,9 @@ export function useChat() {
   }, [currentSessionId, showToast, startPolling]);
 
   const handleSwitchSession = useCallback(async (id: string) => {
+    const requestId = ++sessionSwitchRequestRef.current;
     const data = await getSession(id);
+    if (requestId !== sessionSwitchRequestRef.current) return;
     clearPollers(id);
     currentSessionRef.current = id;
     setCurrentSessionId(id);
@@ -156,8 +177,20 @@ export function useChat() {
     }
     setMessages(data.messages);
   }, [clearPollers, pollTask, restoreSessionTask, startPolling]);
-  const handleDeleteSession = useCallback(async (id: string) => { await deleteSession(id); if (id === currentSessionId) { setCurrentSessionId(''); setMessages([]); } await refreshSessions(); }, [currentSessionId, refreshSessions]);
-  const handleNewChat = useCallback(() => { clearPollers(); currentSessionRef.current = ''; currentTaskRef.current = null; setCurrentSessionId(''); setMessages([]); setPendingApproval(null); setCurrentTaskId(null); setCurrentTaskStatus(null); setQueuePosition(null); setApprovalCallId(null); setApprovalSubmitting(false); setIsStreaming(false); }, [clearPollers]);
+  const handleDeleteSession = useCallback(async (id: string) => {
+    await deleteSession(id);
+    discardSessionTasks(id);
+    if (id === currentSessionId) {
+      sessionSwitchRequestRef.current += 1;
+      currentSessionRef.current = '';
+      setCurrentSessionId('');
+      setMessages([]);
+      setPendingApproval(null);
+      clearCurrentTaskState();
+    }
+    await refreshSessions();
+  }, [clearCurrentTaskState, currentSessionId, discardSessionTasks, refreshSessions]);
+  const handleNewChat = useCallback(() => { clearPollers(); sessionSwitchRequestRef.current += 1; currentSessionRef.current = ''; setCurrentSessionId(''); setMessages([]); setPendingApproval(null); clearCurrentTaskState(); }, [clearCurrentTaskState, clearPollers]);
   const handleStop = useCallback(async () => {
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
     const taskId = currentTaskId;
