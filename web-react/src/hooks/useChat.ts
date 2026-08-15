@@ -5,7 +5,7 @@ import type { AgentEvent, Message, Session, TaskStatus } from '../types';
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'stopped']);
 type TaskPoller = {
-  timer: number;
+  timer: number | null;
   sessionId: string;
   status: TaskStatus;
   queuePosition: number | null;
@@ -37,17 +37,18 @@ export function useChat() {
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
   useEffect(() => { currentTaskRef.current = currentTaskId; }, [currentTaskId]);
   const clearPollers = useCallback((keepSessionId?: string) => {
-    pollersRef.current.forEach((poller, taskId) => {
+    pollersRef.current.forEach((poller) => {
       if (keepSessionId === poller.sessionId) return;
-      window.clearInterval(poller.timer);
-      pollersRef.current.delete(taskId);
+      if (poller.timer !== null) window.clearInterval(poller.timer);
+      poller.timer = null;
     });
   }, []);
-  useEffect(() => () => { clearPollers(); }, [clearPollers]);
+  useEffect(() => () => { clearPollers(); pollersRef.current.clear(); }, [clearPollers]);
 
   const restoreSessionTask = useCallback((sessionId: string) => {
     const active = [...pollersRef.current.entries()].filter(([, poller]) => poller.sessionId === sessionId).at(-1);
-    const [taskId, poller] = active ?? [];
+    const taskId = active?.[0] ?? null;
+    const poller = active?.[1];
     currentTaskRef.current = taskId ?? null;
     setCurrentTaskId(taskId ?? null);
     setCurrentTaskStatus(poller?.status ?? null);
@@ -55,6 +56,7 @@ export function useChat() {
     setApprovalCallId(poller?.approvalCallId ?? null);
     setApprovalSubmitting(false);
     setIsStreaming(poller ? !TERMINAL_TASK_STATUSES.has(poller.status) : false);
+    return active;
   }, []);
 
   const pollTask = useCallback(async (taskId: string, sessionId: string) => {
@@ -74,7 +76,7 @@ export function useChat() {
       }
       if (!TERMINAL_TASK_STATUSES.has(task.status)) return;
       const finishedPoller = pollersRef.current.get(taskId);
-      if (finishedPoller !== undefined) window.clearInterval(finishedPoller.timer);
+      if (finishedPoller?.timer !== null && finishedPoller !== undefined) window.clearInterval(finishedPoller.timer);
       pollersRef.current.delete(taskId);
       if (task.status === 'completed' && currentSessionRef.current === sessionId) {
         const session = await getSession(sessionId);
@@ -89,8 +91,11 @@ export function useChat() {
   }, [refreshSessions, showToast]);
 
   const startPolling = useCallback((taskId: string, sessionId: string) => {
+    const existing = pollersRef.current.get(taskId);
+    if (existing?.timer !== null && existing !== undefined) return;
     const timer = window.setInterval(() => { void pollTask(taskId, sessionId); }, 1000);
-    pollersRef.current.set(taskId, { timer, sessionId, status: 'queued', queuePosition: null, approvalCallId: null });
+    if (existing) existing.timer = timer;
+    else pollersRef.current.set(taskId, { timer, sessionId, status: 'queued', queuePosition: null, approvalCallId: null });
   }, [pollTask]);
 
   const resolvePendingApproval = useCallback(async (callId: string, approved: boolean) => {
@@ -138,13 +143,35 @@ export function useChat() {
     }
   }, [currentSessionId, showToast, startPolling]);
 
-  const handleSwitchSession = useCallback(async (id: string) => { const data = await getSession(id); clearPollers(id); currentSessionRef.current = id; setCurrentSessionId(id); restoreSessionTask(id); setMessages(data.messages); }, [clearPollers, restoreSessionTask]);
+  const handleSwitchSession = useCallback(async (id: string) => {
+    const data = await getSession(id);
+    clearPollers(id);
+    currentSessionRef.current = id;
+    setCurrentSessionId(id);
+    const active = restoreSessionTask(id);
+    if (active) {
+      const [taskId, poller] = active;
+      startPolling(taskId, poller.sessionId);
+      void pollTask(taskId, poller.sessionId);
+    }
+    setMessages(data.messages);
+  }, [clearPollers, pollTask, restoreSessionTask, startPolling]);
   const handleDeleteSession = useCallback(async (id: string) => { await deleteSession(id); if (id === currentSessionId) { setCurrentSessionId(''); setMessages([]); } await refreshSessions(); }, [currentSessionId, refreshSessions]);
   const handleNewChat = useCallback(() => { clearPollers(); currentSessionRef.current = ''; currentTaskRef.current = null; setCurrentSessionId(''); setMessages([]); setPendingApproval(null); setCurrentTaskId(null); setCurrentTaskStatus(null); setQueuePosition(null); setApprovalCallId(null); setApprovalSubmitting(false); setIsStreaming(false); }, [clearPollers]);
   const handleStop = useCallback(async () => {
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
     try {
       const task = await cancelTask(currentTaskId);
+      const poller = pollersRef.current.get(currentTaskId);
+      if (poller) {
+        poller.status = task.status;
+        poller.queuePosition = task.queue_position ?? null;
+        poller.approvalCallId = null;
+        if (TERMINAL_TASK_STATUSES.has(task.status)) {
+          if (poller.timer !== null) window.clearInterval(poller.timer);
+          pollersRef.current.delete(currentTaskId);
+        }
+      }
       setCurrentTaskStatus(task.status); setQueuePosition(task.queue_position ?? null); setIsStreaming(!TERMINAL_TASK_STATUSES.has(task.status));
     } catch (error) { showToast(error instanceof Error ? error.message : '停止任务失败'); }
   }, [currentTaskId, currentTaskStatus, showToast]);

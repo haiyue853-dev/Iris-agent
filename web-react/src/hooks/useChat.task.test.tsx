@@ -142,4 +142,35 @@ describe('useChat background task support', () => {
     vi.useRealTimers();
   });
 
+  it('restores each session active task after A to B to A switching without crossing cancellation', async () => {
+    vi.useFakeTimers();
+    vi.mocked(createTask)
+      .mockResolvedValueOnce({ id: 'task-a', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' })
+      .mockResolvedValueOnce({ id: 'task-b', request_summary: '后台任务', status: 'queued', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
+    vi.mocked(getTask).mockImplementation(async (taskId) => taskId === 'task-a'
+      ? { id: 'task-a', request_summary: '后台任务', status: 'awaiting_approval', approval_call_id: 'call-a', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] }
+      : { id: 'task-b', request_summary: '后台任务', status: 'running', approval_call_id: null, session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
+    vi.mocked(getSession).mockResolvedValue({ messages: [] });
+    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-b', request_summary: '后台任务', status: 'stopped', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' });
+    const { result, unmount } = renderHook(() => useChat());
+
+    await act(async () => { await result.current.handleSendWithSession('A'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await result.current.handleSwitchSession('session-2'); });
+    await act(async () => { await result.current.handleSendWithSession('B'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    await act(async () => { await result.current.handleSwitchSession('session-1'); });
+    expect(result.current.currentTaskId).toBe('task-a');
+    expect(result.current.currentTaskStatus).toBe('awaiting_approval');
+    expect(result.current.approvalCallId).toBe('call-a');
+    await act(async () => { await result.current.handleSwitchSession('session-2'); });
+    expect(result.current.currentTaskId).toBe('task-b');
+    expect(result.current.currentTaskStatus).toBe('running');
+    await act(async () => { await result.current.handleStop(); });
+    expect(cancelTask).toHaveBeenCalledWith('task-b');
+    unmount();
+    vi.useRealTimers();
+  });
+
 });
