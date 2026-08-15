@@ -57,7 +57,7 @@ class TaskQueueService:
             # the ledger failure as the caller-visible error while making the
             # already-created task terminal and visible to the user.
             try:
-                self.task_center.stop(task.id)
+                self.task_center.fail(task.id)
             except Exception:
                 pass
             raise
@@ -137,8 +137,12 @@ class TaskQueueService:
 
     def queue_position(self, task_id: str) -> int | None:
         """Return a one-based FIFO position for a job that has not started."""
-        for position, job in enumerate(self.repository.load(), start=1):
-            if job.task_id == task_id and job.state == "queued":
+        position = 0
+        for job in self.repository.load():
+            if job.state != "queued":
+                continue
+            position += 1
+            if job.task_id == task_id:
                 return position
         return None
 
@@ -168,7 +172,13 @@ class TaskQueueService:
                     self._condition.notify_all()
                 if cancelled:
                     self._stop_if_unfinished(job.task_id)
-                self._remove_job(job.task_id)
+                try:
+                    self._remove_job(job.task_id)
+                except Exception:
+                    # The active record remains durable when its deletion
+                    # fails.  It will be recovered on the next service start;
+                    # do not sacrifice the sole worker and strand later jobs.
+                    pass
 
     def _run_job(self, job: QueueJob) -> None:
         with self._condition:

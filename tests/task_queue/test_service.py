@@ -85,6 +85,19 @@ class FailingSaveQueueRepository(QueueRepository):
         raise QueueLedgerError("simulated queue ledger failure")
 
 
+class FailFirstRemovalQueueRepository(QueueRepository):
+    def __init__(self, root) -> None:
+        super().__init__(root)
+        self.save_calls = 0
+
+    def save(self, jobs) -> None:
+        self.save_calls += 1
+        # submit ×2, first claim, then the first completed-job cleanup.
+        if self.save_calls == 4:
+            raise QueueLedgerError("simulated cleanup failure")
+        super().save(jobs)
+
+
 @pytest.fixture
 def queue_service(tmp_path):
     tasks = TaskCenterService(tmp_path / "tasks")
@@ -172,7 +185,7 @@ def test_queued_cancel_linearizes_before_worker_claim_and_never_runs_agent(tmp_p
     assert agent.calls == []
 
 
-def test_submit_stops_created_task_when_queue_ledger_write_fails(tmp_path) -> None:
+def test_submit_fails_created_task_when_queue_ledger_write_fails(tmp_path) -> None:
     tasks = TaskCenterService(tmp_path / "tasks")
     queue = FailingSaveQueueRepository(tmp_path / "queue")
     service = TaskQueueService(ControlledAgentService(), tasks, queue)
@@ -182,7 +195,26 @@ def test_submit_stops_created_task_when_queue_ledger_write_fails(tmp_path) -> No
 
     created = tasks.list_tasks()
     assert len(created) == 1
-    assert created[0].status == "stopped"
+    assert created[0].status == "failed"
+
+
+def test_worker_continues_to_later_jobs_when_completed_job_cleanup_fails_once(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks")
+    queue = FailFirstRemovalQueueRepository(tmp_path / "queue")
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    first = service.submit("session-a", "first")
+    second = service.submit("session-b", "second")
+    service.start()
+    try:
+        _wait_for(lambda: tasks.get_task(second.id).status == "completed")
+        assert tasks.get_task(first.id).status == "completed"
+        assert agent.calls == ["first", "second"]
+        # The first active record was intentionally retained after the failed
+        # cleanup, so a later process start can apply normal recovery rules.
+        assert any(job.task_id == first.id and job.state == "active" for job in queue.load())
+    finally:
+        service.stop()
 
 
 def test_cancel_awaiting_job_discards_pending_approval_and_unblocks_worker(queue_service) -> None:
@@ -260,3 +292,33 @@ def test_queue_position_and_ledger_shape_remain_minimal(queue_service) -> None:
         {"task_id", "session_id", "message", "created_at", "state"},
         {"task_id", "session_id", "message", "created_at", "state"},
     ]
+
+
+def test_queue_position_ignores_active_records_when_numbering_queued_jobs(queue_service) -> None:
+    service, _, _, queue = queue_service
+    active = QueueJob(
+        task_id="active-task",
+        session_id="session-a",
+        message="active",
+        created_at="2026-08-14T00:00:00+00:00",
+        state="active",
+    )
+    first = QueueJob(
+        task_id="queued-first",
+        session_id="session-b",
+        message="first",
+        created_at="2026-08-14T00:01:00+00:00",
+        state="queued",
+    )
+    second = QueueJob(
+        task_id="queued-second",
+        session_id="session-c",
+        message="second",
+        created_at="2026-08-14T00:02:00+00:00",
+        state="queued",
+    )
+    queue.save([active, first, second])
+
+    assert service.queue_position(active.task_id) is None
+    assert service.queue_position(first.task_id) == 1
+    assert service.queue_position(second.task_id) == 2
