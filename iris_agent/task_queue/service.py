@@ -49,8 +49,18 @@ class TaskQueueService:
         """Create a queued task and persist only its safe queue record."""
         task = self.task_center.create_queued_task(session_id, message)
         job = QueueJob.new(session_id, message, task_id=task.id)
-        with self.repository.transaction():
-            self.repository.save([*self.repository.load(), job])
+        try:
+            with self.repository.transaction():
+                self.repository.save([*self.repository.load(), job])
+        except Exception:
+            # A task without a durable queue job can never be executed.  Keep
+            # the ledger failure as the caller-visible error while making the
+            # already-created task terminal and visible to the user.
+            try:
+                self.task_center.stop(task.id)
+            except Exception:
+                pass
+            raise
         with self._condition:
             self._condition.notify_all()
         return task
@@ -110,6 +120,12 @@ class TaskQueueService:
             if current:
                 self._cancel_requested.add(task_id)
                 self._condition.notify_all()
+            elif waiting is None:
+                # Keep the check, queue removal, and terminal transition under
+                # the worker's claim lock.  Otherwise the worker can claim a
+                # job after this check and before the job is removed.
+                self._remove_job(task_id)
+                return self.task_center.stop(task_id)
 
         if waiting is not None:
             _, call_id, _ = waiting
@@ -117,9 +133,7 @@ class TaskQueueService:
             return self._stop_and_remove(task_id)
         if current:
             return self._request_stop(task_id)
-
-        self._remove_job(task_id)
-        return self.task_center.stop(task_id)
+        raise AssertionError("unreachable queued task cancellation state")
 
     def queue_position(self, task_id: str) -> int | None:
         """Return a one-based FIFO position for a job that has not started."""
@@ -157,7 +171,15 @@ class TaskQueueService:
                 self._remove_job(job.task_id)
 
     def _run_job(self, job: QueueJob) -> None:
-        self.task_center.start(job.task_id)
+        with self._condition:
+            if job.task_id in self._cancel_requested:
+                return
+            task = self.task_center.get_task(job.task_id)
+            if task is None or task.status != "queued":
+                return
+            self.task_center.start(job.task_id)
+            if job.task_id in self._cancel_requested:
+                return
         events = self.agent_service.run(job.session_id, job.message)
         resumed_call_id: str | None = None
         while True:

@@ -8,7 +8,7 @@ import pytest
 from iris_agent.core.models import AgentEvent
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.models import QueueJob
-from iris_agent.task_queue.repository import QueueRepository
+from iris_agent.task_queue.repository import QueueLedgerError, QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
 
 
@@ -61,6 +61,28 @@ class ControlledAgentService:
     def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
         self.cancelled.append((session_id, call_id))
         return True
+
+
+class BlockingRemovalTaskQueueService(TaskQueueService):
+    """Expose the old cancel/check-to-remove gap deterministically."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.removal_entered = threading.Event()
+        self.release_removal = threading.Event()
+        self._block_next_removal = True
+
+    def _remove_job(self, task_id: str) -> None:
+        if self._block_next_removal:
+            self._block_next_removal = False
+            self.removal_entered.set()
+            assert self.release_removal.wait(2)
+        super()._remove_job(task_id)
+
+
+class FailingSaveQueueRepository(QueueRepository):
+    def save(self, jobs) -> None:
+        raise QueueLedgerError("simulated queue ledger failure")
 
 
 @pytest.fixture
@@ -120,6 +142,47 @@ def test_cancel_queued_job_removes_it_without_starting_agent(queue_service) -> N
     service.start()
     time.sleep(0.05)
     assert agent.calls == []
+
+
+def test_queued_cancel_linearizes_before_worker_claim_and_never_runs_agent(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks")
+    queue = QueueRepository(tmp_path / "queue")
+    agent = ControlledAgentService()
+    service = BlockingRemovalTaskQueueService(agent, tasks, queue)
+    queued = service.submit("session-a", "never-start")
+
+    cancellation = threading.Thread(target=service.cancel, args=(queued.id,))
+    cancellation.start()
+    assert service.removal_entered.wait(1)
+    starter = threading.Thread(target=service.start)
+    starter.start()
+    # The previous implementation released the service lock before removal,
+    # allowing this worker to claim and run the job at this point.  The fixed
+    # implementation keeps it blocked until removal and stop are committed.
+    time.sleep(0.05)
+    service.release_removal.set()
+    cancellation.join(timeout=1)
+    starter.join(timeout=1)
+    assert not cancellation.is_alive()
+    assert not starter.is_alive()
+    time.sleep(0.05)
+    service.stop()
+
+    assert tasks.get_task(queued.id).status == "stopped"
+    assert agent.calls == []
+
+
+def test_submit_stops_created_task_when_queue_ledger_write_fails(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks")
+    queue = FailingSaveQueueRepository(tmp_path / "queue")
+    service = TaskQueueService(ControlledAgentService(), tasks, queue)
+
+    with pytest.raises(QueueLedgerError, match="simulated queue ledger failure"):
+        service.submit("session-a", "cannot be persisted")
+
+    created = tasks.list_tasks()
+    assert len(created) == 1
+    assert created[0].status == "stopped"
 
 
 def test_cancel_awaiting_job_discards_pending_approval_and_unblocks_worker(queue_service) -> None:
