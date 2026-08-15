@@ -163,6 +163,17 @@ def test_restart_stops_unfinished_tasks_and_persists_a_safe_recovery_event(tmp_p
         assert recovered.events[-1].label == "服务重启，执行未完成"
 
 
+def test_explicit_recovery_interruption_uses_the_safe_restart_reason(tmp_path):
+    service = TaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    task = service.create_task("session", "restart me")
+
+    recovered = service.recover_interrupted(task.id)
+
+    assert recovered.status == "stopped"
+    assert recovered.events[-1].type == "execution_interrupted"
+    assert recovered.events[-1].label == "服务重启，执行未完成"
+
+
 def test_list_filter_persistence_and_missing_task(tmp_path):
     service = _build_service(tmp_path)
     first = service.create_task("session-a", "one")

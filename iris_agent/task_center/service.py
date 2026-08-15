@@ -177,6 +177,16 @@ class TaskCenterService:
     def stop(self, task_id: str) -> AgentTask:
         return self._append(task_id, "execution_interrupted", "执行已中断", status="stopped", terminal=True)
 
+    def recover_interrupted(self, task_id: str) -> AgentTask:
+        """Safely stop an unfinished task discovered during service recovery."""
+        return self._append(
+            task_id,
+            "execution_interrupted",
+            "服务重启，执行未完成",
+            status="stopped",
+            terminal=True,
+        )
+
     def _recover_unfinished(self) -> None:
         with self.repository.transaction():
             tasks = self.repository.load()

@@ -154,7 +154,14 @@ class TaskQueueService:
             with self._condition:
                 if self._stopping:
                     return
-                job = self._claim_next_job()
+                try:
+                    job = self._claim_next_job()
+                except Exception:
+                    # A queued job has not been claimed until its active
+                    # ledger state is durably saved.  Retry that I/O boundary
+                    # later without failing or otherwise changing the task.
+                    self._condition.wait(timeout=0.1)
+                    continue
                 if job is None:
                     self._condition.wait(timeout=0.2)
                     continue
@@ -279,7 +286,7 @@ class TaskQueueService:
             jobs = self.repository.load()
             active_ids = [job.task_id for job in jobs if job.state == "active"]
             for task_id in active_ids:
-                self._stop_if_unfinished(task_id)
+                self._recover_interrupted_if_unfinished(task_id)
             if active_ids:
                 self.repository.save([job for job in jobs if job.state != "active"])
 
@@ -312,6 +319,12 @@ class TaskQueueService:
         if task is None or task.status in TERMINAL_STATUSES:
             return task  # type: ignore[return-value]
         return self.task_center.stop(task_id)
+
+    def _recover_interrupted_if_unfinished(self, task_id: str) -> AgentTask:
+        task = self.task_center.get_task(task_id)
+        if task is None or task.status in TERMINAL_STATUSES:
+            return task  # type: ignore[return-value]
+        return self.task_center.recover_interrupted(task_id)
 
     def _fail_if_unfinished(self, task_id: str) -> None:
         task = self.task_center.get_task(task_id)

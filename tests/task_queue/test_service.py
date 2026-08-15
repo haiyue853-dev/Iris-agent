@@ -98,6 +98,20 @@ class FailFirstRemovalQueueRepository(QueueRepository):
         super().save(jobs)
 
 
+class FailFirstClaimQueueRepository(QueueRepository):
+    def __init__(self, root) -> None:
+        super().__init__(root)
+        self.save_calls = 0
+
+    def save(self, jobs) -> None:
+        self.save_calls += 1
+        # First submit succeeds; first worker claim fails before changing the
+        # queued ledger record, then the retry must claim it successfully.
+        if self.save_calls == 2:
+            raise QueueLedgerError("simulated claim failure")
+        super().save(jobs)
+
+
 class BlockingCreateTaskCenterService(TaskCenterService):
     """Pause a submit after its task exists but before its queue record exists."""
 
@@ -262,6 +276,21 @@ def test_worker_continues_to_later_jobs_when_completed_job_cleanup_fails_once(tm
         service.stop()
 
 
+def test_worker_retries_a_failed_claim_and_executes_the_queued_job(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks")
+    queue = FailFirstClaimQueueRepository(tmp_path / "queue")
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    queued = service.submit("session-a", "after-claim-retry")
+    service.start()
+    try:
+        _wait_for(lambda: tasks.get_task(queued.id).status == "completed")
+        assert agent.calls == ["after-claim-retry"]
+        assert queue.save_calls >= 3
+    finally:
+        service.stop()
+
+
 def test_cancel_awaiting_job_discards_pending_approval_and_unblocks_worker(queue_service) -> None:
     service, agent, tasks, queue = queue_service
     waiting = service.submit("session-a", "approval")
@@ -318,6 +347,7 @@ def test_startup_recovers_active_job_but_keeps_queued_job_available(tmp_path) ->
         service.start()
         assert agent.started.wait(1)
         assert tasks.get_task(active_task.id).status == "stopped"
+        assert tasks.get_task(active_task.id).events[-1].label == "服务重启，执行未完成"
         assert all(job.task_id != active_task.id for job in queue.load())
         assert tasks.get_task(queued_task.id).status == "running"
     finally:
