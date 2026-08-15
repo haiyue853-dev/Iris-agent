@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from iris_agent.core.errors import ToolApprovalNotFoundError
 from iris_agent.core.models import AgentEvent, Message, ToolCall
 from iris_agent.memory.service import MemoryService
+from iris_agent.profile.service import ProfileService
 from iris_agent.tools.base import ToolExecutionResult
 from iris_agent.providers.base import ModelProvider
 from iris_agent.sessions.base import Session, SessionRepository
@@ -58,16 +59,21 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
         self.memory = memory
+        self.profile_service = profile_service
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
         self._approval_lock = threading.RLock()
 
     def _build_messages(self, session: Session) -> list[Message]:
         messages = [Message(role="system", content=self.system_prompt)]
+        if self.profile_service is not None:
+            profile_text = self.profile_service.render()
+            if profile_text:
+                messages.append(Message(role="system", content=profile_text))
         if self.memory is not None:
             for memory in self.memory.inject():
                 messages.append(Message(role="system", content=f"[记忆·{memory.category}] {memory.content}"))
@@ -80,6 +86,8 @@ class AgentService:
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
             yield from self._run_loop(session_id, messages)
+            if self.profile_service is not None:
+                self.profile_service.maybe_update(user_message)
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
