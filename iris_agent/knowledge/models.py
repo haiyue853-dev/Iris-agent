@@ -106,3 +106,23 @@ class KnowledgeEntry:
             created_at=data["created_at"],
             updated_at=data["updated_at"],
         )
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSearchHit:
+    """A matched knowledge entry with a relevance score."""
+
+    entry_id: str
+    title: str
+    content: str
+    source_url: str | None
+    score: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "title": self.title,
+            "content": self.content,
+            "source_url": self.source_url,
+            "score": self.score,
+        }
