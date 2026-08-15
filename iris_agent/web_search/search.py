@@ -8,10 +8,14 @@ from bs4 import BeautifulSoup
 from iris_agent.web_search.models import SearchResult
 
 _SEARCH_URL = "https://www.bing.com/search"
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
-)
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
 
 
 class WebSearchClient:
@@ -40,7 +44,7 @@ class WebSearchClient:
             response = self._client.get(
                 _SEARCH_URL,
                 params={"q": query, "count": count},
-                headers={"User-Agent": _USER_AGENT},
+                headers=_HEADERS,
             )
             response.raise_for_status()
         except Exception as exc:

@@ -8,10 +8,15 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
-)
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+}
 
 _REMOVED_TAGS = ("script", "style", "nav", "header", "footer", "aside", "noscript", "iframe")
 
@@ -33,14 +38,21 @@ class PageFetcher:
         if not self.enabled:
             raise ValueError("联网抓取已禁用")
         self._validate_url(url)
+        headers = dict(_HEADERS)
+        headers["Referer"] = self._referer(url)
         try:
-            response = self._client.get(url, headers={"User-Agent": _USER_AGENT})
+            response = self._client.get(url, headers=headers)
             response.raise_for_status()
         except ValueError:
             raise
         except Exception as exc:
             raise ValueError(f"网页抓取失败: {exc}") from exc
         return self._extract_text(response.text)[: self.max_page_chars]
+
+    @staticmethod
+    def _referer(url: str) -> str:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}/"
 
     @staticmethod
     def _validate_url(url: str) -> None:
