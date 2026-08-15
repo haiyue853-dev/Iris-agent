@@ -23,6 +23,7 @@ class QueueRepository:
 
     _locks_guard = threading.Lock()
     _locks: dict[Path, threading.RLock] = {}
+    _transaction_paths = threading.local()
 
     def __init__(self, root: Path):
         self.root = root
@@ -38,7 +39,16 @@ class QueueRepository:
 
     def save(self, jobs: list[QueueJob]) -> None:
         with self._lock:
-            self._save_unlocked(jobs)
+            if self._in_transaction():
+                self._save_validated_unlocked(jobs)
+            else:
+                with self._cross_process_lock():
+                    self._save_validated_unlocked(jobs)
+
+    def _save_validated_unlocked(self, jobs: list[QueueJob]) -> None:
+        if self.path.is_file():
+            self._load_unlocked()
+        self._save_unlocked(jobs)
 
     def _load_unlocked(self) -> list[QueueJob]:
         if not self.path.is_file():
@@ -87,8 +97,25 @@ class QueueRepository:
     def transaction(self) -> Iterator[None]:
         """Serialize a queue read-modify-write in and across Windows processes."""
         with self._lock:
-            with self._cross_process_lock():
+            if self._in_transaction():
                 yield
+                return
+            with self._cross_process_lock():
+                paths = self._active_transaction_paths()
+                paths.add(self.path.resolve())
+                try:
+                    yield
+                finally:
+                    paths.remove(self.path.resolve())
+
+    def _in_transaction(self) -> bool:
+        return self.path.resolve() in self._active_transaction_paths()
+
+    @classmethod
+    def _active_transaction_paths(cls) -> set[Path]:
+        if not hasattr(cls._transaction_paths, "paths"):
+            cls._transaction_paths.paths = set()
+        return cls._transaction_paths.paths
 
     @contextmanager
     def _cross_process_lock(self) -> Iterator[None]:

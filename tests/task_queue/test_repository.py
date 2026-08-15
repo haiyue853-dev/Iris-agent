@@ -87,6 +87,45 @@ def test_invalid_ledger_payload_raises_without_overwriting_source(tmp_path, payl
     assert path.read_bytes() == payload
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"not valid json",
+        json.dumps([{}]).encode(),
+        json.dumps({"jobs": [{}]}).encode(),
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "task_id": "task-1",
+                        "session_id": "session-1",
+                        "message": "message",
+                        "created_at": "2026-08-14T10:00:00+00:00",
+                        "state": "complete",
+                    }
+                ]
+            }
+        ).encode(),
+    ],
+)
+def test_save_rejects_invalid_source_without_replacing_its_bytes(tmp_path, payload: bytes) -> None:
+    path = tmp_path / "queue.json"
+    path.write_bytes(payload)
+    repository = QueueRepository(tmp_path)
+    job = QueueJob(
+        task_id="task-1",
+        session_id="session-1",
+        message="message",
+        created_at="2026-08-14T10:00:00+00:00",
+        state="queued",
+    )
+
+    with pytest.raises(QueueLedgerError):
+        repository.save([job])
+
+    assert path.read_bytes() == payload
+
+
 def test_to_dict_has_exactly_the_safe_persisted_keys() -> None:
     job = QueueJob(
         task_id="task-1",
