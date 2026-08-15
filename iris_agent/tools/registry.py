@@ -25,6 +25,15 @@ class ToolRegistry:
     def tools_with_prefix(self, prefix: str) -> list[Tool]:
         return [tool for name, tool in self._tools.items() if name.startswith(prefix)]
 
+    def subset(self, names: list[str]) -> "ToolRegistry":
+        """Return a new registry containing only the named tools (unknown names skipped)."""
+        sub = ToolRegistry()
+        for name in names:
+            tool = self._tools.get(name)
+            if tool is not None:
+                sub.register(tool)
+        return sub
+
     def requires_approval(self, name: str) -> bool:
         tool = self._tools.get(name)
         return tool is not None and tool.requires_approval
