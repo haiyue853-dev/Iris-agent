@@ -160,21 +160,31 @@ export function useChat() {
   const handleNewChat = useCallback(() => { clearPollers(); currentSessionRef.current = ''; currentTaskRef.current = null; setCurrentSessionId(''); setMessages([]); setPendingApproval(null); setCurrentTaskId(null); setCurrentTaskStatus(null); setQueuePosition(null); setApprovalCallId(null); setApprovalSubmitting(false); setIsStreaming(false); }, [clearPollers]);
   const handleStop = useCallback(async () => {
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
+    const taskId = currentTaskId;
+    const sessionId = currentSessionId;
     try {
-      const task = await cancelTask(currentTaskId);
-      const poller = pollersRef.current.get(currentTaskId);
+      const task = await cancelTask(taskId);
+      const poller = pollersRef.current.get(taskId);
       if (poller) {
         poller.status = task.status;
         poller.queuePosition = task.queue_position ?? null;
         poller.approvalCallId = null;
         if (TERMINAL_TASK_STATUSES.has(task.status)) {
           if (poller.timer !== null) window.clearInterval(poller.timer);
-          pollersRef.current.delete(currentTaskId);
+          pollersRef.current.delete(taskId);
         }
       }
-      setCurrentTaskStatus(task.status); setQueuePosition(task.queue_position ?? null); setIsStreaming(!TERMINAL_TASK_STATUSES.has(task.status));
-    } catch (error) { showToast(error instanceof Error ? error.message : '停止任务失败'); }
-  }, [currentTaskId, currentTaskStatus, showToast]);
+      if (currentTaskRef.current === taskId && currentSessionRef.current === sessionId) {
+        setCurrentTaskStatus(task.status);
+        setQueuePosition(task.queue_position ?? null);
+        setApprovalCallId(null);
+        setApprovalSubmitting(false);
+        setIsStreaming(!TERMINAL_TASK_STATUSES.has(task.status));
+      }
+    } catch (error) {
+      if (currentTaskRef.current === taskId && currentSessionRef.current === sessionId) showToast(error instanceof Error ? error.message : '停止任务失败');
+    }
+  }, [currentSessionId, currentTaskId, currentTaskStatus, showToast]);
   const handleCopy = useCallback((text: string) => { navigator.clipboard.writeText(text).then(() => showToast('已复制')); }, [showToast]);
   const handleRegenerate = useCallback(() => showToast('当前版本暂不支持重新生成'), [showToast]);
   const handleEditMessage = useCallback((_index: number, _content: string) => showToast('当前版本暂不支持编辑历史消息'), [showToast]);

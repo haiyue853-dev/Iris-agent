@@ -82,4 +82,21 @@ describe('App workspace navigation', () => {
     expect(screen.getByRole('main', { name: 'Skills 中心' })).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
+
+  it('passes approval submission state to the visible chat controls', () => {
+    vi.mocked(useChat).mockReturnValue({
+      ...useChat(),
+      messages: [{ role: 'user', content: '需要审批' }],
+      isStreaming: true,
+      currentTaskId: 'task-1',
+      currentTaskStatus: 'awaiting_approval',
+      approvalCallId: 'call-1',
+      approvalSubmitting: true,
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole('button', { name: '批准执行' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+  });
 });

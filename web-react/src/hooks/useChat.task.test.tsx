@@ -173,4 +173,49 @@ describe('useChat background task support', () => {
     vi.useRealTimers();
   });
 
+  it('does not let a delayed cancellation from A overwrite the restored B task', async () => {
+    vi.useFakeTimers();
+    vi.mocked(createTask)
+      .mockResolvedValueOnce({ id: 'task-a', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' })
+      .mockResolvedValueOnce({ id: 'task-b', request_summary: '后台任务', status: 'queued', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
+    vi.mocked(getTask).mockImplementation(async (taskId) => ({ id: taskId, request_summary: '后台任务', status: 'running', session_id: taskId === 'task-a' ? 'session-1' : 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] }));
+    vi.mocked(getSession).mockResolvedValue({ messages: [] });
+    let resolveCancel!: (task: { id: string; request_summary: string; status: 'stopped'; session_id: string; created_at: string; updated_at: string }) => void;
+    vi.mocked(cancelTask).mockImplementation(() => new Promise((resolve) => { resolveCancel = resolve; }));
+    const { result, unmount } = renderHook(() => useChat());
+
+    await act(async () => { await result.current.handleSendWithSession('A'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await result.current.handleSwitchSession('session-2'); });
+    await act(async () => { await result.current.handleSendWithSession('B'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await result.current.handleSwitchSession('session-1'); });
+
+    void result.current.handleStop();
+    await act(async () => { await result.current.handleSwitchSession('session-2'); });
+    expect(result.current.currentTaskId).toBe('task-b');
+    await act(async () => { resolveCancel({ id: 'task-a', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' }); });
+    expect(result.current.currentTaskId).toBe('task-b');
+    expect(result.current.currentTaskStatus).toBe('running');
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it('clears an awaiting task approval call id after cancellation reaches a terminal state', async () => {
+    vi.useFakeTimers();
+    vi.mocked(createTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
+    vi.mocked(getTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'awaiting_approval', approval_call_id: 'call-1', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
+    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' });
+    const { result, unmount } = renderHook(() => useChat());
+
+    await act(async () => { await result.current.handleSendWithSession('等待审批'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.approvalCallId).toBe('call-1');
+    await act(async () => { await result.current.handleStop(); });
+    expect(result.current.currentTaskStatus).toBe('stopped');
+    expect(result.current.approvalCallId).toBeNull();
+    unmount();
+    vi.useRealTimers();
+  });
+
 });
