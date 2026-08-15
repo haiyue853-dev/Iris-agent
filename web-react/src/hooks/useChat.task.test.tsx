@@ -151,7 +151,7 @@ describe('useChat background task support', () => {
       ? { id: 'task-a', request_summary: '后台任务', status: 'awaiting_approval', approval_call_id: 'call-a', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] }
       : { id: 'task-b', request_summary: '后台任务', status: 'running', approval_call_id: null, session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
     vi.mocked(getSession).mockResolvedValue({ messages: [] });
-    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-b', request_summary: '后台任务', status: 'stopped', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' });
+    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-b', request_summary: '后台任务', status: 'stopped', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z', events: [] });
     const { result, unmount } = renderHook(() => useChat());
 
     await act(async () => { await result.current.handleSendWithSession('A'); });
@@ -180,7 +180,7 @@ describe('useChat background task support', () => {
       .mockResolvedValueOnce({ id: 'task-b', request_summary: '后台任务', status: 'queued', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
     vi.mocked(getTask).mockImplementation(async (taskId) => ({ id: taskId, request_summary: '后台任务', status: 'running', session_id: taskId === 'task-a' ? 'session-1' : 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] }));
     vi.mocked(getSession).mockResolvedValue({ messages: [] });
-    let resolveCancel!: (task: { id: string; request_summary: string; status: 'stopped'; session_id: string; created_at: string; updated_at: string }) => void;
+    let resolveCancel!: (task: { id: string; request_summary: string; status: 'stopped'; session_id: string; created_at: string; updated_at: string; events: [] }) => void;
     vi.mocked(cancelTask).mockImplementation(() => new Promise((resolve) => { resolveCancel = resolve; }));
     const { result, unmount } = renderHook(() => useChat());
 
@@ -194,7 +194,7 @@ describe('useChat background task support', () => {
     void result.current.handleStop();
     await act(async () => { await result.current.handleSwitchSession('session-2'); });
     expect(result.current.currentTaskId).toBe('task-b');
-    await act(async () => { resolveCancel({ id: 'task-a', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' }); });
+    await act(async () => { resolveCancel({ id: 'task-a', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z', events: [] }); });
     expect(result.current.currentTaskId).toBe('task-b');
     expect(result.current.currentTaskStatus).toBe('running');
     unmount();
@@ -205,7 +205,7 @@ describe('useChat background task support', () => {
     vi.useFakeTimers();
     vi.mocked(createTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
     vi.mocked(getTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'awaiting_approval', approval_call_id: 'call-1', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
-    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z' });
+    vi.mocked(cancelTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'stopped', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:01Z', events: [] });
     const { result, unmount } = renderHook(() => useChat());
 
     await act(async () => { await result.current.handleSendWithSession('等待审批'); });

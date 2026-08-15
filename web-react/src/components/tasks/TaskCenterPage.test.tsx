@@ -78,4 +78,23 @@ describe('TaskCenterPage', () => {
     resolveLatest({ ok: true, json: async () => second });
     expect(await screen.findByRole('heading', { name: '第二个任务' })).toBeInTheDocument();
   });
+
+  it('shows a queued task position and sends its cancellation request', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tasks: [{ ...task, status: 'queued', queue_position: 2 }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...task, status: 'queued', queue_position: 2, events: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...task, status: 'stopped', events: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TaskCenterPage />);
+
+    expect(await screen.findByText('队列第 2 位')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '取消任务' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining('/api/tasks/task-1'),
+      { method: 'DELETE' },
+    );
+  });
 });

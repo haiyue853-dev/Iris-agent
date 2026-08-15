@@ -28,8 +28,8 @@ export function createTask(sessionId: string, message: string): Promise<AgentTas
   });
 }
 
-export function cancelTask(id: string): Promise<AgentTask> {
-  return request<AgentTask>(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export function cancelTask(id: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function resolveTaskApproval(taskId: string, callId: string, approved: boolean): Promise<AgentTask> {
