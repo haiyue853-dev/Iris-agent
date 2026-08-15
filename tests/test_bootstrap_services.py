@@ -150,6 +150,17 @@ def test_build_application_exposes_profile_service_and_wires_into_agent(tmp_path
     assert application.profile.repository.root == Path("data/profile")
 
 
+def test_build_application_wires_compressor_into_agent(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.agent.compressor is not None
+    assert application.agent.compressor.trigger_chars == 12000
+    assert application.agent.compressor.keep_recent == 10
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

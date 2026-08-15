@@ -120,6 +120,14 @@ class ProfileSettings:
 
 
 @dataclass(slots=True)
+class ContextSettings:
+    trigger_chars: int = 12000
+    keep_recent: int = 10
+    max_summary_chars: int = 2000
+    enabled: bool = True
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -141,6 +149,7 @@ class Settings:
     session_search: SessionSearchSettings = field(default_factory=SessionSearchSettings)
     subagent: SubagentSettings = field(default_factory=SubagentSettings)
     profile: ProfileSettings = field(default_factory=ProfileSettings)
+    context: ContextSettings = field(default_factory=ContextSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -185,6 +194,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     session_search = _section(raw, "session_search")
     subagent = _section(raw, "subagent")
     profile = _section(raw, "profile")
+    context = _section(raw, "context")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -252,6 +262,12 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_item_chars=int(profile.get("max_item_chars", 200)),
             extract_interval_rounds=int(profile.get("extract_interval_rounds", 10)),
             enabled=bool(profile.get("enabled", True)),
+        ),
+        context=ContextSettings(
+            trigger_chars=int(context.get("trigger_chars", 12000)),
+            keep_recent=int(context.get("keep_recent", 10)),
+            max_summary_chars=int(context.get("max_summary_chars", 2000)),
+            enabled=bool(context.get("enabled", True)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

@@ -5,6 +5,7 @@ import atexit
 from openai import OpenAI
 
 from iris_agent.config.settings import Settings, load_settings
+from iris_agent.context_compression.compressor import ContextCompressor
 from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
@@ -94,8 +95,15 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         extract_interval_rounds=settings.profile.extract_interval_rounds,
         enabled=settings.profile.enabled,
     )
+    compressor = ContextCompressor(
+        provider,
+        trigger_chars=settings.context.trigger_chars,
+        keep_recent=settings.context.keep_recent,
+        max_summary_chars=settings.context.max_summary_chars,
+        enabled=settings.context.enabled,
+    )
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile)
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,

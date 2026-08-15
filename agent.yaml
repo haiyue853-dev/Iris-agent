@@ -80,3 +80,9 @@ profile:
   extract_interval_rounds: 10
   enabled: true
 
+context:
+  trigger_chars: 12000
+  keep_recent: 10
+  max_summary_chars: 2000
+  enabled: true
+
