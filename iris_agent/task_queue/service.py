@@ -317,8 +317,14 @@ class TaskQueueService:
                     recovered_jobs.append(replace(job, state="queued"))
                     changed = True
                 elif task is not None and task.status in {"running", "awaiting_approval"}:
-                    self.task_center.recover_interrupted(job.task_id)
-                    changed = True
+                    try:
+                        self.task_center.recover_interrupted(job.task_id)
+                    except Exception:
+                        # The task marker was not durable.  Preserve its
+                        # active QueueJob exactly for a later recovery pass.
+                        recovered_jobs.append(job)
+                    else:
+                        changed = True
                 else:
                     # Terminal or missing tasks cannot be resumed; discard
                     # only their stale active ledger entry.
@@ -336,7 +342,13 @@ class TaskQueueService:
                 continue
             task = self.task_center.get_task(summary.id)
             if task is not None and task.events and task.events[0].type == "request_queued":
-                self.task_center.fail(task.id)
+                try:
+                    self.task_center.fail(task.id)
+                except Exception:
+                    # No full message exists to replay and the failure marker
+                    # was not durable, so leave the queued record unchanged
+                    # for the next startup recovery attempt.
+                    continue
 
     def _remove_job(self, task_id: str) -> None:
         with self.repository.transaction():

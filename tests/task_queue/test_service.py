@@ -143,6 +143,18 @@ class FailFirstTaskCenterFailureService(TaskCenterService):
         return super().fail(task_id)
 
 
+class FailFirstRecoveryTaskCenterService(TaskCenterService):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.recovery_calls = 0
+
+    def recover_interrupted(self, task_id: str):
+        self.recovery_calls += 1
+        if self.recovery_calls == 1:
+            raise OSError("simulated recovery marker failure")
+        return super().recover_interrupted(task_id)
+
+
 @pytest.fixture
 def queue_service(tmp_path):
     tasks = TaskCenterService(tmp_path / "tasks")
@@ -447,6 +459,55 @@ def test_worker_continues_when_provider_and_first_failure_marker_both_fail(tmp_p
         assert any(job.task_id == failed_marker.id and job.state == "active" for job in queue.load())
     finally:
         service.stop()
+
+
+def test_startup_failure_to_mark_orphan_does_not_block_healthy_job(tmp_path) -> None:
+    tasks = FailFirstTaskCenterFailureService(tmp_path / "tasks", recover_unfinished=False)
+    queue = QueueRepository(tmp_path / "queue")
+    orphan = tasks.create_queued_task("orphan", "unrecoverable message")
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    healthy = service.submit("session", "healthy")
+    try:
+        service.start()
+        _wait_for(lambda: tasks.get_task(healthy.id).status == "completed")
+        assert tasks.get_task(orphan.id).status == "queued"
+        assert agent.calls == ["healthy"]
+    finally:
+        service.stop()
+
+
+def test_startup_recovery_failure_keeps_active_job_for_retry_and_runs_healthy_job(tmp_path) -> None:
+    tasks = FailFirstRecoveryTaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    queue = QueueRepository(tmp_path / "queue")
+    interrupted = tasks.create_task("interrupted", "active before restart")
+    queue.save([
+        QueueJob(
+            task_id=interrupted.id,
+            session_id="interrupted",
+            message="active before restart",
+            created_at="2026-08-14T00:00:00+00:00",
+            state="active",
+        )
+    ])
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    healthy = service.submit("session", "healthy")
+    try:
+        service.start()
+        _wait_for(lambda: tasks.get_task(healthy.id).status == "completed")
+        assert tasks.get_task(interrupted.id).status == "running"
+        assert any(job.task_id == interrupted.id and job.state == "active" for job in queue.load())
+    finally:
+        service.stop()
+
+    retry = TaskQueueService(ControlledAgentService(), tasks, queue)
+    retry.start()
+    try:
+        _wait_for(lambda: tasks.get_task(interrupted.id).status == "stopped")
+        assert all(job.task_id != interrupted.id for job in queue.load())
+    finally:
+        retry.stop()
 
 
 def test_queue_position_and_ledger_shape_remain_minimal(queue_service) -> None:
