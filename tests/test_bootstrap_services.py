@@ -3,6 +3,7 @@ from pathlib import Path
 from iris_agent.api.app import create_app
 from iris_agent.automation.service import AutomationService
 from iris_agent.bootstrap import ApplicationServices, build_application
+from iris_agent.knowledge.retriever import HybridRetriever, KeywordRetriever
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.service import DailyReportService
 from iris_agent.mcp_center.service import McpServer, McpCenterService
@@ -183,6 +184,30 @@ def test_build_application_exposes_knowledge_service_and_tools(tmp_path, monkeyp
     tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
     assert "add_knowledge" in tool_names
     assert "search_knowledge" in tool_names
+
+
+def test_build_application_knowledge_defaults_to_keyword(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert isinstance(application.knowledge.retriever, KeywordRetriever)
+    assert application.knowledge.fallback_retriever is None
+
+
+def test_build_application_knowledge_hybrid_has_keyword_fallback(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "knowledge:\n  retriever: hybrid\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert isinstance(application.knowledge.retriever, HybridRetriever)
+    assert isinstance(application.knowledge.fallback_retriever, KeywordRetriever)
 
 
 def test_build_application_default_search_sources_are_bing_only(tmp_path, monkeypatch):

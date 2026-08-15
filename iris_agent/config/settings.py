@@ -147,6 +147,10 @@ class KnowledgeSettings:
     max_content_chars: int = 50000
     max_hit_chars: int = 500
     default_limit: int = 5
+    retriever: str = "keyword"
+    embedding_model: str = "bge-m3"
+    embedding_base_url: str = "http://localhost:11434"
+    embedding_timeout_seconds: float = 60
 
 
 @dataclass(slots=True)
@@ -312,6 +316,10 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_content_chars=int(knowledge.get("max_content_chars", 50000)),
             max_hit_chars=int(knowledge.get("max_hit_chars", 500)),
             default_limit=int(knowledge.get("default_limit", 5)),
+            retriever=str(knowledge.get("retriever", "keyword")),
+            embedding_model=str(knowledge.get("embedding_model", "bge-m3")),
+            embedding_base_url=str(knowledge.get("embedding_base_url", "http://localhost:11434")),
+            embedding_timeout_seconds=float(knowledge.get("embedding_timeout_seconds", 60)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

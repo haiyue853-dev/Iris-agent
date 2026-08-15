@@ -111,4 +111,8 @@ knowledge:
   max_content_chars: 50000
   max_hit_chars: 500
   default_limit: 5
+  retriever: keyword
+  embedding_model: bge-m3
+  embedding_base_url: http://localhost:11434
+  embedding_timeout_seconds: 60
 

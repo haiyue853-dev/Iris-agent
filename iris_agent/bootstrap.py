@@ -10,8 +10,9 @@ from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
 from iris_agent.notifications.service import NotificationService
+from iris_agent.knowledge.embedder import OllamaEmbedder
 from iris_agent.knowledge.repository import KnowledgeRepository
-from iris_agent.knowledge.retriever import KeywordRetriever
+from iris_agent.knowledge.retriever import EmbeddingRetriever, HybridRetriever, KeywordRetriever
 from iris_agent.knowledge.service import KnowledgeService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
@@ -181,11 +182,33 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     registry.register(build_web_search_tool(web_search_client))
     registry.register(build_fetch_page_tool(page_fetcher))
     knowledge_repository = KnowledgeRepository(settings.knowledge.directory)
+    keyword_retriever = KeywordRetriever(
+        knowledge_repository.list, max_hit_chars=settings.knowledge.max_hit_chars
+    )
+    primary_retriever = keyword_retriever
+    fallback_retriever = None
+    if settings.knowledge.retriever in ("embedding", "hybrid"):
+        embedder = OllamaEmbedder(
+            model=settings.knowledge.embedding_model,
+            base_url=settings.knowledge.embedding_base_url,
+            timeout=settings.knowledge.embedding_timeout_seconds,
+        )
+        embedding_retriever = EmbeddingRetriever(
+            knowledge_repository.list, embedder, max_hit_chars=settings.knowledge.max_hit_chars
+        )
+        if settings.knowledge.retriever == "hybrid":
+            primary_retriever = HybridRetriever(
+                keyword_retriever, embedding_retriever, max_hit_chars=settings.knowledge.max_hit_chars
+            )
+        else:
+            primary_retriever = embedding_retriever
+        fallback_retriever = keyword_retriever
     knowledge = KnowledgeService(
         knowledge_repository,
-        KeywordRetriever(knowledge_repository.list, max_hit_chars=settings.knowledge.max_hit_chars),
+        primary_retriever,
         max_content_chars=settings.knowledge.max_content_chars,
         default_limit=settings.knowledge.default_limit,
+        fallback_retriever=fallback_retriever,
     )
     registry.register(build_add_knowledge_tool(knowledge))
     registry.register(build_search_knowledge_tool(knowledge))
