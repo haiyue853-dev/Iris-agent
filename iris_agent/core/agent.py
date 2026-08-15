@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 from iris_agent.core.errors import ToolApprovalNotFoundError
 from iris_agent.core.models import AgentEvent, Message, ToolCall
+from iris_agent.context_compression.compressor import ContextCompressor
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.service import ProfileService
 from iris_agent.tools.base import ToolExecutionResult
@@ -59,16 +60,20 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None, compressor: ContextCompressor | None = None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
         self.memory = memory
         self.profile_service = profile_service
+        self.compressor = compressor
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
         self._approval_lock = threading.RLock()
 
     def _build_messages(self, session: Session) -> list[Message]:
+        if self.compressor is not None and self.compressor.needs_compression(session.messages):
+            session.messages = self.compressor.compress(session.messages)
+            self.sessions.save(session)
         messages = [Message(role="system", content=self.system_prompt)]
         if self.profile_service is not None:
             profile_text = self.profile_service.render()
