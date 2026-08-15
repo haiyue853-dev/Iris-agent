@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import InputBox from './InputBox';
-import type { AgentEvent, Message } from '../types';
+import type { AgentEvent, Message, TaskStatus } from '../types';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -18,6 +18,9 @@ interface ChatContainerProps {
   onApproveTool?: (callId: string) => void;
   onRejectTool?: (callId: string) => void;
   currentTaskId?: string | null;
+  currentTaskStatus?: TaskStatus | null;
+  queuePosition?: number | null;
+  approvalCallId?: string | null;
   onViewTask?: (taskId: string) => void;
 }
 
@@ -36,6 +39,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onApproveTool,
   onRejectTool,
   currentTaskId,
+  currentTaskStatus,
+  queuePosition,
+  approvalCallId,
   onViewTask,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,7 +131,17 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             )}
           </React.Fragment>
         ))}
-        {isStreaming && (
+        {currentTaskStatus === 'queued' && <p className="chat-task-state">任务排队中{typeof queuePosition === 'number' ? `（队列第 ${queuePosition} 位）` : '…'}</p>}
+        {currentTaskStatus === 'running' && <p className="chat-task-state">正在执行任务…</p>}
+        {currentTaskStatus === 'awaiting_approval' && <p className="chat-task-state">任务正在等待工具审批。</p>}
+        {currentTaskStatus === 'awaiting_approval' && approvalCallId && <section className="tool-approval-card" aria-label="任务工具审批">
+          <p className="tool-approval-eyebrow">需要确认工具操作</p>
+          <div className="tool-approval-actions">
+            <button className="skill-card-open" onClick={() => onApproveTool?.(approvalCallId)}>批准执行</button>
+            <button className="skill-card-action" onClick={() => onRejectTool?.(approvalCallId)}>拒绝</button>
+          </div>
+        </section>}
+        {isStreaming && streamingContent && (
           <MessageBubble
             role="assistant"
             content={streamingContent}
@@ -160,10 +176,11 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           value={inputValue}
           onChange={onInputChange}
           onSend={onSend}
-          onStop={isStreaming ? onStop : undefined}
+          onStop={undefined}
           placeholder="输入消息..."
-          disabled={isStreaming || Boolean(pendingApproval)}
+          disabled={Boolean(pendingApproval)}
         />
+        {isStreaming && <button className="view-task-btn" onClick={onStop}>停止任务</button>}
       </div>
     </div>
   );

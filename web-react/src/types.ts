@@ -151,7 +151,7 @@ export type AgentEvent =
   | { type: 'message_completed'; data: { content: string } }
   | { type: 'error'; data: { code: string; message: string } };
 
-export type TaskStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'stopped';
+export type TaskStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'stopped';
 
 export type AgentTask = {
   id: string;
@@ -161,6 +161,8 @@ export type AgentTask = {
   created_at: string;
   updated_at: string;
   finished_at?: string;
+  queue_position?: number | null;
+  approval_call_id?: string | null;
 };
 
 export type TaskTimelineEvent = {
