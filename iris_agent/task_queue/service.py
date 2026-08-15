@@ -124,11 +124,14 @@ class TaskQueueService:
                 self._cancel_requested.add(task_id)
                 self._condition.notify_all()
             elif waiting is None:
-                # Keep the check, queue removal, and terminal transition under
+                # Keep the check, terminal transition, and queue removal under
                 # the worker's claim lock.  Otherwise the worker can claim a
-                # job after this check and before the job is removed.
+                # job after this check and before cancellation is recorded.
+                # Writing the terminal task state first makes a crash before
+                # removal recoverable: startup discards its stale queue job.
+                stopped = self.task_center.stop(task_id)
                 self._remove_job(task_id)
-                return self.task_center.stop(task_id)
+                return stopped
 
         if waiting is not None:
             _, call_id, _ = waiting
@@ -166,10 +169,16 @@ class TaskQueueService:
                     self._condition.wait(timeout=0.2)
                     continue
                 self._current_task_id = job.task_id
+            remove_job = True
             try:
                 self._run_job(job)
             except Exception:
-                self._fail_if_unfinished(job.task_id)
+                try:
+                    self._fail_if_unfinished(job.task_id)
+                except Exception:
+                    # Do not erase the active job when the terminal failure
+                    # marker itself is not durable.  Startup can recover it.
+                    remove_job = False
             finally:
                 with self._condition:
                     cancelled = job.task_id in self._cancel_requested
@@ -181,14 +190,19 @@ class TaskQueueService:
                     self._clear_task_timers(job.task_id)
                     self._condition.notify_all()
                 if cancelled:
-                    self._stop_if_unfinished(job.task_id)
-                try:
-                    self._remove_job(job.task_id)
-                except Exception:
-                    # The active record remains durable when its deletion
-                    # fails.  It will be recovered on the next service start;
-                    # do not sacrifice the sole worker and strand later jobs.
-                    pass
+                    try:
+                        self._stop_if_unfinished(job.task_id)
+                    except Exception:
+                        remove_job = False
+                if remove_job:
+                    try:
+                        self._remove_job(job.task_id)
+                    except Exception:
+                        # The active record remains durable when its deletion
+                        # fails.  It will be recovered on the next service
+                        # start; do not sacrifice the sole worker and strand
+                        # later jobs.
+                        pass
 
     def _run_job(self, job: QueueJob) -> None:
         with self._condition:
@@ -287,10 +301,15 @@ class TaskQueueService:
             recovered_jobs: list[QueueJob] = []
             changed = False
             for job in jobs:
-                if job.state != "active":
-                    recovered_jobs.append(job)
-                    continue
                 task = self.task_center.get_task(job.task_id)
+                if job.state == "queued":
+                    if task is not None and task.status == "queued":
+                        recovered_jobs.append(job)
+                    else:
+                        # A terminal or missing task may be left behind if
+                        # cancellation stopped it just before process death.
+                        changed = True
+                    continue
                 if task is not None and task.status == "queued":
                     # The process died after making the ledger active but
                     # before TaskCenter.start().  This job never began, so
@@ -306,6 +325,18 @@ class TaskQueueService:
                     changed = True
             if changed:
                 self.repository.save(recovered_jobs)
+
+            durable_task_ids = {job.task_id for job in recovered_jobs}
+
+        # ``request_queued`` is the only queued TaskCenter creation path in
+        # this application.  Its missing QueueJob has no trustworthy full
+        # message to replay, so fail it safely rather than inventing input.
+        for summary in self.task_center.list_tasks(limit=100):
+            if summary.status != "queued" or summary.id in durable_task_ids:
+                continue
+            task = self.task_center.get_task(summary.id)
+            if task is not None and task.events and task.events[0].type == "request_queued":
+                self.task_center.fail(task.id)
 
     def _remove_job(self, task_id: str) -> None:
         with self.repository.transaction():

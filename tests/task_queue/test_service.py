@@ -38,6 +38,8 @@ class ControlledAgentService:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
+            if message == "provider-error":
+                raise RuntimeError("simulated provider failure")
             if message == "block":
                 self.started.set()
                 self.release.wait(2)
@@ -127,6 +129,18 @@ class BlockingCreateTaskCenterService(TaskCenterService):
         self.created.set()
         assert self.release.wait(2)
         return task
+
+
+class FailFirstTaskCenterFailureService(TaskCenterService):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fail_calls = 0
+
+    def fail(self, task_id: str, **_ignored):
+        self.fail_calls += 1
+        if self.fail_calls == 1:
+            raise OSError("simulated task ledger failure")
+        return super().fail(task_id)
 
 
 @pytest.fixture
@@ -374,6 +388,63 @@ def test_startup_requeues_active_ledger_entry_when_task_never_started(tmp_path) 
         service.start()
         _wait_for(lambda: tasks.get_task(queued_task.id).status == "completed")
         assert agent.calls == ["crash-window"]
+    finally:
+        service.stop()
+
+
+def test_startup_fails_orphaned_queue_task_that_has_no_durable_job(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    queue = QueueRepository(tmp_path / "queue")
+    orphan = tasks.create_queued_task("session", "missing original message")
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    try:
+        service.start()
+        _wait_for(lambda: tasks.get_task(orphan.id).status == "failed")
+        assert agent.calls == []
+        assert queue.load() == []
+    finally:
+        service.stop()
+
+
+def test_startup_removes_queued_ledger_record_for_already_stopped_task(tmp_path) -> None:
+    tasks = TaskCenterService(tmp_path / "tasks", recover_unfinished=False)
+    queue = QueueRepository(tmp_path / "queue")
+    stopped = tasks.create_queued_task("session", "cancelled before crash")
+    tasks.stop(stopped.id)
+    queue.save([
+        QueueJob(
+            task_id=stopped.id,
+            session_id="session",
+            message="cancelled before crash",
+            created_at="2026-08-14T00:00:00+00:00",
+            state="queued",
+        )
+    ])
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    try:
+        service.start()
+        _wait_for(lambda: queue.load() == [])
+        assert tasks.get_task(stopped.id).status == "stopped"
+        assert agent.calls == []
+    finally:
+        service.stop()
+
+
+def test_worker_continues_when_provider_and_first_failure_marker_both_fail(tmp_path) -> None:
+    tasks = FailFirstTaskCenterFailureService(tmp_path / "tasks")
+    queue = QueueRepository(tmp_path / "queue")
+    agent = ControlledAgentService()
+    service = TaskQueueService(agent, tasks, queue)
+    failed_marker = service.submit("session-a", "provider-error")
+    later = service.submit("session-b", "later")
+    service.start()
+    try:
+        _wait_for(lambda: tasks.get_task(later.id).status == "completed")
+        assert agent.calls == ["provider-error", "later"]
+        assert tasks.get_task(failed_marker.id).status == "running"
+        assert any(job.task_id == failed_marker.id and job.state == "active" for job in queue.load())
     finally:
         service.stop()
 
