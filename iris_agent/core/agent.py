@@ -4,9 +4,10 @@ from collections.abc import Iterator
 
 from iris_agent.core.errors import ToolApprovalNotFoundError
 from iris_agent.core.models import AgentEvent, Message, ToolCall
+from iris_agent.memory.service import MemoryService
 from iris_agent.tools.base import ToolExecutionResult
 from iris_agent.providers.base import ModelProvider
-from iris_agent.sessions.base import SessionRepository
+from iris_agent.sessions.base import Session, SessionRepository
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -57,18 +58,27 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
+        self.memory = memory
         self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
         self._approval_lock = threading.RLock()
+
+    def _build_messages(self, session: Session) -> list[Message]:
+        messages = [Message(role="system", content=self.system_prompt)]
+        if self.memory is not None:
+            for memory in self.memory.inject():
+                messages.append(Message(role="system", content=f"[记忆·{memory.category}] {memory.content}"))
+        messages.extend(session.messages)
+        return messages
 
     def run(self, session_id: str, user_message: str) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             self.sessions.append(session_id, Message(role="user", content=user_message))
             session = self.sessions.get(session_id)
-            messages = [Message(role="system", content=self.system_prompt), *session.messages]
+            messages = self._build_messages(session)
             yield from self._run_loop(session_id, messages)
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:
@@ -85,7 +95,7 @@ class AgentService:
             self._persist_tool_result(session_id, event)
             yield event
             session = self.sessions.get(session_id)
-            messages = [Message(role="system", content=self.system_prompt), *session.messages]
+            messages = self._build_messages(session)
             yield from self._run_loop(session_id, messages)
 
     def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
