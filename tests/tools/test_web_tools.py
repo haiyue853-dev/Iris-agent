@@ -8,6 +8,15 @@ class FakeClient:
         return [SearchResult(title="标题", url="https://x.com", snippet="摘要")]
 
 
+class ErrorClient:
+    def __init__(self):
+        self.last_error = None
+
+    def search(self, query, limit=None):
+        self.last_error = "搜索请求失败: 连接超时"
+        return []
+
+
 class FakeFetcher:
     def __init__(self, text: str):
         self.text = text
@@ -38,6 +47,16 @@ def test_web_search_requires_query():
 
     assert not result.ok
     assert result.error_code == "invalid_tool_arguments"
+
+
+def test_web_search_tool_reports_error():
+    tool = build_web_search_tool(ErrorClient())
+
+    result = tool.invoke({"query": "面试经验"})
+
+    assert not result.ok
+    assert result.error_code == "web_search_failed"
+    assert "连接超时" in result.error_message
 
 
 def test_fetch_page_tool_returns_text():

@@ -27,10 +27,13 @@ class WebSearchClient:
         self.max_results = max_results
         self.max_snippet_chars = max_snippet_chars
         self.enabled = enabled
+        self.last_error: str | None = None
         self._client = http_client or httpx.Client(timeout=timeout, follow_redirects=True)
 
     def search(self, query: str, limit: int | None = None) -> list[SearchResult]:
+        self.last_error = None
         if not self.enabled:
+            self.last_error = "联网搜索已禁用"
             return []
         count = limit or self.max_results
         try:
@@ -40,7 +43,8 @@ class WebSearchClient:
                 headers={"User-Agent": _USER_AGENT},
             )
             response.raise_for_status()
-        except Exception:
+        except Exception as exc:
+            self.last_error = f"搜索请求失败: {exc}"
             return []
         return self._parse(response.text, count)
 

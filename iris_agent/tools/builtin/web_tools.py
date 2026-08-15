@@ -1,6 +1,6 @@
 """Web search + page fetch tools."""
 
-from iris_agent.tools.base import Tool
+from iris_agent.tools.base import Tool, ToolInvocationError
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
 
@@ -8,7 +8,11 @@ from iris_agent.web_search.search import WebSearchClient
 def build_web_search_tool(client: WebSearchClient) -> Tool:
     def web_search(query: str, limit: int | None = None):
         results = client.search(query, limit)
-        return {"results": [result.to_dict() for result in results]}
+        if results:
+            return {"results": [result.to_dict() for result in results]}
+        if client.last_error:
+            raise ToolInvocationError("web_search_failed", client.last_error)
+        return {"results": []}
 
     return Tool(
         "web_search",
