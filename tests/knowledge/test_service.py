@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from iris_agent.knowledge.embedder import EmbeddingError
 from iris_agent.knowledge.repository import KnowledgeRepository
 from iris_agent.knowledge.retriever import KeywordRetriever
 from iris_agent.knowledge.service import KnowledgeService
+
+
+class FailingRetriever:
+    def search(self, query, limit):
+        raise EmbeddingError("embedding 不可用")
 
 
 @pytest.fixture
@@ -58,3 +64,19 @@ def test_search_respects_limit(service):
         service.add(f"面经{i}", f"面经{i}内容")
     hits = service.search("面经", limit=1)
     assert len(hits) == 1
+
+
+def test_search_falls_back_when_retriever_fails(tmp_path):
+    repository = KnowledgeRepository(tmp_path)
+    keyword = KeywordRetriever(repository.list, max_hit_chars=500)
+    service = KnowledgeService(repository, FailingRetriever(), fallback_retriever=keyword)
+    service.add("多模态面试", "多模态大模型结构")
+    hits = service.search("多模态")
+    assert len(hits) == 1
+
+
+def test_search_reraises_without_fallback(tmp_path):
+    repository = KnowledgeRepository(tmp_path)
+    service = KnowledgeService(repository, FailingRetriever())
+    with pytest.raises(EmbeddingError):
+        service.search("多模态")

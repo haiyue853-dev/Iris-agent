@@ -104,3 +104,33 @@ class EmbeddingRetriever:
         [vector] = self._embedder.embed([text])
         self._cache[entry.id] = (key, vector)
         return vector
+
+
+class HybridRetriever:
+    """Fuse keyword and embedding rankings with reciprocal rank fusion."""
+
+    def __init__(
+        self,
+        keyword: KeywordRetriever,
+        embedding: EmbeddingRetriever,
+        max_hit_chars: int = 500,
+        rrf_k: int = 60,
+    ):
+        self._keyword = keyword
+        self._embedding = embedding
+        self.max_hit_chars = max_hit_chars
+        self._k = rrf_k
+
+    def search(self, query: str, limit: int) -> list[KnowledgeSearchHit]:
+        keyword_hits = self._keyword.search(query, limit)
+        embedding_hits = self._embedding.search(query, limit)
+        scores: dict[str, float] = {}
+        hits: dict[str, KnowledgeSearchHit] = {}
+        for rank, hit in enumerate(keyword_hits, start=1):
+            scores[hit.entry_id] = scores.get(hit.entry_id, 0.0) + 1.0 / (self._k + rank)
+            hits.setdefault(hit.entry_id, hit)
+        for rank, hit in enumerate(embedding_hits, start=1):
+            scores[hit.entry_id] = scores.get(hit.entry_id, 0.0) + 1.0 / (self._k + rank)
+            hits.setdefault(hit.entry_id, hit)
+        ranked = sorted(hits, key=lambda entry_id: -scores[entry_id])
+        return [hits[entry_id] for entry_id in ranked[:limit]]

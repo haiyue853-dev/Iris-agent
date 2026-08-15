@@ -14,11 +14,13 @@ class KnowledgeService:
         retriever: KnowledgeRetriever,
         max_content_chars: int = 50000,
         default_limit: int = 5,
+        fallback_retriever: KnowledgeRetriever | None = None,
     ):
         self.repository = repository
         self.retriever = retriever
         self.max_content_chars = max_content_chars
         self.default_limit = default_limit
+        self.fallback_retriever = fallback_retriever
 
     def add(
         self,
@@ -48,4 +50,10 @@ class KnowledgeService:
         return self.repository.delete(entry_id)
 
     def search(self, query: str, limit: int | None = None) -> list[KnowledgeSearchHit]:
-        return self.retriever.search(query, limit or self.default_limit)
+        effective_limit = limit or self.default_limit
+        try:
+            return self.retriever.search(query, effective_limit)
+        except Exception:
+            if self.fallback_retriever is not None:
+                return self.fallback_retriever.search(query, effective_limit)
+            raise
