@@ -19,6 +19,7 @@ def register_task_routes(
 
     def task_data(task, *, include_events: bool, include_queue_position: bool = True) -> dict:
         data = task.to_dict()
+        data["approval_call_id"] = task_center.pending_approval_call_id(task.id)
         if any(event.type == "request_queued" for event in task.events):
             data["request_summary"] = QUEUED_TASK_REQUEST_SUMMARY
         if not include_events:

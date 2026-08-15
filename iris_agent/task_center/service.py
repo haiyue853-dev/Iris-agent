@@ -78,6 +78,16 @@ class TaskCenterService:
         ordered = sorted(tasks, key=lambda task: task.updated_at, reverse=True)
         return [task.without_events() for task in ordered[:bounded_limit]]
 
+    def pending_approval_call_id(self, task_id: str) -> str | None:
+        """Return the current approval identifier without exposing call payloads."""
+        task = self.get_task(task_id)
+        if task is None or task.status != "awaiting_approval":
+            return None
+        for (pending_task_id, call_id), (state, _) in self._approval_states.items():
+            if pending_task_id == task_id and state == "awaiting":
+                return call_id
+        return None
+
     def tool_started(self, task_id: str, tool_name: str, **_ignored: object) -> AgentTask:
         tool_name = self._safe_tool_name(tool_name)
         return self._append(task_id, "tool_started", f"开始调用工具：{tool_name}", tool_name=tool_name)

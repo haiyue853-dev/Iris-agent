@@ -123,6 +123,26 @@ def test_list_and_detail_include_queue_position(tmp_path):
     assert detail.json()["queue_position"] == 2
 
 
+def test_list_and_detail_expose_only_pending_approval_call_id(tmp_path):
+    client, sessions, task_center, _ = _client(tmp_path)
+    awaiting = task_center.create_queued_task(sessions.create("awaiting").id, "private")
+    task_center.start(awaiting.id)
+    task_center.approval_requested(awaiting.id, "call-safe-id", "mcp__shell__run")
+    completed = task_center.create_queued_task(sessions.create("completed").id, "private")
+    task_center.complete(completed.id)
+
+    listed = client.get("/api/tasks").json()["tasks"]
+    detail = client.get(f"/api/tasks/{awaiting.id}").json()
+    listed_by_id = {task["id"]: task for task in listed}
+
+    assert detail["status"] == "awaiting_approval"
+    assert detail["approval_call_id"] == "call-safe-id"
+    assert listed_by_id[awaiting.id]["approval_call_id"] == "call-safe-id"
+    assert listed_by_id[completed.id]["approval_call_id"] is None
+    assert "mcp__shell__run" not in detail["approval_call_id"]
+    assert "private" not in detail
+
+
 def test_cancel_and_approval_delegate_to_queue(tmp_path):
     client, sessions, task_center, queue = _client(tmp_path)
     task = task_center.create_queued_task(sessions.create("chat").id, "private")
