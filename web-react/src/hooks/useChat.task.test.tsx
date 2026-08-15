@@ -70,4 +70,29 @@ describe('useChat background task support', () => {
     vi.useRealTimers();
   });
 
+  it('stops polling tasks left behind by session switching and creating a new chat', async () => {
+    vi.useFakeTimers();
+    vi.mocked(createTask)
+      .mockResolvedValueOnce({ id: 'task-1', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' })
+      .mockResolvedValueOnce({ id: 'task-2', request_summary: '后台任务', status: 'queued', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
+    vi.mocked(getTask).mockResolvedValue({ id: 'task-2', request_summary: '后台任务', status: 'running', session_id: 'session-2', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:01:00Z', events: [] });
+    vi.mocked(getSession).mockResolvedValue({ messages: [] });
+    const { result, unmount } = renderHook(() => useChat());
+
+    await act(async () => { await result.current.handleSendWithSession('第一个任务'); });
+    await act(async () => { await result.current.handleSwitchSession('session-2'); });
+    await act(async () => { await result.current.handleSendWithSession('第二个任务'); });
+    vi.mocked(getTask).mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(getTask).toHaveBeenCalledTimes(1);
+    expect(getTask).toHaveBeenCalledWith('task-2');
+
+    result.current.handleNewChat();
+    vi.mocked(getTask).mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(getTask).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+  });
+
 });

@@ -4,6 +4,7 @@ import { cancelTask, createTask, getTask, resolveTaskApproval } from '../api/tas
 import type { AgentEvent, Message, Session, TaskStatus } from '../types';
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'stopped']);
+type TaskPoller = { timer: number; sessionId: string };
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -19,7 +20,7 @@ export function useChat() {
   const [approvalCallId, setApprovalCallId] = useState<string | null>(null);
   const currentSessionRef = useRef('');
   const currentTaskRef = useRef<string | null>(null);
-  const pollersRef = useRef(new Map<string, number>());
+  const pollersRef = useRef(new Map<string, TaskPoller>());
 
   const refreshSessions = useCallback(async () => setSessions(await listSessions()), []);
   useEffect(() => { refreshSessions().catch(() => undefined); }, [refreshSessions]);
@@ -27,7 +28,14 @@ export function useChat() {
 
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
   useEffect(() => { currentTaskRef.current = currentTaskId; }, [currentTaskId]);
-  useEffect(() => () => { pollersRef.current.forEach((timer) => window.clearInterval(timer)); pollersRef.current.clear(); }, []);
+  const clearPollers = useCallback((keepSessionId?: string) => {
+    pollersRef.current.forEach((poller, taskId) => {
+      if (keepSessionId === poller.sessionId) return;
+      window.clearInterval(poller.timer);
+      pollersRef.current.delete(taskId);
+    });
+  }, []);
+  useEffect(() => () => { clearPollers(); }, [clearPollers]);
 
   const pollTask = useCallback(async (taskId: string, sessionId: string) => {
     try {
@@ -39,8 +47,8 @@ export function useChat() {
         setIsStreaming(!TERMINAL_TASK_STATUSES.has(task.status));
       }
       if (!TERMINAL_TASK_STATUSES.has(task.status)) return;
-      const timer = pollersRef.current.get(taskId);
-      if (timer !== undefined) window.clearInterval(timer);
+      const poller = pollersRef.current.get(taskId);
+      if (poller !== undefined) window.clearInterval(poller.timer);
       pollersRef.current.delete(taskId);
       if (task.status === 'completed' && currentSessionRef.current === sessionId) {
         const session = await getSession(sessionId);
@@ -56,7 +64,7 @@ export function useChat() {
 
   const startPolling = useCallback((taskId: string, sessionId: string) => {
     const timer = window.setInterval(() => { void pollTask(taskId, sessionId); }, 1000);
-    pollersRef.current.set(taskId, timer);
+    pollersRef.current.set(taskId, { timer, sessionId });
   }, [pollTask]);
 
   const resolvePendingApproval = useCallback(async (callId: string, approved: boolean) => {
@@ -86,9 +94,9 @@ export function useChat() {
     }
   }, [currentSessionId, showToast, startPolling]);
 
-  const handleSwitchSession = useCallback(async (id: string) => { const data = await getSession(id); setCurrentSessionId(id); setMessages(data.messages); }, []);
+  const handleSwitchSession = useCallback(async (id: string) => { const data = await getSession(id); clearPollers(id); setCurrentSessionId(id); setMessages(data.messages); }, [clearPollers]);
   const handleDeleteSession = useCallback(async (id: string) => { await deleteSession(id); if (id === currentSessionId) { setCurrentSessionId(''); setMessages([]); } await refreshSessions(); }, [currentSessionId, refreshSessions]);
-  const handleNewChat = useCallback(() => { setCurrentSessionId(''); setMessages([]); setPendingApproval(null); setCurrentTaskId(null); setCurrentTaskStatus(null); setQueuePosition(null); setApprovalCallId(null); setIsStreaming(false); }, []);
+  const handleNewChat = useCallback(() => { clearPollers(); setCurrentSessionId(''); setMessages([]); setPendingApproval(null); setCurrentTaskId(null); setCurrentTaskStatus(null); setQueuePosition(null); setApprovalCallId(null); setIsStreaming(false); }, [clearPollers]);
   const handleStop = useCallback(async () => {
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
     try {
