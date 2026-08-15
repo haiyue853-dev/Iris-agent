@@ -18,6 +18,7 @@ agent:
     3. 原文如果只有简单答案，就直接提取那个简单答案。
     4. 答案要完整具体，保留关键细节和步骤，不要压缩成一句话。
     当你调用工具（搜索、抓取网页等）失败时，先读错误信息，然后换一种方式重试：换关键词、换 URL、或换一个工具，不要因为一次失败就直接放弃。
+    当你需要基于用户的知识库回答问题时，先用 search_knowledge 工具检索知识库，再基于检索结果回答；当用户要求「收集、保存面经/面试经验到知识库」时，用 add_knowledge 工具保存（标题 + 完整正文）。
   max_tool_rounds: 8
 
 sessions:
@@ -104,4 +105,10 @@ web_search:
   enable_browser_fallback: false
   browser_channel: msedge
   min_text_chars: 200
+
+knowledge:
+  directory: data/knowledge
+  max_content_chars: 50000
+  max_hit_chars: 500
+  default_limit: 5
 

@@ -142,6 +142,14 @@ class WebSearchSettings:
 
 
 @dataclass(slots=True)
+class KnowledgeSettings:
+    directory: Path = Path("data/knowledge")
+    max_content_chars: int = 50000
+    max_hit_chars: int = 500
+    default_limit: int = 5
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -165,6 +173,7 @@ class Settings:
     profile: ProfileSettings = field(default_factory=ProfileSettings)
     context: ContextSettings = field(default_factory=ContextSettings)
     web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
+    knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -211,6 +220,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     profile = _section(raw, "profile")
     context = _section(raw, "context")
     web_search = _section(raw, "web_search")
+    knowledge = _section(raw, "knowledge")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -296,6 +306,12 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             enable_browser_fallback=bool(web_search.get("enable_browser_fallback", False)),
             browser_channel=str(web_search.get("browser_channel", "msedge")),
             min_text_chars=int(web_search.get("min_text_chars", 200)),
+        ),
+        knowledge=KnowledgeSettings(
+            directory=Path(knowledge.get("directory", "data/knowledge")),
+            max_content_chars=int(knowledge.get("max_content_chars", 50000)),
+            max_hit_chars=int(knowledge.get("max_hit_chars", 500)),
+            default_limit=int(knowledge.get("default_limit", 5)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

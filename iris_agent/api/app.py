@@ -44,6 +44,8 @@ from iris_agent.session_search.service import SessionSearchService
 from iris_agent.api.search_api import register_search_routes
 from iris_agent.profile.service import ProfileService
 from iris_agent.api.profile_api import register_profile_routes
+from iris_agent.knowledge.service import KnowledgeService
+from iris_agent.api.knowledge_api import register_knowledge_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -155,6 +157,7 @@ def create_app(
     memory: MemoryService | None = None,
     search: SessionSearchService | None = None,
     profile: ProfileService | None = None,
+    knowledge: KnowledgeService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -188,6 +191,8 @@ def create_app(
         register_search_routes(app, search)
     if profile is not None:
         register_profile_routes(app, profile)
+    if knowledge is not None:
+        register_knowledge_routes(app, knowledge)
 
     approval_tasks: dict[tuple[str, str], str] = {}
     approval_tool_names: dict[tuple[str, str], str] = {}

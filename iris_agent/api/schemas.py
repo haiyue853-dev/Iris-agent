@@ -32,3 +32,10 @@ class ProfileUpdateRequest(BaseModel):
     goals: list[str] = Field(default_factory=list)
     style: str = Field(default="", max_length=500)
     facts: list[str] = Field(default_factory=list)
+
+
+class KnowledgeCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=50000)
+    category: str = Field(default="面经", max_length=50)
+    source_url: str | None = Field(default=None, max_length=2000)
