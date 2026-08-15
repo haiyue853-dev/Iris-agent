@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from iris_agent.api.schemas import QueueTaskRequest, ToolApprovalRequest
 from iris_agent.sessions.base import SessionRepository
 from iris_agent.task_center.service import TaskCenterService
+from iris_agent.task_queue.repository import QueueLedgerError
 from iris_agent.task_queue.service import TaskQueueService
 
 
@@ -21,7 +22,10 @@ def register_task_routes(
         if not include_events:
             data.pop("events", None)
         if task_queue is not None:
-            data["queue_position"] = task_queue.queue_position(task.id)
+            try:
+                data["queue_position"] = task_queue.queue_position(task.id)
+            except QueueLedgerError:
+                raise _queue_unavailable() from None
         return data
 
     def get_existing(task_id: str):
@@ -32,8 +36,11 @@ def register_task_routes(
 
     def require_queue() -> TaskQueueService:
         if task_queue is None:
-            raise HTTPException(503, detail={"code": "task_queue_unavailable", "message": "任务队列不可用"})
+            raise _queue_unavailable()
         return task_queue
+
+    def _queue_unavailable() -> HTTPException:
+        return HTTPException(503, detail={"code": "task_queue_unavailable", "message": "任务队列暂不可用"})
 
     @router.get("")
     def list_tasks(limit: int = 50, session_id: str | None = None):
@@ -49,8 +56,11 @@ def register_task_routes(
     @router.post("", status_code=status.HTTP_202_ACCEPTED)
     def submit_task(request: QueueTaskRequest):
         sessions.get(request.session_id)
-        task = require_queue().submit(request.session_id, request.message)
-        return task_data(task, include_events=False)
+        try:
+            task = require_queue().submit(request.session_id, request.message)
+            return task_data(task, include_events=False)
+        except QueueLedgerError:
+            raise _queue_unavailable() from None
 
     @router.delete("/{task_id}")
     def cancel_task(task_id: str):
@@ -61,6 +71,8 @@ def register_task_routes(
             return task_data(require_queue().cancel(task_id), include_events=True)
         except KeyError:
             raise HTTPException(404, detail={"code": "task_not_found", "message": "任务不存在"}) from None
+        except QueueLedgerError:
+            raise _queue_unavailable() from None
         except ValueError as exc:
             raise HTTPException(409, detail={"code": "task_not_active", "message": str(exc)}) from exc
 
@@ -73,6 +85,8 @@ def register_task_routes(
             return task_data(require_queue().resolve_approval(task_id, call_id, request.approved), include_events=True)
         except KeyError:
             raise HTTPException(404, detail={"code": "task_not_found", "message": "任务不存在"}) from None
+        except QueueLedgerError:
+            raise _queue_unavailable() from None
         except ValueError as exc:
             raise HTTPException(409, detail={"code": "tool_approval_not_found", "message": str(exc)}) from exc
 
