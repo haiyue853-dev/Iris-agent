@@ -131,3 +131,12 @@ def test_automation_settings_load_from_yaml(tmp_path):
     path.write_text("automation:\n  directory: custom/automation\n", encoding="utf-8")
 
     assert load_settings(path).automation.directory == Path("custom/automation")
+
+
+def test_task_queue_settings_default_and_yaml_override(tmp_path):
+    default = load_settings(tmp_path / "missing.yaml")
+    path = tmp_path / "agent.yaml"
+    path.write_text("task_queue:\n  directory: custom/queue\n", encoding="utf-8")
+
+    assert default.task_queue.directory == Path("data/task_queue")
+    assert load_settings(path).task_queue.directory == Path("custom/queue")

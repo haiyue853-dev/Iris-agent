@@ -75,6 +75,17 @@ def test_build_application_exposes_automation_service(tmp_path, monkeypatch):
     assert application.automation.root == tmp_path / "automation"
 
 
+def test_build_application_exposes_task_queue_service(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.task_queue.task_center is application.task_center
+    assert application.task_queue.agent_service is application.agent
+    assert application.task_queue.repository.root == Path("data/task_queue")
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -108,3 +119,18 @@ def test_server_entrypoint_loads_without_document_service(monkeypatch):
     server = importlib.import_module("server")
     assert TestClient(server.app).post("/api/hot-radar/scan").status_code == 200
     assert TestClient(server.app).get("/api/automation/tasks").status_code == 200
+
+
+def test_server_lifecycle_starts_and_stops_task_queue(monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+
+    server = importlib.import_module("server")
+    calls: list[str] = []
+    monkeypatch.setattr(server.application.task_queue, "start", lambda: calls.append("start"))
+    monkeypatch.setattr(server.application.task_queue, "stop", lambda: calls.append("stop"))
+
+    with TestClient(server.app):
+        assert calls == ["start"]
+
+    assert calls == ["start", "stop"]

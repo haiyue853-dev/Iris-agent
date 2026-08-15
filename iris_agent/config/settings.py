@@ -78,6 +78,11 @@ class TaskCenterSettings:
 
 
 @dataclass(slots=True)
+class TaskQueueSettings:
+    directory: Path = Path("data/task_queue")
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -94,6 +99,7 @@ class Settings:
     automation: AutomationSettings = field(default_factory=AutomationSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     task_center: TaskCenterSettings = field(default_factory=TaskCenterSettings)
+    task_queue: TaskQueueSettings = field(default_factory=TaskQueueSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -122,6 +128,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     automation = _section(raw, "automation")
     notifications = _section(raw, "notifications")
     task_center = _section(raw, "task_center")
+    task_queue = _section(raw, "task_queue")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -162,6 +169,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             directory=Path(notifications.get("directory", "data/notifications")),
         ),
         task_center=TaskCenterSettings(directory=Path(task_center.get("directory", "data/tasks"))),
+        task_queue=TaskQueueSettings(directory=Path(task_queue.get("directory", "data/task_queue"))),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )
     if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:

@@ -17,6 +17,7 @@ app = create_app(
     automation=application.automation,
     notifications=application.notifications,
     task_center=application.task_center,
+    task_queue=application.task_queue,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
 )
@@ -26,10 +27,12 @@ scheduler = AutomationScheduler(application.automation)
 @app.on_event("startup")
 def start_automation_scheduler() -> None:
     scheduler.start()
+    application.task_queue.start()
 
 
 @app.on_event("shutdown")
 def stop_automation_scheduler() -> None:
+    application.task_queue.stop()
     scheduler.stop()
 
 

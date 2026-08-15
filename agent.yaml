@@ -49,3 +49,6 @@ automation:
 
 notifications:
   directory: data/notifications
+
+task_queue:
+  directory: data/task_queue

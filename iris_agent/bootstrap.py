@@ -19,6 +19,8 @@ from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.task_center.service import TaskCenterService
+from iris_agent.task_queue.repository import QueueRepository
+from iris_agent.task_queue.service import TaskQueueService
 from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
 from iris_agent.tools.registry import ToolRegistry
 
@@ -34,6 +36,7 @@ class ApplicationServices:
     automation: AutomationService
     notifications: NotificationService
     task_center: TaskCenterService
+    task_queue: TaskQueueService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -85,4 +88,5 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, mcp, mcp_tools, settings)
+    task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, mcp, mcp_tools, settings)

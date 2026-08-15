@@ -8,7 +8,6 @@ from fastapi import FastAPI, File, Form, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel
 
 from iris_agent.api.report_schemas import (
     ApplySuggestionRequest,
@@ -18,7 +17,7 @@ from iris_agent.api.report_schemas import (
     ReviseReportRequest,
     SaveReportRequest,
 )
-from iris_agent.api.schemas import ChatRequest, CreateSessionRequest
+from iris_agent.api.schemas import ChatRequest, CreateSessionRequest, ToolApprovalRequest
 from iris_agent.api.aihot_daily_api import router as aihot_daily_router
 from iris_agent.api.world_news_api import router as world_news_router
 from iris_agent.api.tech_news_api import router as tech_news_router
@@ -37,6 +36,7 @@ from iris_agent.api.automation_api import register_automation_routes
 from iris_agent.api.notifications_api import register_notification_routes
 from iris_agent.notifications.service import NotificationService
 from iris_agent.task_center.service import TaskCenterService
+from iris_agent.task_queue.service import TaskQueueService
 from iris_agent.api.tasks_api import register_task_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
@@ -59,10 +59,6 @@ from iris_agent.reports.service import DailyReportService
 from iris_agent.sessions.base import Session, SessionRepository
 
 logger = logging.getLogger(__name__)
-
-
-class ToolApprovalRequest(BaseModel):
-    approved: bool
 
 
 def _session_data(session: Session, include_messages: bool = True) -> dict:
@@ -149,6 +145,7 @@ def create_app(
     automation: AutomationService | None = None,
     notifications: NotificationService | None = None,
     task_center: TaskCenterService | None = None,
+    task_queue: TaskQueueService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -175,7 +172,7 @@ def create_app(
     if notifications is not None:
         register_notification_routes(app, notifications)
     if task_center is not None:
-        register_task_routes(app, task_center)
+        register_task_routes(app, task_center, sessions, task_queue)
 
     approval_tasks: dict[tuple[str, str], str] = {}
     approval_tool_names: dict[tuple[str, str], str] = {}
