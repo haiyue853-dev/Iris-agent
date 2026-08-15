@@ -510,6 +510,26 @@ def test_startup_recovery_failure_keeps_active_job_for_retry_and_runs_healthy_jo
         retry.stop()
 
 
+def test_immediate_restart_after_stop_timeout_starts_queued_work_when_old_worker_exits(queue_service) -> None:
+    service, agent, tasks, _ = queue_service
+    blocked = service.submit("session-a", "block")
+    later = service.submit("session-b", "later")
+    service.start()
+    assert agent.started.wait(1)
+
+    # stop only waits one second for this deliberately blocked provider.  A
+    # caller can immediately request start again before the old worker exits.
+    service.stop()
+    service.start()
+    service.start()
+    agent.release.set()
+
+    _wait_for(lambda: tasks.get_task(later.id).status == "completed")
+    assert tasks.get_task(blocked.id).status == "stopped"
+    assert agent.calls == ["block", "later"]
+    assert agent.max_active == 1
+
+
 def test_queue_position_and_ledger_shape_remain_minimal(queue_service) -> None:
     service, _, _, queue = queue_service
     first = service.submit("session-a", "first")

@@ -39,6 +39,7 @@ class TaskQueueService:
         self._condition = threading.Condition(threading.RLock())
         self._thread: threading.Thread | None = None
         self._stopping = False
+        self._restart_requested = False
         self._current_task_id: str | None = None
         self._waiting: tuple[str, str, str] | None = None
         self._approval_decision: tuple[str, str, bool] | None = None
@@ -72,11 +73,21 @@ class TaskQueueService:
         """Recover an interrupted active job and start the sole worker."""
         with self._condition:
             if self._thread is not None and self._thread.is_alive():
+                if self._stopping:
+                    # ``stop`` may have timed out waiting for a blocked
+                    # provider.  Let that one old worker launch its successor
+                    # as it exits, rather than losing this start request.
+                    self._restart_requested = True
                 return
-            self._recover_active_jobs()
-            self._stopping = False
-            self._thread = threading.Thread(target=self._work, name="iris-task-queue", daemon=True)
-            self._thread.start()
+            self._start_worker_locked()
+
+    def _start_worker_locked(self) -> None:
+        """Create the sole worker while ``_condition`` is held."""
+        self._recover_active_jobs()
+        self._stopping = False
+        self._restart_requested = False
+        self._thread = threading.Thread(target=self._work, name="iris-task-queue", daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
         """Request cooperative shutdown; a blocked provider call is not interrupted."""
@@ -156,6 +167,10 @@ class TaskQueueService:
         while True:
             with self._condition:
                 if self._stopping:
+                    if self._thread is threading.current_thread():
+                        self._thread = None
+                    if self._restart_requested:
+                        self._start_worker_locked()
                     return
                 try:
                     job = self._claim_next_job()
