@@ -7,18 +7,17 @@ from iris_agent.tools.base import Tool, ToolInvocationError
 
 def build_use_skill_tool(service: SkillCenterService) -> Tool:
     def use_skill(skill_id: str):
-        try:
-            skill = service.load_skill(skill_id)
-        except SkillNotFoundError:
+        skill = service.find_skill(skill_id)
+        if skill is None:
             raise ToolInvocationError("skill_not_found", "技能不存在") from None
         return {"id": skill.id, "name": skill.name, "content": skill.body}
 
     return Tool(
         "use_skill",
-        "加载一条技能的执行指令，供参考执行",
+        "加载一条技能的执行指令（可用技能 id 或名称），供参考执行",
         {
             "type": "object",
-            "properties": {"skill_id": {"type": "string", "description": "技能 id"}},
+            "properties": {"skill_id": {"type": "string", "description": "技能 id 或名称"}},
             "required": ["skill_id"],
         },
         use_skill,

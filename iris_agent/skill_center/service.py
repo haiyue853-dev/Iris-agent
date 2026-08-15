@@ -62,6 +62,16 @@ class SkillCenterService:
     def load_skill(self, skill_id: str) -> SkillDefinition:
         return self._lookup(skill_id)
 
+    def find_skill(self, id_or_name: str) -> SkillDefinition | None:
+        """按 id 或名称查找技能，找不到返回 None。"""
+        if not id_or_name or not id_or_name.strip():
+            return None
+        target = id_or_name.strip()
+        for skill in self._all_definitions():
+            if skill.id == target or skill.name == target:
+                return skill
+        return None
+
     def set_enabled(self, skill_id: str, enabled: bool) -> SkillInfo:
         definition = self._lookup(skill_id)
         states = self._repository.load()
