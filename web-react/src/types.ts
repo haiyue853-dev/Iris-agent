@@ -239,3 +239,28 @@ export type MemoryEntry = {
   updated_at: string;
   source_session_id: string | null;
 };
+
+// ---------- 知识库 ----------
+export type KnowledgeSourceType = 'scrape' | 'manual';
+
+export type KnowledgeEntry = {
+  id: string;
+  title: string;
+  category: string;
+  source_url: string | null;
+  source_type: KnowledgeSourceType;
+  created_at: number;
+  updated_at: number;
+};
+
+export type KnowledgeDetail = KnowledgeEntry & {
+  content: string;
+};
+
+export type KnowledgeSearchHit = {
+  entry_id: string;
+  title: string;
+  content: string;
+  source_url: string | null;
+  score: number;
+};

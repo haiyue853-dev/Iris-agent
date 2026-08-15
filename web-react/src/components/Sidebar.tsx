@@ -158,6 +158,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a3 3 0 0 0-3 3 3 3 0 0 0-2.4 5A3 3 0 0 0 9 16a3 3 0 0 0 6 0 3 3 0 0 0 2.4-5A3 3 0 0 0 15 6a3 3 0 0 0-3-3z" /><path d="M12 8v4l2.5 1.5" /></svg>
               <span className="view-label">记忆</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'knowledge' ? 'active' : ''}`} onClick={() => onViewChange('knowledge')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+              <span className="view-label">知识库</span>
+            </button>
             <button type="button" className={`view-item ${activeView === 'mcp' ? 'active' : ''}`} onClick={() => onViewChange('mcp')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v4m8-4v4M6 7h12v14H6zM9 11h6m-6 4h6" /></svg>
               <span className="view-label">MCP</span>
