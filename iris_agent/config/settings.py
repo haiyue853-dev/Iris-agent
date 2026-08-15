@@ -134,6 +134,8 @@ class WebSearchSettings:
     max_results: int = 5
     max_snippet_chars: int = 300
     max_page_chars: int = 30000
+    max_retries: int = 2
+    enable_duckduckgo: bool = False
 
 
 @dataclass(slots=True)
@@ -286,6 +288,8 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_results=int(web_search.get("max_results", 5)),
             max_snippet_chars=int(web_search.get("max_snippet_chars", 300)),
             max_page_chars=int(web_search.get("max_page_chars", 30000)),
+            max_retries=int(web_search.get("max_retries", 2)),
+            enable_duckduckgo=bool(web_search.get("enable_duckduckgo", False)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

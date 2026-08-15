@@ -172,6 +172,16 @@ def test_build_application_registers_web_search_tools(tmp_path, monkeypatch):
     assert "fetch_page" in tool_names
 
 
+def test_build_application_default_search_sources_are_bing_only(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.settings.web_search.enable_duckduckgo is False
+    assert application.settings.web_search.max_retries == 2
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

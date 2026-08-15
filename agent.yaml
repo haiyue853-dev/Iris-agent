@@ -17,6 +17,7 @@ agent:
     2. 原文如果先给总结/考点、再给具体答案，两者都保留：先列总结，再列具体答案。
     3. 原文如果只有简单答案，就直接提取那个简单答案。
     4. 答案要完整具体，保留关键细节和步骤，不要压缩成一句话。
+    当你调用工具（搜索、抓取网页等）失败时，先读错误信息，然后换一种方式重试：换关键词、换 URL、或换一个工具，不要因为一次失败就直接放弃。
   max_tool_rounds: 8
 
 sessions:
@@ -98,4 +99,6 @@ web_search:
   max_results: 5
   max_snippet_chars: 300
   max_page_chars: 30000
+  max_retries: 2
+  enable_duckduckgo: false
 
