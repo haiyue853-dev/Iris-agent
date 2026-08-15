@@ -151,3 +151,39 @@ def test_fetch_does_not_retry_on_404():
         fetcher.fetch("https://example.com/page")
 
     assert "404" in str(exc.value)
+
+
+class FakeBrowserFetcher:
+    def __init__(self, text: str):
+        self.text = text
+        self.called = False
+
+    def fetch(self, url):
+        self.called = True
+        return self.text
+
+
+def test_fetch_falls_back_to_browser_on_failure():
+    browser = FakeBrowserFetcher("浏览器渲染的正文")
+    fetcher = _fetcher_with_sequence([
+        httpx.Response(521, text="antibot"),
+        httpx.Response(521, text="antibot"),
+        httpx.Response(521, text="antibot"),
+    ])
+    fetcher.browser_fetcher = browser
+
+    text = fetcher.fetch("https://example.com/page")
+
+    assert text == "浏览器渲染的正文"
+    assert browser.called is True
+
+
+def test_fetch_falls_back_to_browser_on_empty_shell():
+    browser = FakeBrowserFetcher("浏览器渲染的正文")
+    http = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, text="<html><body><div id=app></div></body></html>")))
+    fetcher = PageFetcher(http_client=http, browser_fetcher=browser, min_text_chars=50)
+
+    text = fetcher.fetch("https://example.com/page")
+
+    assert text == "浏览器渲染的正文"
+    assert browser.called is True

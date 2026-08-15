@@ -36,18 +36,33 @@ class PageFetcher:
         max_page_chars: int = 30000,
         enabled: bool = True,
         max_retries: int = 2,
+        min_text_chars: int = 200,
+        browser_fetcher=None,
         http_client: httpx.Client | None = None,
     ):
         self.timeout = timeout
         self.max_page_chars = max_page_chars
         self.enabled = enabled
         self.max_retries = max_retries
+        self.min_text_chars = min_text_chars
+        self.browser_fetcher = browser_fetcher
         self._client = http_client or httpx.Client(timeout=timeout, follow_redirects=True)
 
     def fetch(self, url: str) -> str:
         if not self.enabled:
             raise ValueError("联网抓取已禁用")
         self._validate_url(url)
+        try:
+            text = self._try_http_fetch(url)
+        except ValueError as exc:
+            if self.browser_fetcher is not None:
+                return self.browser_fetcher.fetch(url)
+            raise exc
+        if len(text) < self.min_text_chars and self.browser_fetcher is not None:
+            return self.browser_fetcher.fetch(url)
+        return text
+
+    def _try_http_fetch(self, url: str) -> str:
         last_detail: object | None = None
         for attempt in range(self.max_retries + 1):
             headers = self._headers_for(attempt, url)
