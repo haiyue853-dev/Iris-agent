@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import iris_agent.task_queue.repository as queue_repository_module
 from iris_agent.task_queue.models import QueueJob
 from iris_agent.task_queue.repository import QueueLedgerError, QueueRepository
 
@@ -158,6 +159,49 @@ def test_queue_ledger_directory_raises_queue_ledger_error_without_replacing_sour
 
     assert path.is_dir()
     assert sentinel.read_text(encoding="utf-8") == "unchanged"
+
+
+@pytest.mark.parametrize("write_operation", ["mkstemp", "fsync", "replace"])
+def test_save_wraps_write_failures_without_replacing_ledger_or_leaking_temporary_files(
+    tmp_path, monkeypatch, write_operation: str
+) -> None:
+    path = tmp_path / "queue.json"
+    source = json.dumps({"jobs": []}).encode("utf-8")
+    path.write_bytes(source)
+    repository = QueueRepository(tmp_path)
+
+    def fail(*_args, **_kwargs):
+        raise OSError("simulated write failure")
+
+    target = queue_repository_module.tempfile if write_operation == "mkstemp" else queue_repository_module.os
+    monkeypatch.setattr(target, write_operation, fail)
+
+    with pytest.raises(QueueLedgerError):
+        repository.save([])
+
+    assert path.read_bytes() == source
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_save_raises_queue_ledger_error_immediately_for_non_contention_lock_failure(tmp_path, monkeypatch) -> None:
+    import msvcrt
+
+    repository = QueueRepository(tmp_path)
+    attempts = 0
+
+    def fail_lock(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts > 1:
+            raise RuntimeError("lock failure was retried")
+        raise OSError("simulated lock I/O failure")
+
+    monkeypatch.setattr(msvcrt, "locking", fail_lock)
+
+    with pytest.raises(QueueLedgerError):
+        repository.save([])
+
+    assert attempts == 1
 
 
 def test_to_dict_has_exactly_the_safe_persisted_keys() -> None:

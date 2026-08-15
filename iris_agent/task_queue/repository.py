@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
@@ -75,15 +76,18 @@ class QueueRepository:
         if not isinstance(jobs, list) or not all(isinstance(job, QueueJob) for job in jobs):
             raise QueueLedgerError("invalid queue ledger record")
         payload = {"jobs": [job.to_dict() for job in jobs]}
-        fd, temporary_path = tempfile.mkstemp(dir=str(self.root), suffix=".tmp")
+        temporary_path: str | None = None
         try:
+            fd, temporary_path = tempfile.mkstemp(dir=str(self.root), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_path, self.path)
+        except OSError as exc:
+            raise QueueLedgerError("unable to write queue ledger") from exc
         finally:
-            if os.path.exists(temporary_path):
+            if temporary_path and os.path.exists(temporary_path):
                 try:
                     os.unlink(temporary_path)
                 except OSError:
@@ -124,17 +128,22 @@ class QueueRepository:
         # supplies a one-byte OS lock; queue records remain in queue.json.
         import msvcrt
 
-        self.lock_path.touch(exist_ok=True)
-        with self.lock_path.open("r+b") as handle:
-            while True:
+        try:
+            self.lock_path.touch(exist_ok=True)
+            with self.lock_path.open("r+b") as handle:
+                while True:
+                    try:
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError as exc:
+                        if exc.errno != errno.EACCES and getattr(exc, "winerror", None) != 33:
+                            raise
+                        time.sleep(0.01)
                 try:
+                    yield
+                finally:
                     handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    time.sleep(0.01)
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError as exc:
+            raise QueueLedgerError("unable to lock queue ledger") from exc
