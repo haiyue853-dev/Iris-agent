@@ -18,6 +18,7 @@ app = create_app(
     notifications=application.notifications,
     task_center=application.task_center,
     task_queue=application.task_queue,
+    memory=application.memory,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
 )

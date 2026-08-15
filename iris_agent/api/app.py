@@ -38,6 +38,8 @@ from iris_agent.notifications.service import NotificationService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.service import TaskQueueService
 from iris_agent.api.tasks_api import register_task_routes
+from iris_agent.memory.service import MemoryService
+from iris_agent.api.memory_api import register_memory_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -146,6 +148,7 @@ def create_app(
     notifications: NotificationService | None = None,
     task_center: TaskCenterService | None = None,
     task_queue: TaskQueueService | None = None,
+    memory: MemoryService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -173,6 +176,8 @@ def create_app(
         register_notification_routes(app, notifications)
     if task_center is not None:
         register_task_routes(app, task_center, sessions, task_queue)
+    if memory is not None:
+        register_memory_routes(app, memory)
 
     approval_tasks: dict[tuple[str, str], str] = {}
     approval_tool_names: dict[tuple[str, str], str] = {}

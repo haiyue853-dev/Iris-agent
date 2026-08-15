@@ -52,3 +52,10 @@ notifications:
 
 task_queue:
   directory: data/task_queue
+
+memory:
+  directory: data/memory
+  max_entries: 500
+  max_chars: 500
+  max_injected_chars: 2000
+  max_injected_entries: 20

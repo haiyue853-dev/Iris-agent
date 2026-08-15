@@ -11,6 +11,8 @@ from iris_agent.automation.service import AutomationService
 from iris_agent.notifications.service import NotificationService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
+from iris_agent.memory.repository import MemoryRepository
+from iris_agent.memory.service import MemoryService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.repository import JsonDailyReportRepository
@@ -21,7 +23,7 @@ from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -37,6 +39,7 @@ class ApplicationServices:
     notifications: NotificationService
     task_center: TaskCenterService
     task_queue: TaskQueueService
+    memory: MemoryService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -61,8 +64,16 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
+    memory = MemoryService(
+        MemoryRepository(settings.memory.directory),
+        max_entries=settings.memory.max_entries,
+        max_chars=settings.memory.max_chars,
+        max_injected_chars=settings.memory.max_injected_chars,
+        max_injected_entries=settings.memory.max_injected_entries,
+    )
+    registry.register(build_remember_tool(memory))
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt)
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -89,4 +100,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, mcp, mcp_tools, settings)

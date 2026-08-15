@@ -86,6 +86,19 @@ def test_build_application_exposes_task_queue_service(tmp_path, monkeypatch):
     assert application.task_queue.repository.root == Path("data/task_queue")
 
 
+def test_build_application_exposes_memory_service_and_remember_tool(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.memory is not None
+    assert application.agent.memory is application.memory
+    assert application.memory.repository.root == Path("data/memory")
+    tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
+    assert "remember" in tool_names
+
+
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
