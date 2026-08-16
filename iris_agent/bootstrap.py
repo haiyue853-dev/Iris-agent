@@ -274,4 +274,11 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             token=settings.gateway.wecom.token,
             aes_key=settings.gateway.wecom.aes_key,
         )
+    if settings.gateway.push.enabled and qq_adapter is not None and settings.gateway.push.qq_target:
+        qq_target = settings.gateway.push.qq_target
+
+        def _push(text: str) -> None:
+            qq_adapter.push_text(qq_target, text)
+
+        automation.push = _push
     return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings)

@@ -9,7 +9,9 @@ answered; group messages are answered only when ``respond_groups`` is enabled.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 from uuid import uuid4
 
 from iris_agent.gateway.base import InboundMessage
@@ -22,6 +24,40 @@ class QQOneBotAdapter:
     def __init__(self, gateway: GatewayService, respond_groups: bool = False) -> None:
         self.gateway = gateway
         self.respond_groups = respond_groups
+        self._ws = None
+        self._loop = None
+        self._lock = threading.Lock()
+
+    # ---- connection tracking (for active push) --------------------------
+
+    def attach(self, websocket, loop) -> None:
+        with self._lock:
+            self._ws = websocket
+            self._loop = loop
+
+    def detach(self, websocket) -> None:
+        with self._lock:
+            if self._ws is websocket:
+                self._ws = None
+                self._loop = None
+
+    def push_text(self, user_id: str, text: str) -> bool:
+        """Actively push a private text message to a QQ user.
+
+        Returns ``False`` when no OneBot connection is currently attached or
+        the send could not be scheduled.  Safe to call from any thread.
+        """
+        with self._lock:
+            websocket = self._ws
+            loop = self._loop
+        if websocket is None or loop is None or loop.is_closed():
+            return False
+        action = self._send_action("private", text=text, user_id=user_id)
+        try:
+            asyncio.run_coroutine_threadsafe(websocket.send_json(action), loop)
+            return True
+        except Exception:  # noqa: BLE001 - push is best-effort
+            return False
 
     def handle_event(self, payload: dict) -> list[dict]:
         """Turn an inbound OneBot event into a list of actions (possibly empty)."""

@@ -1,3 +1,7 @@
+import asyncio
+import threading
+import time
+
 from iris_agent.gateway.qq import QQOneBotAdapter
 from iris_agent.gateway.service import GatewayReply
 
@@ -127,3 +131,46 @@ def test_group_message_does_not_send_files():
 
     assert len(actions) == 1
     assert actions[0]["params"]["message"] == "回复:hi"
+
+
+def test_push_text_returns_false_without_connection():
+    adapter = _adapter()
+
+    assert adapter.push_text("123", "hello") is False
+
+
+def test_push_text_schedules_send_when_attached():
+    adapter = _adapter()
+    sent = []
+
+    class FakeWS:
+        async def send_json(self, action):
+            sent.append(action)
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    adapter.attach(FakeWS(), loop)
+    try:
+        assert adapter.push_text("12345", "热点提醒") is True
+        deadline = time.time() + 1
+        while not sent and time.time() < deadline:
+            time.sleep(0.01)
+        assert len(sent) == 1
+        assert sent[0]["action"] == "send_msg"
+        assert sent[0]["params"] == {"message_type": "private", "message": "热点提醒", "user_id": 12345}
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=1)
+        loop.close()
+
+
+def test_detach_clears_connection():
+    adapter = _adapter()
+    loop = asyncio.new_event_loop()
+    ws = object()
+    adapter.attach(ws, loop)
+
+    adapter.detach(ws)
+
+    assert adapter.push_text("123", "hello") is False

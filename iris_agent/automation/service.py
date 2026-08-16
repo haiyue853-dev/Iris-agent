@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -38,8 +39,8 @@ class AutomationExecution:
 
 
 class AutomationService:
-    def __init__(self, root: Path, radar: HotRadarService, notifications: NotificationService | None = None):
-        self.root, self.radar, self.notifications, self.path = root, radar, notifications, root / "automation.json"
+    def __init__(self, root: Path, radar: HotRadarService, notifications: NotificationService | None = None, push: Callable[[str], None] | None = None):
+        self.root, self.radar, self.notifications, self.push, self.path = root, radar, notifications, push, root / "automation.json"
         root.mkdir(parents=True, exist_ok=True)
         self._recover()
 
@@ -115,6 +116,12 @@ class AutomationService:
                     self.notifications.create(task.name, summary, task_id, item_ids)
                 except Exception:
                     logger.exception("Failed to create notification for automation task %s", task_id)
+            if new_count and self.push is not None:
+                try:
+                    task = self._task(task_id)
+                    self.push(f"【{task.name}】{summary}")
+                except Exception:
+                    logger.exception("Failed to push automation task %s", task_id)
         data = self._read()
         for item in data["executions"]:
             if item["id"] == execution.id:

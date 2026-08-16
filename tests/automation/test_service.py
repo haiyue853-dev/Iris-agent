@@ -108,3 +108,48 @@ def test_task_rejects_cron_fields_the_scheduler_cannot_run(tmp_path):
 
     with pytest.raises(ValueError):
         service.create_task("invalid", "today at nine every day")
+
+
+def test_push_callback_invoked_on_new_items(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: [{"title": "AI 更新", "url": "https://example.test/ai", "source": "Tech", "summary": "摘要"}]})
+    radar.create_subscription("AI")
+    notifications = NotificationService(tmp_path / "notifications")
+    pushed: list[str] = []
+    service = AutomationService(tmp_path / "automation", radar, notifications, push=pushed.append)
+    task = service.create_task("热点监控", "0 * * * *")
+
+    execution = service.run_now(task.id)
+
+    assert execution.status == "succeeded"
+    assert len(pushed) == 1
+    assert "热点监控" in pushed[0]
+    assert "新增 1 条热点" in pushed[0]
+
+
+def test_push_callback_not_invoked_on_zero_match(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: []})
+    notifications = NotificationService(tmp_path / "notifications")
+    pushed: list[str] = []
+    service = AutomationService(tmp_path / "automation", radar, notifications, push=pushed.append)
+    task = service.create_task("radar", "0 * * * *")
+
+    service.run_now(task.id)
+
+    assert pushed == []
+
+
+def test_push_callback_failure_does_not_fail_scan(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: [{"title": "AI", "url": "https://example.test/ai", "source": "Tech", "summary": "x"}]})
+    radar.create_subscription("AI")
+    notifications = NotificationService(tmp_path / "notifications")
+
+    def boom(_text):
+        raise RuntimeError("push failed")
+
+    service = AutomationService(tmp_path / "automation", radar, notifications, push=boom)
+    task = service.create_task("radar", "0 * * * *")
+
+    execution = service.run_now(task.id)
+
+    assert execution.status == "succeeded"
+    assert execution.new_count == 1

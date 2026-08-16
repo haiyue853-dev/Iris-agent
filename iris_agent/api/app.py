@@ -212,6 +212,7 @@ def create_app(
         @app.websocket(qq_ws_path)
         async def qq_gateway_ws(websocket: WebSocket):
             await websocket.accept()
+            qq_adapter.attach(websocket, asyncio.get_running_loop())
             try:
                 while True:
                     payload = await websocket.receive_json()
@@ -220,6 +221,8 @@ def create_app(
                         await websocket.send_json(action)
             except WebSocketDisconnect:
                 pass
+            finally:
+                qq_adapter.detach(websocket)
 
     if wecom_adapter is not None:
         @app.get(wecom_callback_path)

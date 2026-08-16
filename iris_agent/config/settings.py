@@ -193,12 +193,19 @@ class WeComGatewaySettings:
 
 
 @dataclass(slots=True)
+class PushGatewaySettings:
+    enabled: bool = False
+    qq_target: str = ""
+
+
+@dataclass(slots=True)
 class GatewaySettings:
     enabled: bool = False
     directory: Path = Path("data/gateway")
     session_prefix: str = "gateway"
     qq: QqGatewaySettings = field(default_factory=QqGatewaySettings)
     wecom: WeComGatewaySettings = field(default_factory=WeComGatewaySettings)
+    push: PushGatewaySettings = field(default_factory=PushGatewaySettings)
 
 
 @dataclass(slots=True)
@@ -400,6 +407,10 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
                 token=str(_section(gateway, "wecom").get("token", "")),
                 aes_key=str(_section(gateway, "wecom").get("aes_key", "")),
                 callback_path=str(_section(gateway, "wecom").get("callback_path", "/gateway/wecom/callback")),
+            ),
+            push=PushGatewaySettings(
+                enabled=bool(_section(gateway, "push").get("enabled", False)),
+                qq_target=str(_section(gateway, "push").get("qq_target", "")),
             ),
         ),
     )

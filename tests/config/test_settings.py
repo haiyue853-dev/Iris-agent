@@ -208,6 +208,8 @@ def test_gateway_settings_defaults(tmp_path):
     assert settings.gateway.qq.path == "/gateway/qq/ws"
     assert settings.gateway.qq.respond_groups is False
     assert settings.gateway.wecom.enabled is False
+    assert settings.gateway.push.enabled is False
+    assert settings.gateway.push.qq_target == ""
 
 
 def test_gateway_settings_load_from_yaml(tmp_path):
@@ -221,7 +223,10 @@ def test_gateway_settings_load_from_yaml(tmp_path):
         "  wecom:\n"
         "    enabled: true\n"
         "    corp_id: corp123\n"
-        "    agent_id: 1000002\n",
+        "    agent_id: 1000002\n"
+        "  push:\n"
+        "    enabled: true\n"
+        "    qq_target: '123456789'\n",
         encoding="utf-8",
     )
 
@@ -233,3 +238,5 @@ def test_gateway_settings_load_from_yaml(tmp_path):
     assert gateway.wecom.enabled is True
     assert gateway.wecom.corp_id == "corp123"
     assert gateway.wecom.agent_id == 1000002
+    assert gateway.push.enabled is True
+    assert gateway.push.qq_target == "123456789"
