@@ -51,6 +51,8 @@ class CuratorService:
         enable_llm: bool = True,
         max_pairs_per_run: int = 200,
         expire_days: int = 90,
+        consolidate_enabled: bool = True,
+        consolidate_min_entries: int = 4,
     ):
         self.repository = repository
         self.memory = memory
@@ -62,11 +64,14 @@ class CuratorService:
         self.enable_llm = enable_llm
         self.max_pairs_per_run = max_pairs_per_run
         self.expire_days = expire_days
+        self.consolidate_enabled = consolidate_enabled
+        self.consolidate_min_entries = consolidate_min_entries
 
     def run(self) -> CuratorReport:
         candidates = self._build_candidates()
         suggestions = self._review(candidates)
         suggestions.extend(self._build_expire_suggestions())
+        suggestions.extend(self._build_consolidate_suggestions())
         report = CuratorReport.new(self._summarize(suggestions), suggestions)
         self.repository.save(report)
         return report
@@ -220,6 +225,36 @@ class CuratorService:
             )
         return suggestions
 
+    def _build_consolidate_suggestions(self) -> list[CuratorSuggestion]:
+        if not self.consolidate_enabled or self.referee is None:
+            return []
+        by_category: dict[str, list] = {}
+        for entry in self.memory.list():
+            by_category.setdefault(entry.category, []).append(entry)
+        suggestions: list[CuratorSuggestion] = []
+        for category, entries in by_category.items():
+            if len(entries) < self.consolidate_min_entries:
+                continue
+            texts = [entry.content for entry in entries]
+            resolution = self.referee.consolidate(texts)
+            if not resolution:
+                continue
+            ids = [entry.id for entry in entries]
+            suggestions.append(
+                CuratorSuggestion.new(
+                    kind="consolidate",
+                    scope="memory",
+                    targets=ids,
+                    keep="",
+                    drop="",
+                    summary=f"记忆归纳：把 {len(ids)} 条「{_SCOPE_LABELS.get(category, category)}」记忆合并为 1 条",
+                    reason="llm",
+                    field=category,
+                    resolution=resolution,
+                )
+            )
+        return suggestions
+
     def _review(self, candidates: list[_Candidate]) -> list[CuratorSuggestion]:
         if not candidates:
             return []
@@ -262,6 +297,17 @@ class CuratorService:
 
     def _apply_one(self, suggestion: CuratorSuggestion) -> bool:
         if suggestion.scope == "memory":
+            if suggestion.kind == "consolidate":
+                try:
+                    self.memory.add(suggestion.resolution, suggestion.field or "fact")
+                except (ValueError, TypeError):
+                    return False
+                for entry_id in suggestion.targets:
+                    try:
+                        self.memory.delete(entry_id)
+                    except MemoryNotFoundError:
+                        pass
+                return True
             try:
                 self.memory.delete(suggestion.drop)
                 return True

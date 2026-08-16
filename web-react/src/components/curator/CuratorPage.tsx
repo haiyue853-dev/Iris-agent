@@ -7,6 +7,7 @@ const KIND_LABELS: Record<CuratorSuggestionKind, string> = {
   conflict: '冲突',
   dedupe: '重复',
   expire: '过期',
+  consolidate: '归纳',
 };
 
 const STATUS_LABELS: Record<CuratorReportStatus, string> = {
@@ -131,8 +132,13 @@ export default function CuratorPage() {
                     {selected.suggestions.map((suggestion) => (
                       <li key={suggestion.id} className="memory-item curator-suggestion">
                         <span className={`curator-kind curator-kind-${suggestion.kind}`}>{KIND_LABELS[suggestion.kind]}</span>
-                        <span className="memory-content">{suggestion.summary}</span>
-                        <span className="curator-reason">{suggestion.reason === 'llm' ? 'LLM' : suggestion.reason === 'embedding' ? '向量' : '重叠'}</span>
+                        <span className="memory-content">
+                          {suggestion.summary}
+                          {suggestion.resolution && (
+                            <span className="curator-resolution">→ {suggestion.resolution}</span>
+                          )}
+                        </span>
+                        <span className="curator-reason">{suggestion.reason === 'llm' ? 'LLM' : suggestion.reason === 'embedding' ? '向量' : suggestion.reason === 'age' ? '时效' : '重叠'}</span>
                         {suggestion.applied ? (
                           <span className="curator-done">已应用</span>
                         ) : suggestion.dismissed ? (

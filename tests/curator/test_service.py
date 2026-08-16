@@ -33,12 +33,32 @@ class FakeEmbedder:
         return [self._vectors.get(t, [1.0, 0.0]) for t in texts]
 
 
+class DistinctEmbedder:
+    """返回两两正交的向量，使任意两条文本相似度为 0（不产生去重建议）。"""
+
+    def __init__(self):
+        self._next = 0
+
+    def embed(self, texts):
+        out = []
+        for _ in texts:
+            vector = [0.0] * (self._next + 1)
+            vector[self._next] = 1.0
+            out.append(vector)
+            self._next += 1
+        return out
+
+
 class FakeReferee:
-    def __init__(self, label="conflict"):
+    def __init__(self, label="conflict", consolidation=""):
         self.label = label
+        self.consolidation = consolidation
 
     def judge(self, a, b):
         return self.label
+
+    def consolidate(self, texts):
+        return self.consolidation
 
 
 def _memory(tmp_path) -> MemoryService:
@@ -64,7 +84,7 @@ def _knowledge(tmp_path) -> KnowledgeService:
     return KnowledgeService(repository, retriever)
 
 
-def _service(tmp_path, embedder, referee=None, enable_llm=False, max_pairs_per_run=200, skills=None, knowledge=None, expire_days=90) -> CuratorService:
+def _service(tmp_path, embedder, referee=None, enable_llm=False, max_pairs_per_run=200, skills=None, knowledge=None, expire_days=90, consolidate_enabled=True, consolidate_min_entries=4) -> CuratorService:
     engine = SimilarityEngine(embedder=embedder, merge_threshold=0.85, conflict_threshold=0.45)
     return CuratorService(
         CuratorRepository(tmp_path / "curator"),
@@ -77,6 +97,8 @@ def _service(tmp_path, embedder, referee=None, enable_llm=False, max_pairs_per_r
         enable_llm=enable_llm,
         max_pairs_per_run=max_pairs_per_run,
         expire_days=expire_days,
+        consolidate_enabled=consolidate_enabled,
+        consolidate_min_entries=consolidate_min_entries,
     )
 
 
@@ -233,16 +255,18 @@ def test_run_finds_duplicate_skills(tmp_path):
 
 def test_apply_deletes_drop_skill(tmp_path):
     skills = _skills(tmp_path)
-    first = skills.save_user_skill("React 技巧", "前端", "如何使用 React hooks 组织组件状态")
+    skills.save_user_skill("React 技巧", "前端", "如何使用 React hooks 组织组件状态")
     skills.save_user_skill("React 技能", "前端", "如何使用 React hooks 管理组件状态")
     service = _service(tmp_path, FakeEmbedder(), skills=skills, enable_llm=False)
     report = service.run()
+    drop_id = [s for s in report.suggestions if s.scope == "skill"][0].drop
 
     applied = service.apply(report.id)
 
     assert applied == 1
     remaining = {s.id for s in skills.list_user_definitions()}
-    assert first.id not in remaining
+    assert drop_id not in remaining
+    assert len(remaining) == 1
 
 
 def test_run_finds_duplicate_knowledge(tmp_path):
@@ -316,3 +340,60 @@ def test_expire_disabled_when_days_non_positive(tmp_path):
     report = service.run()
 
     assert [s for s in report.suggestions if s.kind == "expire"] == []
+
+
+def test_run_consolidates_many_memories(tmp_path):
+    memory = _memory(tmp_path)
+    for index in range(4):
+        memory.add(f"用户偏好点{index}", "preference")
+    referee = FakeReferee(consolidation="用户有一系列偏好")
+    service = _service(tmp_path, DistinctEmbedder(), referee=referee, enable_llm=True, consolidate_min_entries=4)
+
+    report = service.run()
+
+    consolidate = [s for s in report.suggestions if s.kind == "consolidate"]
+    assert len(consolidate) == 1
+    assert consolidate[0].scope == "memory"
+    assert consolidate[0].field == "preference"
+    assert consolidate[0].resolution == "用户有一系列偏好"
+    assert len(consolidate[0].targets) == 4
+
+
+def test_apply_consolidation_replaces_fragments(tmp_path):
+    memory = _memory(tmp_path)
+    for index in range(4):
+        memory.add(f"用户偏好点{index}", "preference")
+    referee = FakeReferee(consolidation="用户有一系列偏好")
+    service = _service(tmp_path, DistinctEmbedder(), referee=referee, enable_llm=True, consolidate_min_entries=4)
+    report = service.run()
+
+    applied = service.apply(report.id)
+
+    assert applied == 1
+    remaining = memory.list()
+    assert len(remaining) == 1
+    assert remaining[0].content == "用户有一系列偏好"
+
+
+def test_consolidation_skipped_below_threshold(tmp_path):
+    memory = _memory(tmp_path)
+    for index in range(3):
+        memory.add(f"用户偏好点{index}", "preference")
+    referee = FakeReferee(consolidation="用户有一系列偏好")
+    service = _service(tmp_path, DistinctEmbedder(), referee=referee, enable_llm=True, consolidate_min_entries=4)
+
+    report = service.run()
+
+    assert [s for s in report.suggestions if s.kind == "consolidate"] == []
+
+
+def test_consolidation_disabled_when_flag_off(tmp_path):
+    memory = _memory(tmp_path)
+    for index in range(4):
+        memory.add(f"用户偏好点{index}", "preference")
+    referee = FakeReferee(consolidation="用户有一系列偏好")
+    service = _service(tmp_path, DistinctEmbedder(), referee=referee, enable_llm=True, consolidate_enabled=False)
+
+    report = service.run()
+
+    assert [s for s in report.suggestions if s.kind == "consolidate"] == []

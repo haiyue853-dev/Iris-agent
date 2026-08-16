@@ -126,4 +126,6 @@ curator:
   expire_days: 90
   auto_run: false
   schedule: "0 3 * * *"
+  consolidate_enabled: true
+  consolidate_min_entries: 4
 

@@ -113,3 +113,24 @@ def test_suggestion_expire_kind_allows_empty_keep():
 def test_suggestion_expire_requires_knowledge_scope():
     with pytest.raises(ValueError):
         _suggestion(kind="expire", scope="memory", keep="")
+
+
+def test_suggestion_consolidate_valid():
+    suggestion = _suggestion(kind="consolidate", scope="memory", field="preference", keep="", drop="", resolution="合并后的记忆")
+    assert suggestion.kind == "consolidate"
+    assert suggestion.resolution == "合并后的记忆"
+
+
+def test_suggestion_consolidate_requires_memory_scope():
+    with pytest.raises(ValueError):
+        _suggestion(kind="consolidate", scope="knowledge", field="preference", keep="", drop="", resolution="x")
+
+
+def test_suggestion_consolidate_requires_category_field():
+    with pytest.raises(ValueError):
+        _suggestion(kind="consolidate", scope="memory", field=None, keep="", drop="", resolution="x")
+
+
+def test_suggestion_consolidate_requires_resolution():
+    with pytest.raises(ValueError):
+        _suggestion(kind="consolidate", scope="memory", field="preference", keep="", drop="", resolution="")

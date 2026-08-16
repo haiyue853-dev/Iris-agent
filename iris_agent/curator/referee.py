@@ -12,6 +12,12 @@ _SYSTEM_PROMPT = (
     "不要输出任何解释，只输出 duplicate、conflict 或 unrelated 其中一个词。"
 )
 
+_CONSOLIDATE_PROMPT = (
+    "你是记忆整理器。下面几条是关于同一类信息的用户记忆片段，请把它们归纳合并成"
+    "一条简洁、完整、保留全部关键信息的长期记忆。用中文输出，只输出合并后的记忆内容"
+    "本身，不要加任何解释、编号或前缀。"
+)
+
 
 class ConflictReferee:
     def __init__(self, provider):
@@ -33,3 +39,16 @@ class ConflictReferee:
         if "duplicate" in label or "重复" in label or "相同" in label:
             return "duplicate"
         return "unrelated"
+
+    def consolidate(self, texts: list[str]) -> str:
+        """Return a single consolidated memory text, or "" on failure."""
+        fragments = "\n".join(f"{index}. {text}" for index, text in enumerate(texts, start=1))
+        messages = [
+            Message(role="system", content=_CONSOLIDATE_PROMPT),
+            Message(role="user", content=fragments),
+        ]
+        try:
+            response = self.provider.complete(messages, tools=[])
+        except Exception:
+            return ""
+        return (response.content or "").strip()

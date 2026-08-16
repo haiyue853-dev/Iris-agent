@@ -7,15 +7,16 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-_KINDS = frozenset({"merge", "conflict", "dedupe", "expire"})
+_KINDS = frozenset({"merge", "conflict", "dedupe", "expire", "consolidate"})
 _SCOPES = frozenset({"memory", "profile", "skill", "knowledge"})
 _REASONS = frozenset({"embedding", "overlap", "llm", "age"})
 _REPORT_STATUSES = frozenset({"open", "applied", "dismissed"})
 _PROFILE_FIELDS = frozenset({"preferences", "goals", "facts"})
+_MEMORY_CATEGORIES = frozenset({"preference", "fact", "project", "other"})
 
 _REPORT_FIELDS = frozenset({"id", "status", "created_at", "summary", "suggestions"})
 _SUGGESTION_FIELDS = frozenset(
-    {"id", "kind", "scope", "field", "targets", "keep", "drop", "summary", "reason", "applied", "dismissed"}
+    {"id", "kind", "scope", "field", "targets", "keep", "drop", "summary", "reason", "applied", "dismissed", "resolution"}
 )
 
 _MAX_SUMMARY_CHARS = 400
@@ -36,6 +37,7 @@ class CuratorSuggestion:
     reason: str
     applied: bool = False
     dismissed: bool = False
+    resolution: str = ""
 
     def __post_init__(self) -> None:
         if self.kind not in _KINDS:
@@ -44,20 +46,31 @@ class CuratorSuggestion:
             raise ValueError("invalid curator suggestion scope")
         if self.scope == "profile" and self.field not in _PROFILE_FIELDS:
             raise ValueError("invalid curator suggestion profile field")
-        if self.scope in ("memory", "skill", "knowledge") and self.field is not None:
+        if self.scope in ("memory", "skill", "knowledge") and self.field is not None and self.kind != "consolidate":
             raise ValueError(f"{self.scope} suggestion must not carry a profile field")
         if self.kind == "expire" and self.scope != "knowledge":
             raise ValueError("expire suggestion only applies to knowledge scope")
+        if self.kind == "consolidate":
+            if self.scope != "memory":
+                raise ValueError("consolidate suggestion only applies to memory scope")
+            if self.field not in _MEMORY_CATEGORIES:
+                raise ValueError("consolidate suggestion requires a memory category field")
+            if not self.resolution.strip():
+                raise ValueError("consolidate suggestion requires a resolution")
         if self.reason not in _REASONS:
             raise ValueError("invalid curator suggestion reason")
         if not isinstance(self.targets, list) or not all(isinstance(item, str) for item in self.targets):
             raise ValueError("invalid curator suggestion targets")
         if not isinstance(self.keep, str):
             raise ValueError("invalid curator suggestion keep")
-        if not isinstance(self.drop, str) or not self.drop:
+        if not isinstance(self.drop, str):
             raise ValueError("invalid curator suggestion drop")
-        if self.kind != "expire" and not self.keep:
+        if self.kind not in ("expire", "consolidate") and not self.keep:
             raise ValueError("invalid curator suggestion keep")
+        if self.kind not in ("consolidate",) and not self.drop:
+            raise ValueError("invalid curator suggestion drop")
+        if not isinstance(self.resolution, str):
+            raise ValueError("invalid curator suggestion resolution")
         if not isinstance(self.summary, str) or not self.summary.strip():
             raise ValueError("invalid curator suggestion summary")
         if len(self.summary) > _MAX_SUMMARY_CHARS:
@@ -78,6 +91,7 @@ class CuratorSuggestion:
         summary: str,
         reason: str,
         field: str | None = None,
+        resolution: str = "",
     ) -> "CuratorSuggestion":
         return cls(
             id=f"sug-{uuid4().hex[:12]}",
@@ -91,6 +105,7 @@ class CuratorSuggestion:
             reason=reason,
             applied=False,
             dismissed=False,
+            resolution=resolution,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,6 +121,7 @@ class CuratorSuggestion:
             "reason": self.reason,
             "applied": self.applied,
             "dismissed": self.dismissed,
+            "resolution": self.resolution,
         }
 
     @classmethod
@@ -124,6 +140,7 @@ class CuratorSuggestion:
             reason=data["reason"],
             applied=data["applied"],
             dismissed=data["dismissed"],
+            resolution=data["resolution"],
         )
 
 

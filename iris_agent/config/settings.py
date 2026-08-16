@@ -164,6 +164,8 @@ class CuratorSettings:
     expire_days: int = 90
     auto_run: bool = False
     schedule: str = "0 3 * * *"
+    consolidate_enabled: bool = True
+    consolidate_min_entries: int = 4
 
 
 @dataclass(slots=True)
@@ -346,6 +348,8 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             expire_days=int(curator.get("expire_days", 90)),
             auto_run=bool(curator.get("auto_run", False)),
             schedule=str(curator.get("schedule", "0 3 * * *")),
+            consolidate_enabled=bool(curator.get("consolidate_enabled", True)),
+            consolidate_min_entries=int(curator.get("consolidate_min_entries", 4)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

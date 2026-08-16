@@ -237,6 +237,8 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         enable_llm=settings.curator.enable_llm,
         max_pairs_per_run=settings.curator.max_pairs_per_run,
         expire_days=settings.curator.expire_days,
+        consolidate_enabled=settings.curator.consolidate_enabled,
+        consolidate_min_entries=settings.curator.consolidate_min_entries,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
