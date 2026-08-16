@@ -124,6 +124,30 @@ def test_push_callback_invoked_on_new_items(tmp_path):
     assert len(pushed) == 1
     assert "热点监控" in pushed[0]
     assert "新增 1 条热点" in pushed[0]
+    assert "1. AI 更新" in pushed[0]
+
+
+def test_push_text_lists_headlines_and_truncates(tmp_path):
+    titles = [{"title": f"AI 热点标题 {index} 这是一段很长的描述用来测试截断", "url": f"https://example.test/{index}", "source": "Tech", "summary": "x"} for index in range(12)]
+    radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: titles})
+    radar.create_subscription("AI")
+    notifications = NotificationService(tmp_path / "notifications")
+    pushed: list[str] = []
+    service = AutomationService(tmp_path / "automation", radar, notifications, push=pushed.append)
+    task = service.create_task("热点监控", "0 * * * *")
+
+    service.run_now(task.id)
+
+    text = pushed[0]
+    assert "新增 12 条热点" in text
+    assert "1. " in text
+    assert "8. " in text
+    assert "9. " not in text  # 截断到 8 条
+    assert "共 12 条" in text
+    # 标题被截断到 60 字符以内
+    for line in text.splitlines()[1:]:
+        if line and line[0].isdigit():
+            assert len(line) <= 70
 
 
 def test_push_callback_not_invoked_on_zero_match(tmp_path):

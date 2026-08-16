@@ -119,7 +119,7 @@ class AutomationService:
             if new_count and self.push is not None:
                 try:
                     task = self._task(task_id)
-                    self.push(f"【{task.name}】{summary}")
+                    self.push(self._build_push_text(task.name, summary, item_ids))
                 except Exception:
                     logger.exception("Failed to push automation task %s", task_id)
         data = self._read()
@@ -138,6 +138,27 @@ class AutomationService:
         if any(item.trigger == trigger for item in self.list_executions(task_id)):
             return None
         return self._run(task_id, trigger)
+
+    def _build_push_text(self, task_name: str, summary: str, item_ids: tuple[str, ...]) -> str:
+        """Compose a push message listing the newly matched headlines."""
+        items = self.radar.list_items()
+        item_map = {item.id: item for item in items}
+        lines = [f"【{task_name}】{summary}"]
+        shown = 0
+        for item_id in item_ids:
+            item = item_map.get(item_id)
+            if item is None:
+                continue
+            title = item.title.strip()
+            if len(title) > 60:
+                title = title[:60] + "…"
+            lines.append(f"{shown + 1}. {title}")
+            shown += 1
+            if shown >= 8:
+                break
+        if len(item_ids) > shown:
+            lines.append(f"…共 {len(item_ids)} 条，详见热点雷达")
+        return "\n".join(lines)
 
 
 def _matches_cron_field(field: str, value: int, minimum: int, maximum: int) -> bool:
