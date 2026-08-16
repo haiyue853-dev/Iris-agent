@@ -17,12 +17,12 @@ class FakeGateway:
         return GatewayReply(text=f"{self.reply}:{message.text}", files=list(self.files))
 
 
-def _adapter(respond_groups=False, reply="回复", files=None, allowed_users=None) -> QQOneBotAdapter:
-    return QQOneBotAdapter(FakeGateway(reply, files), respond_groups=respond_groups, allowed_users=allowed_users)
+def _adapter(respond_groups=False, reply="回复", files=None, allowed_users=None, allow_all=False) -> QQOneBotAdapter:
+    return QQOneBotAdapter(FakeGateway(reply, files), respond_groups=respond_groups, allowed_users=allowed_users, allow_all=allow_all)
 
 
 def test_private_message_returns_send_action():
-    adapter = _adapter()
+    adapter = _adapter(allow_all=True)
     payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "你好"}
 
     actions = adapter.handle_event(payload)
@@ -41,7 +41,7 @@ def test_group_message_ignored_by_default():
 
 
 def test_group_message_answered_when_enabled():
-    adapter = _adapter(respond_groups=True)
+    adapter = _adapter(respond_groups=True, allow_all=True)
     payload = {"post_type": "message", "message_type": "group", "group_id": 789, "user_id": 1, "raw_message": "hi"}
 
     actions = adapter.handle_event(payload)
@@ -56,7 +56,7 @@ def test_non_message_event_returns_empty():
 
 
 def test_text_extracted_from_segments():
-    adapter = _adapter()
+    adapter = _adapter(allow_all=True)
     payload = {
         "post_type": "message",
         "message_type": "private",
@@ -86,7 +86,7 @@ def test_exception_returns_friendly_reply():
         def handle(self, message):
             raise RuntimeError("boom")
 
-    adapter = QQOneBotAdapter(BoomGateway())
+    adapter = QQOneBotAdapter(BoomGateway(), allow_all=True)
     payload = {"post_type": "message", "message_type": "private", "user_id": 1, "raw_message": "hi"}
 
     actions = adapter.handle_event(payload)
@@ -97,7 +97,7 @@ def test_exception_returns_friendly_reply():
 def test_file_markers_become_file_actions_before_text(tmp_path):
     real_file = tmp_path / "日报.md"
     real_file.write_text("内容", encoding="utf-8")
-    adapter = _adapter(files=[str(real_file)])
+    adapter = _adapter(files=[str(real_file)], allow_all=True)
     payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "把日报发给我"}
 
     actions = adapter.handle_event(payload)
@@ -113,7 +113,7 @@ def test_file_markers_become_file_actions_before_text(tmp_path):
 
 def test_missing_file_adds_notice(tmp_path):
     missing = str(tmp_path / "不存在的文件.md")
-    adapter = _adapter(files=[missing])
+    adapter = _adapter(files=[missing], allow_all=True)
     payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "发文件"}
 
     actions = adapter.handle_event(payload)
@@ -124,7 +124,7 @@ def test_missing_file_adds_notice(tmp_path):
 
 
 def test_group_message_does_not_send_files():
-    adapter = _adapter(respond_groups=True, files=["D:/a.txt"])
+    adapter = _adapter(respond_groups=True, files=["D:/a.txt"], allow_all=True)
     payload = {"post_type": "message", "message_type": "group", "group_id": 789, "user_id": 1, "raw_message": "hi"}
 
     actions = adapter.handle_event(payload)
@@ -193,8 +193,22 @@ def test_allowed_user_is_answered():
     assert actions[0]["params"]["message"] == "回复:hi"
 
 
-def test_empty_allowed_users_allows_all():
+def test_empty_allowed_users_denies_all():
     adapter = _adapter()
+    payload = {"post_type": "message", "message_type": "private", "user_id": 99999, "raw_message": "hi"}
+
+    assert adapter.handle_event(payload) == []
+
+
+def test_allow_all_flag_allows_everyone():
+    adapter = _adapter(allow_all=True)
+    payload = {"post_type": "message", "message_type": "private", "user_id": 99999, "raw_message": "hi"}
+
+    assert len(adapter.handle_event(payload)) == 1
+
+
+def test_allow_all_overrides_allowlist():
+    adapter = _adapter(allowed_users=["12345"], allow_all=True)
     payload = {"post_type": "message", "message_type": "private", "user_id": 99999, "raw_message": "hi"}
 
     assert len(adapter.handle_event(payload)) == 1

@@ -264,6 +264,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             gateway,
             respond_groups=settings.gateway.qq.respond_groups,
             allowed_users=settings.gateway.qq.allowed_users,
+            allow_all=settings.gateway.qq.allow_all,
         )
         if settings.gateway.qq.enabled
         else None

@@ -180,6 +180,7 @@ class QqGatewaySettings:
     path: str = "/gateway/qq/ws"
     respond_groups: bool = False
     allowed_users: list[str] = field(default_factory=list)
+    allow_all: bool = False
 
 
 @dataclass(slots=True)
@@ -411,6 +412,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
                 path=str(_section(gateway, "qq").get("path", "/gateway/qq/ws")),
                 respond_groups=bool(_section(gateway, "qq").get("respond_groups", False)),
                 allowed_users=_split_csv(_section(gateway, "qq").get("allowed_users")),
+                allow_all=bool(_section(gateway, "qq").get("allow_all", False)),
             ),
             wecom=WeComGatewaySettings(
                 enabled=bool(_section(gateway, "wecom").get("enabled", False)),

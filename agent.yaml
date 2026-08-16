@@ -140,6 +140,8 @@ gateway:
     enabled: true
     path: /gateway/qq/ws
     respond_groups: false
+    allowed_users: "1846247370"
+    allow_all: false
   wecom:
     enabled: false
     corp_id: ""
@@ -149,6 +151,6 @@ gateway:
     aes_key: ""
     callback_path: /gateway/wecom/callback
   push:
-    enabled: false
-    qq_target: ""
+    enabled: true
+    qq_target: "1905499552"
 

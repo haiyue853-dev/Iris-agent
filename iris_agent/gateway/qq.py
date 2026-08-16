@@ -21,10 +21,11 @@ from iris_agent.gateway.service import GatewayReply, GatewayService
 class QQOneBotAdapter:
     name = "qq"
 
-    def __init__(self, gateway: GatewayService, respond_groups: bool = False, allowed_users: list[str] | None = None) -> None:
+    def __init__(self, gateway: GatewayService, respond_groups: bool = False, allowed_users: list[str] | None = None, allow_all: bool = False) -> None:
         self.gateway = gateway
         self.respond_groups = respond_groups
         self.allowed_users = set(allowed_users or [])
+        self.allow_all = allow_all
         self._ws = None
         self._loop = None
         self._lock = threading.Lock()
@@ -89,7 +90,10 @@ class QQOneBotAdapter:
         return []
 
     def _is_allowed(self, user_id: str) -> bool:
-        return not self.allowed_users or user_id in self.allowed_users
+        # Default-deny: with no allowlist and allow_all off, nobody is authorized.
+        if self.allow_all:
+            return True
+        return user_id in self.allowed_users
 
     def _safe_reply(self, user_id: str, text: str, payload: dict) -> GatewayReply:
         try:
