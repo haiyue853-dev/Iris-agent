@@ -215,8 +215,8 @@ def create_app(
             try:
                 while True:
                     payload = await websocket.receive_json()
-                    action = await asyncio.to_thread(qq_adapter.handle_event, payload)
-                    if action is not None:
+                    actions = await asyncio.to_thread(qq_adapter.handle_event, payload)
+                    for action in actions:
                         await websocket.send_json(action)
             except WebSocketDisconnect:
                 pass

@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
+import re
 import threading
 from pathlib import Path
 
 from iris_agent.core.agent import AgentService
 from iris_agent.gateway.base import InboundMessage
 from iris_agent.sessions.base import SessionRepository
+
+_FILE_MARKER = re.compile(r"\[FILE:\s*([^\]]+?)\s*\]")
+
+
+@dataclass(slots=True)
+class GatewayReply:
+    """The agent's reply plus any local files it asked to send.
+
+    The agent declares files inline with ``[FILE:<absolute path>]`` markers,
+    which the gateway strips from ``text`` and collects into ``files`` so the
+    platform adapter can relay them (e.g. to a phone over QQ).
+    """
+
+    text: str
+    files: list[str] = field(default_factory=list)
 
 
 class GatewayService:
@@ -50,13 +67,20 @@ class GatewayService:
 
     # ---- message handling -----------------------------------------------
 
-    def handle(self, message: InboundMessage) -> str:
-        """Answer an inbound message and return the final reply text."""
+    def handle(self, message: InboundMessage) -> GatewayReply:
+        """Answer an inbound message and return the final reply plus files."""
         text = message.text.strip()
         if not text:
-            return ""
+            return GatewayReply(text="")
         session_id = self.session_id(message.platform, message.user_id)
-        return self._run(session_id, text)
+        reply_text = self._run(session_id, text)
+        return self._extract_files(reply_text)
+
+    @staticmethod
+    def _extract_files(text: str) -> GatewayReply:
+        files = [match.strip() for match in _FILE_MARKER.findall(text) if match.strip()]
+        clean = _FILE_MARKER.sub("", text).strip()
+        return GatewayReply(text=clean, files=files)
 
     def _run(self, session_id: str, text: str) -> str:
         parts: list[str] = []

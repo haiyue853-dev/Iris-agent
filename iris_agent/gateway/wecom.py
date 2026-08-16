@@ -22,7 +22,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 from iris_agent.gateway.base import InboundMessage
-from iris_agent.gateway.service import GatewayService
+from iris_agent.gateway.service import GatewayReply, GatewayService
 
 _WECOM_API = "https://qyapi.weixin.qq.com/cgi-bin"
 
@@ -115,10 +115,10 @@ class WeComAdapter:
         try:
             reply = self.gateway.handle(InboundMessage("wecom", user_id, text))
         except Exception as exc:  # noqa: BLE001 - surface a friendly error to the user
-            reply = f"抱歉，处理你的消息时出错了：{exc}"
-        if reply:
-            self.send_text(user_id, reply)
-        return reply
+            reply = GatewayReply(text=f"抱歉，处理你的消息时出错了：{exc}")
+        if reply.text:
+            self.send_text(user_id, reply.text)
+        return reply.text
 
     # ---- active push ----------------------------------------------------
 

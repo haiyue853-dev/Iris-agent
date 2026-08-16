@@ -38,7 +38,7 @@ def test_handle_returns_reply_and_creates_session(tmp_path):
 
     reply = service.handle(InboundMessage("qq", "123", "你好"))
 
-    assert reply == "ok"
+    assert reply.text == "ok"
     session_id = service.session_id("qq", "123")
     assert session_id.startswith("session_")
 
@@ -69,7 +69,8 @@ def test_blank_text_returns_empty(tmp_path):
 
     reply = service.handle(InboundMessage("qq", "123", "   "))
 
-    assert reply == ""
+    assert reply.text == ""
+    assert reply.files == []
     assert agent.runs == []
 
 
@@ -90,7 +91,7 @@ def test_approval_request_is_refused(tmp_path):
 
     reply = service.handle(InboundMessage("qq", "123", "触发审批"))
 
-    assert reply == "拒绝结果(False)"
+    assert reply.text == "拒绝结果(False)"
     assert agent.runs[1] == ("resolve", agent.runs[0][1], "c1", False)
 
 
@@ -106,7 +107,7 @@ def test_accumulates_multiple_text_deltas(tmp_path):
 
     reply = service.handle(InboundMessage("qq", "123", "hi"))
 
-    assert reply == "第一段第二段"
+    assert reply.text == "第一段第二段"
 
 
 class LegacyAgent(FakeAgent):
@@ -119,4 +120,29 @@ def test_falls_back_to_message_completed_content(tmp_path):
 
     reply = service.handle(InboundMessage("qq", "123", "hi"))
 
-    assert reply == "旧版内容"
+    assert reply.text == "旧版内容"
+
+
+class FileMarkerAgent(FakeAgent):
+    def run(self, session_id: str, text: str):
+        yield AgentEvent("text_delta", {"content": "好的，文件发给你。\n[FILE:D:/agent/iris-agent/日报-2026-08-16.md]\n[FILE:D:\\agent\\iris-agent\\报告.docx]"})
+        yield AgentEvent("message_completed", {"message_id": "m1"})
+
+
+def test_extracts_file_markers_into_files_and_cleans_text(tmp_path):
+    service = _service(tmp_path, FileMarkerAgent())
+
+    reply = service.handle(InboundMessage("qq", "123", "把日报发给我"))
+
+    assert reply.files == ["D:/agent/iris-agent/日报-2026-08-16.md", "D:\\agent\\iris-agent\\报告.docx"]
+    assert "[FILE:" not in reply.text
+    assert reply.text.strip() == "好的，文件发给你。"
+
+
+def test_no_file_marker_yields_empty_files(tmp_path):
+    service = _service(tmp_path)
+
+    reply = service.handle(InboundMessage("qq", "123", "hi"))
+
+    assert reply.files == []
+    assert reply.text == "ok"
