@@ -90,8 +90,10 @@ def test_exception_returns_friendly_reply():
     assert "出错" in actions[0]["params"]["message"]
 
 
-def test_file_markers_become_file_actions_before_text():
-    adapter = _adapter(files=["D:/agent/iris-agent/日报.md"])
+def test_file_markers_become_file_actions_before_text(tmp_path):
+    real_file = tmp_path / "日报.md"
+    real_file.write_text("内容", encoding="utf-8")
+    adapter = _adapter(files=[str(real_file)])
     payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "把日报发给我"}
 
     actions = adapter.handle_event(payload)
@@ -101,8 +103,20 @@ def test_file_markers_become_file_actions_before_text():
     assert file_action["action"] == "send_msg"
     assert file_action["params"]["user_id"] == 12345
     assert "CQ:file" in file_action["params"]["message"]
-    assert "D:/agent/iris-agent/日报.md" in file_action["params"]["message"]
+    assert str(real_file).replace("\\", "/") in file_action["params"]["message"]
     assert actions[1]["params"]["message"] == "回复:把日报发给我"
+
+
+def test_missing_file_adds_notice(tmp_path):
+    missing = str(tmp_path / "不存在的文件.md")
+    adapter = _adapter(files=[missing])
+    payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "发文件"}
+
+    actions = adapter.handle_event(payload)
+
+    assert len(actions) == 1
+    assert "文件不存在" in actions[0]["params"]["message"]
+    assert "不存在的文件.md" in actions[0]["params"]["message"]
 
 
 def test_group_message_does_not_send_files():

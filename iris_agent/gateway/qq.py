@@ -9,6 +9,7 @@ answered; group messages are answered only when ``respond_groups`` is enabled.
 
 from __future__ import annotations
 
+import os
 from uuid import uuid4
 
 from iris_agent.gateway.base import InboundMessage
@@ -64,12 +65,20 @@ class QQOneBotAdapter:
         group_id: str | None = None,
     ) -> list[dict]:
         actions: list[dict] = []
+        missing: list[str] = []
         # Files are relayed only for private chats (the "send to my phone" case).
         if message_type == "private" and user_id is not None:
             for path in reply.files:
-                actions.append(self._send_file_action(user_id, path))
-        if reply.text:
-            actions.append(self._send_action(message_type, text=reply.text, user_id=user_id, group_id=group_id))
+                if os.path.isfile(path):
+                    actions.append(self._send_file_action(user_id, path))
+                else:
+                    missing.append(path)
+        text = reply.text
+        if missing:
+            notice = "以下文件不存在，未能发送：" + "、".join(missing)
+            text = f"{notice}\n{text}" if text else notice
+        if text:
+            actions.append(self._send_action(message_type, text=text, user_id=user_id, group_id=group_id))
         return actions
 
     @staticmethod
