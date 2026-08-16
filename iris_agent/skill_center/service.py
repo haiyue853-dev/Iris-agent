@@ -54,6 +54,12 @@ class SkillCenterService:
         states = self._repository.load()
         return [self._to_info(skill, states) for skill in self._all_definitions()]
 
+    def list_user_definitions(self) -> list[SkillDefinition]:
+        """返回全部用户技能（含正文），供审查/去重使用。"""
+        if self._user_catalog is None:
+            return []
+        return self._user_catalog.list()
+
     def get_skill(self, skill_id: str) -> SkillInfo:
         definition = self._lookup(skill_id)
         states = self._repository.load()
@@ -101,6 +107,20 @@ class SkillCenterService:
 
         self._write_skill(skill_id, name, description, version, content)
         return self._lookup(skill_id)
+
+    def delete_user_skill(self, skill_id: str) -> bool:
+        """删除一个用户技能（仅限 user 目录），返回是否删除成功。"""
+        if self.user_directory is None:
+            return False
+        definition = self._lookup(skill_id)
+        if definition.source != "user":
+            raise ValueError("不能删除内置 Skill")
+        directory = self.user_directory / skill_id
+        if not directory.is_dir():
+            return False
+        import shutil
+        shutil.rmtree(directory)
+        return True
 
     def _lookup(self, skill_id: str) -> SkillDefinition:
         if not skill_id or any(ch in skill_id for ch in ("/", "\\", "..", " ")):

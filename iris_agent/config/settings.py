@@ -161,6 +161,9 @@ class CuratorSettings:
     enable_llm: bool = True
     max_pairs_per_run: int = 200
     max_reports: int = 50
+    expire_days: int = 90
+    auto_run: bool = False
+    schedule: str = "0 3 * * *"
 
 
 @dataclass(slots=True)
@@ -340,6 +343,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             enable_llm=bool(curator.get("enable_llm", True)),
             max_pairs_per_run=int(curator.get("max_pairs_per_run", 200)),
             max_reports=int(curator.get("max_reports", 50)),
+            expire_days=int(curator.get("expire_days", 90)),
+            auto_run=bool(curator.get("auto_run", False)),
+            schedule=str(curator.get("schedule", "0 3 * * *")),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

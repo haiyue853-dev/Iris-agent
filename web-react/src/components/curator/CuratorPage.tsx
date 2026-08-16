@@ -5,7 +5,8 @@ import type { CuratorReport, CuratorReportStatus, CuratorReportSummary, CuratorS
 const KIND_LABELS: Record<CuratorSuggestionKind, string> = {
   merge: '重复',
   conflict: '冲突',
-  dedupe: '画像重复',
+  dedupe: '重复',
+  expire: '过期',
 };
 
 const STATUS_LABELS: Record<CuratorReportStatus, string> = {

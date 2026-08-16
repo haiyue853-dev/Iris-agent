@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-_KINDS = frozenset({"merge", "conflict", "dedupe"})
-_SCOPES = frozenset({"memory", "profile"})
-_REASONS = frozenset({"embedding", "overlap", "llm"})
+_KINDS = frozenset({"merge", "conflict", "dedupe", "expire"})
+_SCOPES = frozenset({"memory", "profile", "skill", "knowledge"})
+_REASONS = frozenset({"embedding", "overlap", "llm", "age"})
 _REPORT_STATUSES = frozenset({"open", "applied", "dismissed"})
 _PROFILE_FIELDS = frozenset({"preferences", "goals", "facts"})
 
@@ -44,16 +44,20 @@ class CuratorSuggestion:
             raise ValueError("invalid curator suggestion scope")
         if self.scope == "profile" and self.field not in _PROFILE_FIELDS:
             raise ValueError("invalid curator suggestion profile field")
-        if self.scope == "memory" and self.field is not None:
-            raise ValueError("memory suggestion must not carry a profile field")
+        if self.scope in ("memory", "skill", "knowledge") and self.field is not None:
+            raise ValueError(f"{self.scope} suggestion must not carry a profile field")
+        if self.kind == "expire" and self.scope != "knowledge":
+            raise ValueError("expire suggestion only applies to knowledge scope")
         if self.reason not in _REASONS:
             raise ValueError("invalid curator suggestion reason")
         if not isinstance(self.targets, list) or not all(isinstance(item, str) for item in self.targets):
             raise ValueError("invalid curator suggestion targets")
-        if not isinstance(self.keep, str) or not self.keep:
+        if not isinstance(self.keep, str):
             raise ValueError("invalid curator suggestion keep")
         if not isinstance(self.drop, str) or not self.drop:
             raise ValueError("invalid curator suggestion drop")
+        if self.kind != "expire" and not self.keep:
+            raise ValueError("invalid curator suggestion keep")
         if not isinstance(self.summary, str) or not self.summary.strip():
             raise ValueError("invalid curator suggestion summary")
         if len(self.summary) > _MAX_SUMMARY_CHARS:

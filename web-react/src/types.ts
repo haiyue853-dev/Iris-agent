@@ -266,8 +266,8 @@ export type KnowledgeSearchHit = {
 };
 
 // ---------- Curator 后台审查 ----------
-export type CuratorSuggestionKind = 'merge' | 'conflict' | 'dedupe';
-export type CuratorScope = 'memory' | 'profile';
+export type CuratorSuggestionKind = 'merge' | 'conflict' | 'dedupe' | 'expire';
+export type CuratorScope = 'memory' | 'profile' | 'skill' | 'knowledge';
 export type CuratorReportStatus = 'open' | 'applied' | 'dismissed';
 
 export type CuratorSuggestion = {

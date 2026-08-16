@@ -123,4 +123,7 @@ curator:
   enable_llm: true
   max_pairs_per_run: 200
   max_reports: 50
+  expire_days: 90
+  auto_run: false
+  schedule: "0 3 * * *"
 

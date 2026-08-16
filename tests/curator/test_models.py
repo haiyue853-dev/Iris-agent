@@ -87,3 +87,29 @@ def test_report_rejects_bad_status():
 def test_from_dict_requires_exact_fields():
     with pytest.raises(ValueError):
         CuratorSuggestion.from_dict({"id": "sug-1", "kind": "merge"})
+
+
+def test_suggestion_skill_scope_valid():
+    suggestion = _suggestion(scope="skill")
+    assert suggestion.scope == "skill"
+
+
+def test_suggestion_knowledge_scope_valid():
+    suggestion = _suggestion(scope="knowledge")
+    assert suggestion.scope == "knowledge"
+
+
+def test_suggestion_skill_scope_rejects_field():
+    with pytest.raises(ValueError):
+        _suggestion(scope="skill", field="preferences")
+
+
+def test_suggestion_expire_kind_allows_empty_keep():
+    suggestion = _suggestion(kind="expire", scope="knowledge", keep="")
+    assert suggestion.kind == "expire"
+    assert suggestion.keep == ""
+
+
+def test_suggestion_expire_requires_knowledge_scope():
+    with pytest.raises(ValueError):
+        _suggestion(kind="expire", scope="memory", keep="")

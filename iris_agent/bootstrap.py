@@ -231,9 +231,12 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             merge_threshold=settings.curator.merge_threshold,
             conflict_threshold=settings.curator.conflict_threshold,
         ),
+        skills=skills,
+        knowledge=knowledge,
         referee=ConflictReferee(provider),
         enable_llm=settings.curator.enable_llm,
         max_pairs_per_run=settings.curator.max_pairs_per_run,
+        expire_days=settings.curator.expire_days,
     )
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)

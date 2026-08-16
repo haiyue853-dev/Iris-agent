@@ -7,10 +7,14 @@ import pytest
 from iris_agent.curator.repository import CuratorRepository
 from iris_agent.curator.service import CuratorReportNotFoundError, CuratorService
 from iris_agent.curator.similarity import SimilarityEngine
+from iris_agent.knowledge.repository import KnowledgeRepository
+from iris_agent.knowledge.retriever import KeywordRetriever
+from iris_agent.knowledge.service import KnowledgeService
 from iris_agent.memory.repository import MemoryRepository
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.repository import ProfileRepository
 from iris_agent.profile.service import ProfileService
+from iris_agent.skill_center.service import SkillCenterService
 
 
 class FakeExtractor:
@@ -45,16 +49,34 @@ def _profile(tmp_path) -> ProfileService:
     return ProfileService(ProfileRepository(tmp_path / "profile"), FakeExtractor(), enabled=False)
 
 
-def _service(tmp_path, embedder, referee=None, enable_llm=False, max_pairs_per_run=200) -> CuratorService:
+def _skills(tmp_path) -> SkillCenterService:
+    return SkillCenterService(
+        catalog_root=tmp_path / "bundled",
+        settings_file=tmp_path / "skills_state.json",
+        user_directory=tmp_path / "user_skills",
+        max_body_chars=4000,
+    )
+
+
+def _knowledge(tmp_path) -> KnowledgeService:
+    repository = KnowledgeRepository(tmp_path / "knowledge")
+    retriever = KeywordRetriever(repository.list, max_hit_chars=500)
+    return KnowledgeService(repository, retriever)
+
+
+def _service(tmp_path, embedder, referee=None, enable_llm=False, max_pairs_per_run=200, skills=None, knowledge=None, expire_days=90) -> CuratorService:
     engine = SimilarityEngine(embedder=embedder, merge_threshold=0.85, conflict_threshold=0.45)
     return CuratorService(
         CuratorRepository(tmp_path / "curator"),
         _memory(tmp_path),
         _profile(tmp_path),
         engine,
+        skills=skills,
+        knowledge=knowledge,
         referee=referee,
         enable_llm=enable_llm,
         max_pairs_per_run=max_pairs_per_run,
+        expire_days=expire_days,
     )
 
 
@@ -194,3 +216,103 @@ def test_get_report_missing_raises(tmp_path):
     service = _service(tmp_path, FakeEmbedder())
     with pytest.raises(CuratorReportNotFoundError):
         service.get_report("cur-ffffffffffff")
+
+
+def test_run_finds_duplicate_skills(tmp_path):
+    skills = _skills(tmp_path)
+    skills.save_user_skill("React 技巧", "前端", "如何使用 React hooks 组织组件状态")
+    skills.save_user_skill("React 技能", "前端", "如何使用 React hooks 管理组件状态")
+    service = _service(tmp_path, FakeEmbedder(), skills=skills, enable_llm=False)
+
+    report = service.run()
+
+    skill_suggestions = [s for s in report.suggestions if s.scope == "skill"]
+    assert len(skill_suggestions) == 1
+    assert skill_suggestions[0].kind == "dedupe"
+
+
+def test_apply_deletes_drop_skill(tmp_path):
+    skills = _skills(tmp_path)
+    first = skills.save_user_skill("React 技巧", "前端", "如何使用 React hooks 组织组件状态")
+    skills.save_user_skill("React 技能", "前端", "如何使用 React hooks 管理组件状态")
+    service = _service(tmp_path, FakeEmbedder(), skills=skills, enable_llm=False)
+    report = service.run()
+
+    applied = service.apply(report.id)
+
+    assert applied == 1
+    remaining = {s.id for s in skills.list_user_definitions()}
+    assert first.id not in remaining
+
+
+def test_run_finds_duplicate_knowledge(tmp_path):
+    knowledge = _knowledge(tmp_path)
+    knowledge.add("多模态存储", "多模态大模型的图文信息组织方式")
+    knowledge.add("多模态存储2", "多模态大模型的图文信息组织方式")
+    service = _service(tmp_path, FakeEmbedder(), knowledge=knowledge, enable_llm=False)
+
+    report = service.run()
+
+    knowledge_suggestions = [s for s in report.suggestions if s.scope == "knowledge" and s.kind != "expire"]
+    assert len(knowledge_suggestions) == 1
+    assert knowledge_suggestions[0].kind == "dedupe"
+
+
+def test_apply_deletes_drop_knowledge(tmp_path):
+    knowledge = _knowledge(tmp_path)
+    knowledge.add("多模态存储", "多模态大模型的图文信息组织方式")
+    knowledge.add("多模态存储2", "多模态大模型的图文信息组织方式")
+    service = _service(tmp_path, FakeEmbedder(), knowledge=knowledge, enable_llm=False)
+    report = service.run()
+
+    applied = service.apply(report.id)
+
+    assert applied == 1
+    assert len(knowledge.list()) == 1
+
+
+def test_run_suggests_expired_knowledge(tmp_path):
+    import time
+    from dataclasses import replace
+
+    knowledge = _knowledge(tmp_path)
+    entry = knowledge.add("旧面经", "某公司 2024 年面试题")
+    knowledge.repository.save(replace(entry, created_at=time.time() - 2 * 86400))
+    service = _service(tmp_path, FakeEmbedder(), knowledge=knowledge, enable_llm=False, expire_days=1)
+
+    report = service.run()
+
+    expire_suggestions = [s for s in report.suggestions if s.kind == "expire"]
+    assert len(expire_suggestions) == 1
+    assert expire_suggestions[0].scope == "knowledge"
+    assert expire_suggestions[0].reason == "age"
+
+
+def test_apply_deletes_expired_knowledge(tmp_path):
+    import time
+    from dataclasses import replace
+
+    knowledge = _knowledge(tmp_path)
+    entry = knowledge.add("旧面经", "某公司 2024 年面试题")
+    knowledge.repository.save(replace(entry, created_at=time.time() - 2 * 86400))
+    service = _service(tmp_path, FakeEmbedder(), knowledge=knowledge, enable_llm=False, expire_days=1)
+    report = service.run()
+
+    applied = service.apply(report.id)
+
+    assert applied == 1
+    assert knowledge.list() == []
+
+
+def test_expire_disabled_when_days_non_positive(tmp_path):
+    import time
+    from dataclasses import replace
+
+    knowledge = _knowledge(tmp_path)
+    entry = knowledge.add("旧面经", "某公司 2024 年面试题")
+    knowledge.repository.save(replace(entry, created_at=time.time() - 2 * 86400))
+    service = _service(tmp_path, FakeEmbedder(), knowledge=knowledge, enable_llm=False, expire_days=0)
+
+    report = service.run()
+
+    assert [s for s in report.suggestions if s.kind == "expire"] == []
