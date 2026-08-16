@@ -21,9 +21,10 @@ from iris_agent.gateway.service import GatewayReply, GatewayService
 class QQOneBotAdapter:
     name = "qq"
 
-    def __init__(self, gateway: GatewayService, respond_groups: bool = False) -> None:
+    def __init__(self, gateway: GatewayService, respond_groups: bool = False, allowed_users: list[str] | None = None) -> None:
         self.gateway = gateway
         self.respond_groups = respond_groups
+        self.allowed_users = set(allowed_users or [])
         self._ws = None
         self._loop = None
         self._lock = threading.Lock()
@@ -70,7 +71,7 @@ class QQOneBotAdapter:
 
         if message_type == "private":
             user_id = str(payload.get("user_id", ""))
-            if not user_id:
+            if not user_id or not self._is_allowed(user_id):
                 return []
             reply = self._safe_reply(user_id, text, payload)
             return self._build_actions("private", reply, user_id=user_id)
@@ -80,12 +81,15 @@ class QQOneBotAdapter:
                 return []
             group_id = str(payload.get("group_id", ""))
             user_id = str(payload.get("user_id", ""))
-            if not group_id or not user_id:
+            if not group_id or not user_id or not self._is_allowed(user_id):
                 return []
             reply = self._safe_reply(user_id, text, payload)
             return self._build_actions("group", reply, group_id=group_id)
 
         return []
+
+    def _is_allowed(self, user_id: str) -> bool:
+        return not self.allowed_users or user_id in self.allowed_users
 
     def _safe_reply(self, user_id: str, text: str, payload: dict) -> GatewayReply:
         try:

@@ -260,7 +260,11 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         state_file=settings.gateway.directory / "sessions.json",
     )
     qq_adapter = (
-        QQOneBotAdapter(gateway, respond_groups=settings.gateway.qq.respond_groups)
+        QQOneBotAdapter(
+            gateway,
+            respond_groups=settings.gateway.qq.respond_groups,
+            allowed_users=settings.gateway.qq.allowed_users,
+        )
         if settings.gateway.qq.enabled
         else None
     )

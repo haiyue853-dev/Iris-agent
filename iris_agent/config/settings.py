@@ -179,6 +179,7 @@ class QqGatewaySettings:
     enabled: bool = False
     path: str = "/gateway/qq/ws"
     respond_groups: bool = False
+    allowed_users: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -249,6 +250,17 @@ def _split_tools(value: Any) -> list[str]:
         parts = [part.strip() for part in value.split(",") if part.strip()]
         return parts if parts else SubagentSettings().allowed_tools
     return SubagentSettings().allowed_tools
+
+
+def _split_csv(value: Any) -> list[str]:
+    """Split a comma/space separated list, defaulting to an empty list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [part.strip() for part in value.replace(" ", ",").split(",") if part.strip()]
+    return []
 
 
 def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> Settings:
@@ -398,6 +410,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
                 enabled=bool(_section(gateway, "qq").get("enabled", False)),
                 path=str(_section(gateway, "qq").get("path", "/gateway/qq/ws")),
                 respond_groups=bool(_section(gateway, "qq").get("respond_groups", False)),
+                allowed_users=_split_csv(_section(gateway, "qq").get("allowed_users")),
             ),
             wecom=WeComGatewaySettings(
                 enabled=bool(_section(gateway, "wecom").get("enabled", False)),

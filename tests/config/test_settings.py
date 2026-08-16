@@ -207,6 +207,7 @@ def test_gateway_settings_defaults(tmp_path):
     assert settings.gateway.qq.enabled is False
     assert settings.gateway.qq.path == "/gateway/qq/ws"
     assert settings.gateway.qq.respond_groups is False
+    assert settings.gateway.qq.allowed_users == []
     assert settings.gateway.wecom.enabled is False
     assert settings.gateway.push.enabled is False
     assert settings.gateway.push.qq_target == ""
@@ -220,6 +221,7 @@ def test_gateway_settings_load_from_yaml(tmp_path):
         "  qq:\n"
         "    enabled: true\n"
         "    respond_groups: true\n"
+        "    allowed_users: '12345, 67890'\n"
         "  wecom:\n"
         "    enabled: true\n"
         "    corp_id: corp123\n"
@@ -235,6 +237,7 @@ def test_gateway_settings_load_from_yaml(tmp_path):
     assert gateway.enabled is True
     assert gateway.qq.enabled is True
     assert gateway.qq.respond_groups is True
+    assert gateway.qq.allowed_users == ["12345", "67890"]
     assert gateway.wecom.enabled is True
     assert gateway.wecom.corp_id == "corp123"
     assert gateway.wecom.agent_id == 1000002

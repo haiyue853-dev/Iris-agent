@@ -17,8 +17,8 @@ class FakeGateway:
         return GatewayReply(text=f"{self.reply}:{message.text}", files=list(self.files))
 
 
-def _adapter(respond_groups=False, reply="回复", files=None) -> QQOneBotAdapter:
-    return QQOneBotAdapter(FakeGateway(reply, files), respond_groups=respond_groups)
+def _adapter(respond_groups=False, reply="回复", files=None, allowed_users=None) -> QQOneBotAdapter:
+    return QQOneBotAdapter(FakeGateway(reply, files), respond_groups=respond_groups, allowed_users=allowed_users)
 
 
 def test_private_message_returns_send_action():
@@ -174,3 +174,27 @@ def test_detach_clears_connection():
     adapter.detach(ws)
 
     assert adapter.push_text("123", "hello") is False
+
+
+def test_allowed_users_filters_unknown_users():
+    adapter = _adapter(allowed_users=["12345"])
+    payload = {"post_type": "message", "message_type": "private", "user_id": 99999, "raw_message": "hi"}
+
+    assert adapter.handle_event(payload) == []
+
+
+def test_allowed_user_is_answered():
+    adapter = _adapter(allowed_users=["12345"])
+    payload = {"post_type": "message", "message_type": "private", "user_id": 12345, "raw_message": "hi"}
+
+    actions = adapter.handle_event(payload)
+
+    assert len(actions) == 1
+    assert actions[0]["params"]["message"] == "回复:hi"
+
+
+def test_empty_allowed_users_allows_all():
+    adapter = _adapter()
+    payload = {"post_type": "message", "message_type": "private", "user_id": 99999, "raw_message": "hi"}
+
+    assert len(adapter.handle_event(payload)) == 1
