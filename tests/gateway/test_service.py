@@ -5,17 +5,21 @@ from iris_agent.sessions.json_store import JsonSessionRepository
 
 
 class FakeAgent:
+    """Mimic AgentService: content arrives via ``text_delta``; ``message_completed`` is stripped."""
+
     def __init__(self, reply: str = "ok"):
         self.reply = reply
         self.runs: list[tuple] = []
 
     def run(self, session_id: str, text: str):
         self.runs.append(("run", session_id, text))
-        yield AgentEvent("message_completed", {"content": self.reply})
+        yield AgentEvent("text_delta", {"content": self.reply})
+        yield AgentEvent("message_completed", {"message_id": "m1"})
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool):
         self.runs.append(("resolve", session_id, call_id, approved))
-        yield AgentEvent("message_completed", {"content": f"拒绝结果({approved})"})
+        yield AgentEvent("text_delta", {"content": f"拒绝结果({approved})"})
+        yield AgentEvent("message_completed", {"message_id": "m2"})
 
 
 class ApprovalAgent(FakeAgent):
@@ -88,3 +92,31 @@ def test_approval_request_is_refused(tmp_path):
 
     assert reply == "拒绝结果(False)"
     assert agent.runs[1] == ("resolve", agent.runs[0][1], "c1", False)
+
+
+class ChunkedAgent(FakeAgent):
+    def run(self, session_id: str, text: str):
+        yield AgentEvent("text_delta", {"content": "第一段"})
+        yield AgentEvent("text_delta", {"content": "第二段"})
+        yield AgentEvent("message_completed", {"message_id": "m1"})
+
+
+def test_accumulates_multiple_text_deltas(tmp_path):
+    service = _service(tmp_path, ChunkedAgent())
+
+    reply = service.handle(InboundMessage("qq", "123", "hi"))
+
+    assert reply == "第一段第二段"
+
+
+class LegacyAgent(FakeAgent):
+    def run(self, session_id: str, text: str):
+        yield AgentEvent("message_completed", {"content": "旧版内容"})
+
+
+def test_falls_back_to_message_completed_content(tmp_path):
+    service = _service(tmp_path, LegacyAgent())
+
+    reply = service.handle(InboundMessage("qq", "123", "hi"))
+
+    assert reply == "旧版内容"

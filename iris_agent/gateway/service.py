@@ -59,19 +59,26 @@ class GatewayService:
         return self._run(session_id, text)
 
     def _run(self, session_id: str, text: str) -> str:
-        result = ""
+        parts: list[str] = []
+        fallback = ""
         events = self.agent.run(session_id, text)
         while True:
             pending: str | None = None
             for event in events:
-                if event.type == "message_completed":
-                    result = str(event.data.get("content", ""))
+                if event.type == "text_delta":
+                    # AgentService strips content from ``message_completed`` and
+                    # streams it via ``text_delta`` instead, so accumulate those.
+                    parts.append(str(event.data.get("content", "")))
+                elif event.type == "message_completed":
+                    content = str(event.data.get("content", ""))
+                    if content:
+                        fallback = content
                 elif event.type == "tool_approval_requested":
                     # No approval UI on chat platforms; refuse non-read-only tools.
                     pending = str(event.data.get("call_id", ""))
                     break
             if pending is None:
-                return result
+                return "".join(parts) or fallback
             events = self.agent.resolve_tool_approval(session_id, pending, False)
 
     # ---- mapping persistence --------------------------------------------

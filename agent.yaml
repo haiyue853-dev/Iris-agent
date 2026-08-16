@@ -131,11 +131,11 @@ curator:
   consolidate_min_entries: 4
 
 gateway:
-  enabled: false
+  enabled: true
   directory: data/gateway
   session_prefix: gateway
   qq:
-    enabled: false
+    enabled: true
     path: /gateway/qq/ws
     respond_groups: false
   wecom:
