@@ -18,6 +18,9 @@ from iris_agent.curator.referee import ConflictReferee
 from iris_agent.curator.repository import CuratorRepository
 from iris_agent.curator.service import CuratorService
 from iris_agent.curator.similarity import SimilarityEngine
+from iris_agent.gateway.service import GatewayService
+from iris_agent.gateway.qq import QQOneBotAdapter
+from iris_agent.gateway.wecom import WeComAdapter
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.memory.repository import MemoryRepository
@@ -65,6 +68,9 @@ class ApplicationServices:
     curator: CuratorService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
+    gateway: GatewayService
+    qq_adapter: QQOneBotAdapter | None
+    wecom_adapter: WeComAdapter | None
     settings: Settings
 
 
@@ -247,4 +253,25 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, settings)
+    gateway = GatewayService(
+        agent,
+        sessions,
+        session_prefix=settings.gateway.session_prefix,
+        state_file=settings.gateway.directory / "sessions.json",
+    )
+    qq_adapter = (
+        QQOneBotAdapter(gateway, respond_groups=settings.gateway.qq.respond_groups)
+        if settings.gateway.qq.enabled
+        else None
+    )
+    wecom_adapter = None
+    if settings.gateway.wecom.enabled:
+        wecom_adapter = WeComAdapter(
+            gateway,
+            corp_id=settings.gateway.wecom.corp_id,
+            agent_id=settings.gateway.wecom.agent_id,
+            secret=settings.gateway.wecom.secret,
+            token=settings.gateway.wecom.token,
+            aes_key=settings.gateway.wecom.aes_key,
+        )
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings)

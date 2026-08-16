@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 from time import monotonic
 import threading
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, Response, UploadFile, status
+from fastapi import FastAPI, File, Form, Request, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
@@ -48,6 +49,9 @@ from iris_agent.knowledge.service import KnowledgeService
 from iris_agent.api.knowledge_api import register_knowledge_routes
 from iris_agent.curator.service import CuratorService
 from iris_agent.api.curator_api import register_curator_routes
+from iris_agent.gateway.service import GatewayService
+from iris_agent.gateway.qq import QQOneBotAdapter
+from iris_agent.gateway.wecom import WeComAdapter, WeComCryptError
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -161,6 +165,11 @@ def create_app(
     profile: ProfileService | None = None,
     knowledge: KnowledgeService | None = None,
     curator: CuratorService | None = None,
+    gateway: GatewayService | None = None,
+    qq_adapter: QQOneBotAdapter | None = None,
+    wecom_adapter: WeComAdapter | None = None,
+    qq_ws_path: str = "/gateway/qq/ws",
+    wecom_callback_path: str = "/gateway/wecom/callback",
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -198,6 +207,39 @@ def create_app(
         register_knowledge_routes(app, knowledge)
     if curator is not None:
         register_curator_routes(app, curator)
+
+    if qq_adapter is not None:
+        @app.websocket(qq_ws_path)
+        async def qq_gateway_ws(websocket: WebSocket):
+            await websocket.accept()
+            try:
+                while True:
+                    payload = await websocket.receive_json()
+                    action = await asyncio.to_thread(qq_adapter.handle_event, payload)
+                    if action is not None:
+                        await websocket.send_json(action)
+            except WebSocketDisconnect:
+                pass
+
+    if wecom_adapter is not None:
+        @app.get(wecom_callback_path)
+        def wecom_verify(msg_signature: str, timestamp: str, nonce: str, echostr: str):
+            try:
+                return wecom_adapter.verify_url(msg_signature, timestamp, nonce, echostr)
+            except WeComCryptError as exc:
+                return Response(content=str(exc), status_code=400)
+
+        @app.post(wecom_callback_path)
+        async def wecom_callback(request: Request, msg_signature: str, timestamp: str, nonce: str):
+            body = await request.body()
+            try:
+                result = wecom_adapter.parse_callback(msg_signature, timestamp, nonce, body)
+            except WeComCryptError:
+                return Response(content="", status_code=400)
+            if result is not None:
+                user_id, text = result
+                threading.Thread(target=wecom_adapter.reply, args=(user_id, text), daemon=True).start()
+            return Response(content="success")
 
     approval_tasks: dict[tuple[str, str], str] = {}
     approval_tool_names: dict[tuple[str, str], str] = {}

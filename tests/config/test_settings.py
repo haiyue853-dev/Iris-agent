@@ -197,3 +197,39 @@ def test_subagent_settings_load_from_yaml(tmp_path):
     assert subagent.default_max_rounds == 3
     assert subagent.max_parallel_tasks == 8
     assert subagent.allowed_tools == ["current_time", "read_file"]
+
+
+def test_gateway_settings_defaults(tmp_path):
+    settings = load_settings(tmp_path / "missing.yaml")
+
+    assert settings.gateway.enabled is False
+    assert settings.gateway.directory == Path("data/gateway")
+    assert settings.gateway.qq.enabled is False
+    assert settings.gateway.qq.path == "/gateway/qq/ws"
+    assert settings.gateway.qq.respond_groups is False
+    assert settings.gateway.wecom.enabled is False
+
+
+def test_gateway_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "gateway:\n"
+        "  enabled: true\n"
+        "  qq:\n"
+        "    enabled: true\n"
+        "    respond_groups: true\n"
+        "  wecom:\n"
+        "    enabled: true\n"
+        "    corp_id: corp123\n"
+        "    agent_id: 1000002\n",
+        encoding="utf-8",
+    )
+
+    gateway = load_settings(path).gateway
+
+    assert gateway.enabled is True
+    assert gateway.qq.enabled is True
+    assert gateway.qq.respond_groups is True
+    assert gateway.wecom.enabled is True
+    assert gateway.wecom.corp_id == "corp123"
+    assert gateway.wecom.agent_id == 1000002

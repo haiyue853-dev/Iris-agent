@@ -288,3 +288,68 @@ def test_server_lifecycle_starts_and_stops_task_queue(monkeypatch):
         assert calls == ["start"]
 
     assert calls == ["start", "stop"]
+
+
+def test_build_application_gateway_disabled_by_default(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.gateway is not None
+    assert application.qq_adapter is None
+    assert application.wecom_adapter is None
+
+
+def test_build_application_enables_qq_gateway(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "gateway:\n  qq:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.qq_adapter is not None
+    assert application.wecom_adapter is None
+
+
+def test_build_application_enables_wecom_gateway(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "gateway:\n  wecom:\n    enabled: true\n    corp_id: corp\n    agent_id: 1\n"
+        + "    secret: s\n    token: t\n    aes_key: abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.wecom_adapter is not None
+    assert application.qq_adapter is None
+
+
+def test_create_app_registers_gateway_endpoints_when_enabled(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "gateway:\n  qq:\n    enabled: true\n"
+        + "  wecom:\n    enabled: true\n    corp_id: corp\n    agent_id: 1\n"
+        + "    secret: s\n    token: t\n    aes_key: abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    application = build_application(config)
+
+    app = create_app(
+        application.agent,
+        application.sessions,
+        qq_adapter=application.qq_adapter,
+        wecom_adapter=application.wecom_adapter,
+    )
+
+    paths = {getattr(route, "path", "") for route in app.routes}
+    assert "/gateway/qq/ws" in paths
+    assert "/gateway/wecom/callback" in paths

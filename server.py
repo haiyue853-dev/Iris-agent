@@ -26,6 +26,11 @@ app = create_app(
     curator=application.curator,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
+    gateway=application.gateway,
+    qq_adapter=application.qq_adapter,
+    wecom_adapter=application.wecom_adapter,
+    qq_ws_path=application.settings.gateway.qq.path,
+    wecom_callback_path=application.settings.gateway.wecom.callback_path,
 )
 scheduler = AutomationScheduler(application.automation)
 curator_scheduler = (

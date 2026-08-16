@@ -175,6 +175,33 @@ class McpSettings:
 
 
 @dataclass(slots=True)
+class QqGatewaySettings:
+    enabled: bool = False
+    path: str = "/gateway/qq/ws"
+    respond_groups: bool = False
+
+
+@dataclass(slots=True)
+class WeComGatewaySettings:
+    enabled: bool = False
+    corp_id: str = ""
+    agent_id: int = 0
+    secret: str = ""
+    token: str = ""
+    aes_key: str = ""
+    callback_path: str = "/gateway/wecom/callback"
+
+
+@dataclass(slots=True)
+class GatewaySettings:
+    enabled: bool = False
+    directory: Path = Path("data/gateway")
+    session_prefix: str = "gateway"
+    qq: QqGatewaySettings = field(default_factory=QqGatewaySettings)
+    wecom: WeComGatewaySettings = field(default_factory=WeComGatewaySettings)
+
+
+@dataclass(slots=True)
 class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
@@ -196,6 +223,7 @@ class Settings:
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     curator: CuratorSettings = field(default_factory=CuratorSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
+    gateway: GatewaySettings = field(default_factory=GatewaySettings)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -244,6 +272,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     knowledge = _section(raw, "knowledge")
     curator = _section(raw, "curator")
     mcp = _section(raw, "mcp")
+    gateway = _section(raw, "gateway")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
     api_key = overrides.get("api_key") or os.getenv("OPENAI_API_KEY", "")
@@ -354,6 +383,25 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             consolidate_min_entries=int(curator.get("consolidate_min_entries", 4)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
+        gateway=GatewaySettings(
+            enabled=bool(gateway.get("enabled", False)),
+            directory=Path(gateway.get("directory", "data/gateway")),
+            session_prefix=str(gateway.get("session_prefix", "gateway")),
+            qq=QqGatewaySettings(
+                enabled=bool(_section(gateway, "qq").get("enabled", False)),
+                path=str(_section(gateway, "qq").get("path", "/gateway/qq/ws")),
+                respond_groups=bool(_section(gateway, "qq").get("respond_groups", False)),
+            ),
+            wecom=WeComGatewaySettings(
+                enabled=bool(_section(gateway, "wecom").get("enabled", False)),
+                corp_id=str(_section(gateway, "wecom").get("corp_id", "")),
+                agent_id=int(_section(gateway, "wecom").get("agent_id", 0)),
+                secret=str(_section(gateway, "wecom").get("secret", "")),
+                token=str(_section(gateway, "wecom").get("token", "")),
+                aes_key=str(_section(gateway, "wecom").get("aes_key", "")),
+                callback_path=str(_section(gateway, "wecom").get("callback_path", "/gateway/wecom/callback")),
+            ),
+        ),
     )
     if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:
         raise ConfigurationError("模型名称不能为空，且 max_tool_rounds 必须大于 0")

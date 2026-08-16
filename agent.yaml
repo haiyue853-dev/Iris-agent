@@ -130,3 +130,20 @@ curator:
   consolidate_enabled: true
   consolidate_min_entries: 4
 
+gateway:
+  enabled: false
+  directory: data/gateway
+  session_prefix: gateway
+  qq:
+    enabled: false
+    path: /gateway/qq/ws
+    respond_groups: false
+  wecom:
+    enabled: false
+    corp_id: ""
+    agent_id: 0
+    secret: ""
+    token: ""
+    aes_key: ""
+    callback_path: /gateway/wecom/callback
+
