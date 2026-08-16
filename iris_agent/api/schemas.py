@@ -39,3 +39,8 @@ class KnowledgeCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=50000)
     category: str = Field(default="面经", max_length=50)
     source_url: str | None = Field(default=None, max_length=2000)
+
+
+class CuratorApplyRequest(BaseModel):
+    suggestion_ids: list[str] | None = None
+    all: bool = False

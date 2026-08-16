@@ -154,6 +154,16 @@ class KnowledgeSettings:
 
 
 @dataclass(slots=True)
+class CuratorSettings:
+    directory: Path = Path("data/curator")
+    merge_threshold: float = 0.85
+    conflict_threshold: float = 0.45
+    enable_llm: bool = True
+    max_pairs_per_run: int = 200
+    max_reports: int = 50
+
+
+@dataclass(slots=True)
 class McpSettings:
     settings_file: Path = Path("data/mcp/servers.json")
 
@@ -178,6 +188,7 @@ class Settings:
     context: ContextSettings = field(default_factory=ContextSettings)
     web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
+    curator: CuratorSettings = field(default_factory=CuratorSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
 
@@ -225,6 +236,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     context = _section(raw, "context")
     web_search = _section(raw, "web_search")
     knowledge = _section(raw, "knowledge")
+    curator = _section(raw, "curator")
     mcp = _section(raw, "mcp")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
@@ -320,6 +332,14 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             embedding_model=str(knowledge.get("embedding_model", "bge-m3")),
             embedding_base_url=str(knowledge.get("embedding_base_url", "http://localhost:11434")),
             embedding_timeout_seconds=float(knowledge.get("embedding_timeout_seconds", 60)),
+        ),
+        curator=CuratorSettings(
+            directory=Path(curator.get("directory", "data/curator")),
+            merge_threshold=float(curator.get("merge_threshold", 0.85)),
+            conflict_threshold=float(curator.get("conflict_threshold", 0.45)),
+            enable_llm=bool(curator.get("enable_llm", True)),
+            max_pairs_per_run=int(curator.get("max_pairs_per_run", 200)),
+            max_reports=int(curator.get("max_reports", 50)),
         ),
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
     )

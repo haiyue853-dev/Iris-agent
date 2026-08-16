@@ -140,3 +140,37 @@ def test_task_queue_settings_default_and_yaml_override(tmp_path):
 
     assert default.task_queue.directory == Path("data/task_queue")
     assert load_settings(path).task_queue.directory == Path("custom/queue")
+
+
+def test_curator_settings_defaults(tmp_path):
+    settings = load_settings(tmp_path / "missing.yaml")
+
+    assert settings.curator.directory == Path("data/curator")
+    assert settings.curator.merge_threshold == 0.85
+    assert settings.curator.conflict_threshold == 0.45
+    assert settings.curator.enable_llm is True
+    assert settings.curator.max_pairs_per_run == 200
+    assert settings.curator.max_reports == 50
+
+
+def test_curator_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "curator:\n"
+        "  directory: custom/curator\n"
+        "  merge_threshold: 0.9\n"
+        "  conflict_threshold: 0.5\n"
+        "  enable_llm: false\n"
+        "  max_pairs_per_run: 10\n"
+        "  max_reports: 5\n",
+        encoding="utf-8",
+    )
+
+    curator = load_settings(path).curator
+
+    assert curator.directory == Path("custom/curator")
+    assert curator.merge_threshold == 0.9
+    assert curator.conflict_threshold == 0.5
+    assert curator.enable_llm is False
+    assert curator.max_pairs_per_run == 10
+    assert curator.max_reports == 5

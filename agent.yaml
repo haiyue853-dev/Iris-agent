@@ -111,8 +111,16 @@ knowledge:
   max_content_chars: 50000
   max_hit_chars: 500
   default_limit: 5
-  retriever: keyword
+  retriever: hybrid
   embedding_model: bge-m3
   embedding_base_url: http://localhost:11434
   embedding_timeout_seconds: 60
+
+curator:
+  directory: data/curator
+  merge_threshold: 0.85
+  conflict_threshold: 0.45
+  enable_llm: true
+  max_pairs_per_run: 200
+  max_reports: 50
 

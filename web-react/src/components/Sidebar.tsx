@@ -162,6 +162,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
               <span className="view-label">知识库</span>
             </button>
+            <button type="button" className={`view-item ${activeView === 'curator' ? 'active' : ''}`} onClick={() => onViewChange('curator')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z" /><path d="M9 12l2 2 4-4" /></svg>
+              <span className="view-label">审查</span>
+            </button>
             <button type="button" className={`view-item ${activeView === 'mcp' ? 'active' : ''}`} onClick={() => onViewChange('mcp')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v4m8-4v4M6 7h12v14H6zM9 11h6m-6 4h6" /></svg>
               <span className="view-label">MCP</span>

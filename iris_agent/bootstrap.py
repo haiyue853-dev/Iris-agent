@@ -14,6 +14,10 @@ from iris_agent.knowledge.embedder import OllamaEmbedder
 from iris_agent.knowledge.repository import KnowledgeRepository
 from iris_agent.knowledge.retriever import EmbeddingRetriever, HybridRetriever, KeywordRetriever
 from iris_agent.knowledge.service import KnowledgeService
+from iris_agent.curator.referee import ConflictReferee
+from iris_agent.curator.repository import CuratorRepository
+from iris_agent.curator.service import CuratorService
+from iris_agent.curator.similarity import SimilarityEngine
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
 from iris_agent.memory.repository import MemoryRepository
@@ -58,6 +62,7 @@ class ApplicationServices:
     subagent: SubagentRunner
     profile: ProfileService
     knowledge: KnowledgeService
+    curator: CuratorService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
     settings: Settings
@@ -212,9 +217,27 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     )
     registry.register(build_add_knowledge_tool(knowledge))
     registry.register(build_search_knowledge_tool(knowledge))
+    curator_embedder = OllamaEmbedder(
+        model=settings.knowledge.embedding_model,
+        base_url=settings.knowledge.embedding_base_url,
+        timeout=settings.knowledge.embedding_timeout_seconds,
+    )
+    curator = CuratorService(
+        CuratorRepository(settings.curator.directory, max_reports=settings.curator.max_reports),
+        memory,
+        profile,
+        SimilarityEngine(
+            curator_embedder,
+            merge_threshold=settings.curator.merge_threshold,
+            conflict_threshold=settings.curator.conflict_threshold,
+        ),
+        referee=ConflictReferee(provider),
+        enable_llm=settings.curator.enable_llm,
+        max_pairs_per_run=settings.curator.max_pairs_per_run,
+    )
     hot_radar = HotRadarService(settings.hot_radar.directory)
     notifications = NotificationService(settings.notifications.directory)
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, mcp, mcp_tools, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, settings)

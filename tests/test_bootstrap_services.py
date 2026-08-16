@@ -210,6 +210,22 @@ def test_build_application_knowledge_hybrid_has_keyword_fallback(tmp_path, monke
     assert isinstance(application.knowledge.fallback_retriever, KeywordRetriever)
 
 
+def test_build_application_exposes_curator_service(tmp_path, monkeypatch):
+    from iris_agent.curator.service import CuratorService
+
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert isinstance(application.curator, CuratorService)
+    assert application.curator.memory is application.memory
+    assert application.curator.profile is application.profile
+    assert application.curator.repository.root == Path("data/curator")
+    assert application.curator.enable_llm is True
+    assert application.curator.engine is not None
+
+
 def test_build_application_default_search_sources_are_bing_only(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

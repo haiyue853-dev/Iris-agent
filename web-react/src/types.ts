@@ -264,3 +264,38 @@ export type KnowledgeSearchHit = {
   source_url: string | null;
   score: number;
 };
+
+// ---------- Curator 后台审查 ----------
+export type CuratorSuggestionKind = 'merge' | 'conflict' | 'dedupe';
+export type CuratorScope = 'memory' | 'profile';
+export type CuratorReportStatus = 'open' | 'applied' | 'dismissed';
+
+export type CuratorSuggestion = {
+  id: string;
+  kind: CuratorSuggestionKind;
+  scope: CuratorScope;
+  field: string | null;
+  targets: string[];
+  keep: string;
+  drop: string;
+  summary: string;
+  reason: string;
+  applied: boolean;
+  dismissed: boolean;
+};
+
+export type CuratorReport = {
+  id: string;
+  status: CuratorReportStatus;
+  created_at: string;
+  summary: string;
+  suggestions: CuratorSuggestion[];
+};
+
+export type CuratorReportSummary = {
+  id: string;
+  status: CuratorReportStatus;
+  created_at: string;
+  summary: string;
+  suggestion_count: number;
+};

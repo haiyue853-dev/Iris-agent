@@ -11,12 +11,13 @@ import AutomationPage from './components/automation/AutomationPage';
 import TaskCenterPage from './components/tasks/TaskCenterPage';
 import MemoryPage from './components/memory/MemoryPage';
 import KnowledgePage from './components/knowledge/KnowledgePage';
+import CuratorPage from './components/curator/CuratorPage';
 import { useChat } from './hooks/useChat';
 import './App.css';
 
-export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'tasks' | 'memory' | 'knowledge';
+export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automation' | 'radar' | 'mcp' | 'tasks' | 'memory' | 'knowledge' | 'curator';
 
-const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks', 'memory', 'knowledge'];
+const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks', 'memory', 'knowledge', 'curator'];
 
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -125,6 +126,8 @@ function App() {
           <MemoryPage />
         ) : activeView === 'knowledge' ? (
           <KnowledgePage />
+        ) : activeView === 'curator' ? (
+          <CuratorPage />
         ) : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (

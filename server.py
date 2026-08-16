@@ -22,6 +22,7 @@ app = create_app(
     search=application.session_search,
     profile=application.profile,
     knowledge=application.knowledge,
+    curator=application.curator,
     mcp=application.mcp,
     mcp_tools=application.mcp_tools,
 )
