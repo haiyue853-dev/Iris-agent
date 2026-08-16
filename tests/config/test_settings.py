@@ -174,3 +174,26 @@ def test_curator_settings_load_from_yaml(tmp_path):
     assert curator.enable_llm is False
     assert curator.max_pairs_per_run == 10
     assert curator.max_reports == 5
+
+
+def test_subagent_settings_defaults(tmp_path):
+    settings = load_settings(tmp_path / "missing.yaml")
+
+    assert settings.subagent.default_max_rounds == 6
+    assert settings.subagent.max_parallel_tasks == 5
+    assert settings.subagent.allowed_tools == ["current_time", "list_directory", "read_file", "recall", "use_skill"]
+
+
+def test_subagent_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "subagent:\n  max_goal_chars: 100\n  default_max_rounds: 3\n  max_parallel_tasks: 8\n  allowed_tools: current_time,read_file\n",
+        encoding="utf-8",
+    )
+
+    subagent = load_settings(path).subagent
+
+    assert subagent.max_goal_chars == 100
+    assert subagent.default_max_rounds == 3
+    assert subagent.max_parallel_tasks == 8
+    assert subagent.allowed_tools == ["current_time", "read_file"]

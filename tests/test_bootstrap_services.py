@@ -132,10 +132,12 @@ def test_build_application_exposes_subagent_runner_and_delegate_tool(tmp_path, m
     assert application.subagent is not None
     tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
     assert "delegate_task" in tool_names
-    # 子代理默认工具集不含写工具与 delegate_task（防递归）
+    assert "delegate_tasks" in tool_names
+    # 子代理默认工具集不含写工具与 delegate_task/delegate_tasks（防递归）
     sub_tools = application.subagent.tool_subset(application.subagent.default_allowed_tools)
     sub_tool_names = {schema["function"]["name"] for schema in sub_tools.schemas()}
     assert "delegate_task" not in sub_tool_names
+    assert "delegate_tasks" not in sub_tool_names
     assert "remember" not in sub_tool_names
     assert "save_skill" not in sub_tool_names
 

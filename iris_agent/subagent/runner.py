@@ -1,6 +1,7 @@
-"""Subagent runner: execute an isolated delegated task via AgentLoop."""
+"""Subagent runner: execute isolated delegated tasks via AgentLoop."""
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from iris_agent.core.agent import AgentLoop
 from iris_agent.core.models import Message
@@ -20,6 +21,7 @@ class SubagentRunner:
         max_result_chars: int = 4000,
         default_max_rounds: int = 6,
         default_allowed_tools: list[str] | None = None,
+        max_parallel_tasks: int = 5,
     ):
         self.provider = provider
         self.tool_subset = tool_subset
@@ -29,6 +31,7 @@ class SubagentRunner:
         self.max_result_chars = max_result_chars
         self.default_max_rounds = default_max_rounds
         self.default_allowed_tools = default_allowed_tools or []
+        self.max_parallel_tasks = max_parallel_tasks
 
     def run(self, request: SubagentRequest) -> SubagentResult:
         goal = request.goal[: self.max_goal_chars]
@@ -53,3 +56,29 @@ class SubagentRunner:
             elif event.type == "tool_finished":
                 rounds += 1
         return SubagentResult(ok=ok, result=result[: self.max_result_chars], rounds=rounds)
+
+    def run_parallel(self, requests: list[SubagentRequest], max_workers: int | None = None) -> list[SubagentResult]:
+        """Run several subagent requests concurrently and return results in input order.
+
+        Each request runs in its own thread over the shared (thread-safe) provider.
+        A single failing request is captured as ``ok=False`` instead of aborting
+        the whole batch.
+        """
+        if not requests:
+            return []
+        workers = max_workers if max_workers and max_workers > 0 else self.max_parallel_tasks
+        workers = max(1, min(workers, len(requests)))
+        results: list[SubagentResult] = [SubagentResult(ok=False, result="", rounds=0)] * len(requests)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(self.run, request): index for index, request in enumerate(requests)}
+            for future in futures:
+                index = futures[future]
+                try:
+                    results[index] = future.result()
+                except Exception as exc:  # noqa: BLE001 - isolate one failing subagent
+                    results[index] = SubagentResult(
+                        ok=False,
+                        result=f"子代理执行异常: {exc}"[: self.max_result_chars],
+                        rounds=0,
+                    )
+        return results

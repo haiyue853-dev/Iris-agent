@@ -3,7 +3,7 @@ from .knowledge_tools import build_add_knowledge_tool, build_search_knowledge_to
 from .memory_tool import build_remember_tool
 from .recall_tool import build_recall_tool
 from .skill_tools import build_save_skill_tool, build_use_skill_tool
-from .subagent_tool import build_delegate_task_tool
+from .subagent_tool import build_delegate_task_tool, build_delegate_tasks_tool
 from .time_tool import build_current_time_tool
 from .web_tools import build_fetch_page_tool, build_web_search_tool
 
@@ -16,6 +16,7 @@ __all__ = [
     "build_use_skill_tool",
     "build_save_skill_tool",
     "build_delegate_task_tool",
+    "build_delegate_tasks_tool",
     "build_web_search_tool",
     "build_fetch_page_tool",
     "build_add_knowledge_tool",

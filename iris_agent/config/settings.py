@@ -105,6 +105,7 @@ class SubagentSettings:
     max_context_chars: int = 4000
     max_result_chars: int = 4000
     default_max_rounds: int = 6
+    max_parallel_tasks: int = 5
     allowed_tools: list[str] = field(
         default_factory=lambda: ["current_time", "list_directory", "read_file", "recall", "use_skill"]
     )
@@ -301,6 +302,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_context_chars=int(subagent.get("max_context_chars", 4000)),
             max_result_chars=int(subagent.get("max_result_chars", 4000)),
             default_max_rounds=int(subagent.get("default_max_rounds", 6)),
+            max_parallel_tasks=int(subagent.get("max_parallel_tasks", 5)),
             allowed_tools=_split_tools(subagent.get("allowed_tools")),
         ),
         profile=ProfileSettings(

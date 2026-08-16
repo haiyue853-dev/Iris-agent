@@ -79,6 +79,7 @@ subagent:
   max_context_chars: 4000
   max_result_chars: 4000
   default_max_rounds: 6
+  max_parallel_tasks: 5
   allowed_tools: current_time,list_directory,read_file,recall,use_skill
 
 profile:

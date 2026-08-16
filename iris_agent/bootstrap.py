@@ -37,7 +37,7 @@ from iris_agent.subagent.runner import SubagentRunner
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_web_search_tool, build_fetch_page_tool, build_add_knowledge_tool, build_search_knowledge_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_delegate_tasks_tool, build_web_search_tool, build_fetch_page_tool, build_add_knowledge_tool, build_search_knowledge_tool
 from iris_agent.web_search.browser_fetcher import BrowserFetcher
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
@@ -152,8 +152,10 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_result_chars=settings.subagent.max_result_chars,
         default_max_rounds=settings.subagent.default_max_rounds,
         default_allowed_tools=settings.subagent.allowed_tools,
+        max_parallel_tasks=settings.subagent.max_parallel_tasks,
     )
     registry.register(build_delegate_task_tool(subagent))
+    registry.register(build_delegate_tasks_tool(subagent))
     search_sources = [BingSearchSource(
         timeout=settings.web_search.timeout_seconds,
         max_snippet_chars=settings.web_search.max_snippet_chars,
