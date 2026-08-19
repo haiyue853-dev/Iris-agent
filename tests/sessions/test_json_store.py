@@ -45,3 +45,16 @@ def test_concurrent_appends_do_not_lose_messages(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda i: repo.append(session.id, Message(role="user", content=str(i))), range(20)))
     assert len(repo.get(session.id).messages) == 20
+
+
+def test_message_attachment_ids_survive_restart_and_old_records_default_to_empty(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("附件")
+    repo.append(session.id, Message(role="user", content="请阅读", attachment_ids=["attachment-1"]))
+
+    assert JsonSessionRepository(tmp_path).get(session.id).messages[0].attachment_ids == ["attachment-1"]
+
+    payload = json.loads((tmp_path / f"{session.id}.json").read_text(encoding="utf-8"))
+    del payload["messages"][0]["attachment_ids"]
+    (tmp_path / f"{session.id}.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert JsonSessionRepository(tmp_path).get(session.id).messages[0].attachment_ids == []

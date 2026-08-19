@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import InputBox from './InputBox';
-import type { AgentEvent, Message, TaskStatus } from '../types';
+import type { AgentEvent, Message, PendingAttachment, TaskStatus } from '../types';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -9,7 +9,7 @@ interface ChatContainerProps {
   isStreaming: boolean;
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (text: string, attachmentIds: string[]) => void;
   onStop: () => void;
   onCopy: (text: string) => void;
   onRegenerate: () => void;
@@ -23,6 +23,9 @@ interface ChatContainerProps {
   approvalCallId?: string | null;
   approvalSubmitting?: boolean;
   onViewTask?: (taskId: string) => void;
+  attachments?: PendingAttachment[];
+  onFilesSelected?: (files: File[]) => void;
+  onRemoveAttachment?: (clientId: string) => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -45,6 +48,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   approvalCallId,
   approvalSubmitting,
   onViewTask,
+  attachments,
+  onFilesSelected,
+  onRemoveAttachment,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -126,6 +132,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               <MessageBubble
                 role={msg.role}
                 content={msg.content}
+                attachments={msg.attachments}
                 onCopy={onCopy}
                 onRegenerate={msg.role === 'assistant' ? onRegenerate : undefined}
                 onEdit={msg.role === 'user' ? () => handleEditClick(index, msg.content) : undefined}
@@ -181,6 +188,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onStop={undefined}
           placeholder="输入消息..."
           disabled={Boolean(pendingApproval)}
+          attachments={attachments}
+          onFilesSelected={onFilesSelected}
+          onRemoveAttachment={onRemoveAttachment}
         />
         {isStreaming && <button className="view-task-btn" onClick={onStop}>停止任务</button>}
       </div>

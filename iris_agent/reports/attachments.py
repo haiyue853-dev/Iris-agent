@@ -113,9 +113,10 @@ class ReportAttachment:
 class AttachmentFile:
     """Read-only attachment handle pinned to the verified file descriptor."""
 
-    def __init__(self, path: Path, descriptor: int):
+    def __init__(self, path: Path, descriptor: int, original_name: str | None = None):
         self._path = path
         self._descriptor = descriptor
+        self._original_name = original_name if original_name is not None else path.name
 
     @property
     def parent(self) -> Path:
@@ -124,6 +125,10 @@ class AttachmentFile:
     @property
     def name(self) -> str:
         return self._path.name
+
+    @property
+    def original_name(self) -> str:
+        return self._original_name
 
     @property
     def suffix(self) -> str:
@@ -236,7 +241,11 @@ class AttachmentRepository:
                 if attachment is None or path is None or not path.exists():
                     raise ReportAttachmentNotFoundError("日报附件不存在")
                 self._controlled_file(report_date, attachment.preserve, path)
-                return AttachmentFile(path, self._open_controlled_file(report_date, attachment.preserve, path))
+                return AttachmentFile(
+                    path,
+                    self._open_controlled_file(report_date, attachment.preserve, path),
+                    attachment.original_name,
+                )
 
     def cleanup(self, attachment_ids: list[str] | tuple[str, ...]) -> None:
         for attachment_id in attachment_ids:

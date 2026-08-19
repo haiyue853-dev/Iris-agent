@@ -34,6 +34,12 @@ class ToolRegistry:
                 sub.register(tool)
         return sub
 
+    def copy(self) -> "ToolRegistry":
+        sub = ToolRegistry()
+        for tool in self._tools.values():
+            sub.register(tool)
+        return sub
+
     def requires_approval(self, name: str) -> bool:
         tool = self._tools.get(name)
         return tool is not None and tool.requires_approval

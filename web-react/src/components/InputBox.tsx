@@ -1,13 +1,18 @@
 import React, { useRef, useEffect } from 'react';
+import AttachmentChip from './AttachmentChip';
+import type { PendingAttachment } from '../types';
 
 interface InputBoxProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (text: string, attachmentIds: string[]) => void;
   onStop?: () => void;
   placeholder?: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  attachments?: PendingAttachment[];
+  onFilesSelected?: (files: File[]) => void;
+  onRemoveAttachment?: (clientId: string) => void;
 }
 
 const InputBox: React.FC<InputBoxProps> = ({
@@ -18,8 +23,12 @@ const InputBox: React.FC<InputBoxProps> = ({
   placeholder = '输入消息...',
   disabled = false,
   autoFocus = false,
+  attachments = [],
+  onFilesSelected,
+  onRemoveAttachment,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (autoFocus && textareaRef.current) {
@@ -37,10 +46,17 @@ const InputBox: React.FC<InputBoxProps> = ({
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   };
 
+  const readyAttachmentIds = attachments.filter((attachment) => attachment.status === 'ready' && attachment.id).map((attachment) => attachment.id as string);
+  const hasPendingUpload = attachments.some((attachment) => attachment.status === 'uploading');
+  const canSend = !disabled && !hasPendingUpload && (value.trim().length > 0 || readyAttachmentIds.length > 0);
+  const send = () => {
+    if (canSend) onSend(value.trim(), readyAttachmentIds);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSend();
+      send();
     }
   };
 
@@ -48,6 +64,9 @@ const InputBox: React.FC<InputBoxProps> = ({
 
   return (
     <div className={`input-box ${hasContent ? 'has-content' : ''}`}>
+      {attachments.length > 0 && <div className="attachment-chip-list" aria-label="已选附件">
+        {attachments.map((attachment) => <AttachmentChip key={attachment.client_id} attachment={attachment} onRemove={onRemoveAttachment ?? (() => undefined)} />)}
+      </div>}
       <textarea
         ref={textareaRef}
         className="input-textarea"
@@ -60,7 +79,8 @@ const InputBox: React.FC<InputBoxProps> = ({
       />
       <div className="input-footer">
         <div className="input-actions">
-          <button className="action-btn" title="添加">
+          <input ref={fileInputRef} className="visually-hidden" aria-label="添加附件" type="file" multiple onChange={(event) => { onFilesSelected?.(Array.from(event.target.files ?? [])); event.currentTarget.value = ''; }} disabled={disabled} accept=".txt,.md,.pdf,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp" />
+          <button type="button" className="action-btn" title="添加附件" onClick={() => fileInputRef.current?.click()} disabled={disabled}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
@@ -80,9 +100,9 @@ const InputBox: React.FC<InputBoxProps> = ({
             </button>
           ) : (
             <button
-              className={`send-btn ${hasContent ? 'active' : ''}`}
-              onClick={onSend}
-              disabled={!hasContent || disabled}
+              className={`send-btn ${canSend ? 'active' : ''}`}
+              onClick={send}
+              disabled={!canSend}
               title="发送"
             >
               {/* 圆形按钮 + 向上箭头（简洁版） */}

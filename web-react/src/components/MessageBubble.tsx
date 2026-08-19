@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import type { ChatAttachment } from '../types';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -8,6 +9,7 @@ interface MessageBubbleProps {
   onCopy: (text: string) => void;
   onRegenerate?: (text: string) => void;
   onEdit?: () => void;
+  attachments?: ChatAttachment[];
 }
 
 /** 用户头像（人形 SVG） */
@@ -37,7 +39,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   onCopy,
   onRegenerate,
   onEdit,
+  attachments = [],
 }) => {
+  const safeLocation = (location: string) => /^[A-Za-z]:[\\/]|^\\\\|^\/|^file:/i.test(location) ? '已定位' : location;
   const renderContent = () => {
     if (isStreaming && !content) {
       return (
@@ -72,6 +76,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
           <div className="message-stack">
             {renderContent()}
+            {role === 'user' && attachments.length > 0 && <div className="message-attachments" aria-label="消息附件">
+              {attachments.map((attachment) => <span key={attachment.id} className="message-attachment-name">{attachment.original_name}</span>)}
+            </div>}
+            {role === 'assistant' && attachments.some((attachment) => attachment.sources.length > 0) && <div className="message-sources" aria-label="附件来源">
+              {attachments.flatMap((attachment) => attachment.sources.map((source) => <span key={`${attachment.id}:${source}`} className="message-source">来源：{attachment.original_name} · {safeLocation(source)}</span>))}
+            </div>}
           </div>
           {role === 'user' && (
             <div className="avatar avatar-user">

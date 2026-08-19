@@ -43,6 +43,16 @@ class ReportSettings:
 
 
 @dataclass(slots=True)
+class AttachmentSettings:
+    directory: Path = Path("data/chat_attachments")
+    max_file_bytes: int = 10_000_000
+    max_total_bytes: int = 50_000_000
+    max_count: int = 10
+    max_text_chars: int = 50_000
+    temporary_ttl_seconds: int = 86_400
+
+
+@dataclass(slots=True)
 class ToolSettings:
     enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file"])
     workspace_root: Path = Path("workspace")
@@ -216,6 +226,7 @@ class Settings:
     agent: AgentSettings = field(default_factory=AgentSettings)
     sessions: SessionSettings = field(default_factory=SessionSettings)
     reports: ReportSettings = field(default_factory=ReportSettings)
+    attachments: AttachmentSettings = field(default_factory=AttachmentSettings)
     tools: ToolSettings = field(default_factory=ToolSettings)
     skills: SkillSettings = field(default_factory=SkillSettings)
     hot_radar: HotRadarSettings = field(default_factory=HotRadarSettings)
@@ -276,6 +287,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     agent = _section(raw, "agent")
     sessions = _section(raw, "sessions")
     reports = _section(raw, "reports")
+    attachments = _section(raw, "attachments")
     tools = _section(raw, "tools")
     skills = _section(raw, "skills")
     hot_radar = _section(raw, "hot_radar")
@@ -314,6 +326,14 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_attachment_total_bytes=int(reports.get("max_attachment_total_bytes", 50_000_000)),
             max_attachment_count=int(reports.get("max_attachment_count", 10)),
             max_attachment_text_chars=int(reports.get("max_attachment_text_chars", 20_000)),
+        ),
+        attachments=AttachmentSettings(
+            directory=Path(attachments.get("directory", "data/chat_attachments")),
+            max_file_bytes=int(attachments.get("max_file_bytes", 10_000_000)),
+            max_total_bytes=int(attachments.get("max_total_bytes", 50_000_000)),
+            max_count=int(attachments.get("max_count", 10)),
+            max_text_chars=int(attachments.get("max_text_chars", 50_000)),
+            temporary_ttl_seconds=int(attachments.get("temporary_ttl_seconds", 86_400)),
         ),
         tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000))),
         skills=SkillSettings(
@@ -441,6 +461,14 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         or settings.reports.max_attachment_text_chars < 1
     ):
         raise ConfigurationError("日报输入限制和版本上限必须大于 0")
+    if (
+        settings.attachments.max_file_bytes < 1
+        or settings.attachments.max_total_bytes < 1
+        or settings.attachments.max_count < 1
+        or settings.attachments.max_text_chars < 1
+        or settings.attachments.temporary_ttl_seconds < 1
+    ):
+        raise ConfigurationError("聊天附件限制必须大于 0")
     if (
         settings.hot_radar.poll_interval_seconds < 1
     ):

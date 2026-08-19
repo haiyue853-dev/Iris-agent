@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 from iris_agent.api.app import create_app
 from iris_agent.automation.service import AutomationScheduler
+from iris_agent.attachments.scheduler import AttachmentCleanupScheduler
 from iris_agent.bootstrap import build_application
 from iris_agent.curator.scheduler import CuratorScheduler
 from iris_agent.reports.extraction import LocalAttachmentExtractor
@@ -31,8 +32,13 @@ app = create_app(
     wecom_adapter=application.wecom_adapter,
     qq_ws_path=application.settings.gateway.qq.path,
     wecom_callback_path=application.settings.gateway.wecom.callback_path,
+    chat_attachments=application.chat_attachments,
 )
 scheduler = AutomationScheduler(application.automation)
+attachment_cleanup_scheduler = AttachmentCleanupScheduler(
+    application.chat_attachments,
+    interval_seconds=max(60, min(application.settings.attachments.temporary_ttl_seconds, 3600)),
+)
 curator_scheduler = (
     CuratorScheduler(application.curator, application.notifications, application.settings.curator.schedule)
     if application.settings.curator.auto_run
@@ -43,6 +49,7 @@ curator_scheduler = (
 @app.on_event("startup")
 def start_automation_scheduler() -> None:
     scheduler.start()
+    attachment_cleanup_scheduler.start()
     application.task_queue.start()
     if curator_scheduler is not None:
         curator_scheduler.start()
@@ -51,6 +58,7 @@ def start_automation_scheduler() -> None:
 @app.on_event("shutdown")
 def stop_automation_scheduler() -> None:
     application.task_queue.stop()
+    attachment_cleanup_scheduler.stop()
     scheduler.stop()
     if curator_scheduler is not None:
         curator_scheduler.stop()

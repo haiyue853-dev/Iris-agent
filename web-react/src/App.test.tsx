@@ -25,6 +25,9 @@ describe('App workspace navigation', () => {
       approvalCallId: null,
       approvalSubmitting: false,
       sessions: [],
+      attachments: [],
+      uploadFiles: vi.fn(),
+      removeAttachment: vi.fn(),
       handleSendWithSession: vi.fn(),
       resolvePendingApproval: vi.fn(),
       handleRegenerate: vi.fn(),
@@ -98,5 +101,15 @@ describe('App workspace navigation', () => {
 
     expect(screen.getByRole('button', { name: '批准执行' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+  });
+
+  it('offers attachment selection on the welcome screen', async () => {
+    const user = userEvent.setup();
+    const uploadFiles = vi.fn();
+    vi.mocked(useChat).mockReturnValue({ ...useChat(), uploadFiles });
+    render(<App />);
+
+    await user.upload(screen.getByLabelText('添加附件'), new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+    expect(uploadFiles).toHaveBeenCalledWith([expect.any(File)]);
   });
 });

@@ -1,11 +1,15 @@
 import React from 'react';
 import InputBox from './InputBox';
+import type { PendingAttachment } from '../types';
 
 interface WelcomePageProps {
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (text: string, attachmentIds: string[]) => void;
   onNavigate?: (view: 'chat' | 'aihot') => void;
+  attachments?: PendingAttachment[];
+  onFilesSelected?: (files: File[]) => void;
+  onRemoveAttachment?: (clientId: string) => void;
 }
 
 const WelcomePage: React.FC<WelcomePageProps> = ({
@@ -13,6 +17,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   onInputChange,
   onSend,
   onNavigate,
+  attachments,
+  onFilesSelected,
+  onRemoveAttachment,
 }) => {
   return (
     <div className="welcome-container">
@@ -42,6 +49,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
             onSend={onSend}
             placeholder="输入消息..."
             autoFocus={true}
+            attachments={attachments}
+            onFilesSelected={onFilesSelected}
+            onRemoveAttachment={onRemoveAttachment}
           />
         </div>
         <p className="welcome-hint">Iris 由 AI 驱动，回答可能不准确，请甄别使用</p>

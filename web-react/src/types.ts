@@ -1,4 +1,40 @@
-export type Message = { role: 'user' | 'assistant'; content: string };
+export type ChatAttachment = {
+  id: string;
+  original_name: string;
+  media_type: string;
+  size_bytes: number;
+  created_at: string;
+  extraction_status: string;
+  extraction_message?: string;
+  text_truncated: boolean;
+  sources: string[];
+};
+
+export type AttachmentUploadState = ChatAttachment & {
+  client_id: string;
+  status: 'uploading' | 'ready' | 'error';
+  error?: string;
+};
+
+export type PendingAttachment = Omit<ChatAttachment, 'id' | 'media_type' | 'size_bytes' | 'created_at' | 'extraction_status' | 'text_truncated' | 'sources'> & {
+  client_id: string;
+  id?: string;
+  media_type?: string;
+  size_bytes?: number;
+  created_at?: string;
+  extraction_status?: string;
+  text_truncated?: boolean;
+  sources?: string[];
+  status: 'uploading' | 'ready' | 'error';
+  error?: string;
+};
+
+export type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+  attachment_ids?: string[];
+  attachments?: ChatAttachment[];
+};
 export type Session = { id: string; name: string; created_at: number; updated_at: number };
 
 // ---------- AI HOT 每日资讯日报 ----------
@@ -148,7 +184,8 @@ export type AgentEvent =
   | { type: 'tool_started'; data: { call_id: string; name: string; arguments: Record<string, unknown> } }
   | { type: 'tool_approval_requested'; data: { call_id: string; name: string; arguments: Record<string, unknown>; context?: { server_name?: string; tool_name?: string } | null } }
   | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string } }
-  | { type: 'message_completed'; data: { content: string } }
+  | { type: 'message_completed'; data: { content?: string; message_id?: string } }
+  | { type: 'paused'; data: { reason?: string; call_id?: string } }
   | { type: 'error'; data: { code: string; message: string } };
 
 export type TaskStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'stopped';

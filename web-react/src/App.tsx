@@ -43,6 +43,9 @@ function App() {
     approvalCallId,
     approvalSubmitting,
     sessions,
+    attachments,
+    uploadFiles,
+    removeAttachment,
     handleSendWithSession,
     resolvePendingApproval,
     handleRegenerate,
@@ -79,18 +82,18 @@ function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [handleNewChat, messages.length]);
 
-  const handleWelcomeSend = () => {
-    const msg = welcomeInput.trim();
-    if (!msg) return;
+  const handleWelcomeSend = (text: string, attachmentIds: string[]) => {
+    const msg = text.trim();
+    if (!msg && !attachmentIds.length) return;
     setWelcomeInput('');
-    handleSendWithSession(msg);
+    handleSendWithSession(msg, attachmentIds);
   };
 
-  const handleChatSend = () => {
-    const msg = chatInput.trim();
-    if (!msg) return;
+  const handleChatSend = (text: string, attachmentIds: string[]) => {
+    const msg = text.trim();
+    if (!msg && !attachmentIds.length) return;
     setChatInput('');
-    handleSendWithSession(msg);
+    handleSendWithSession(msg, attachmentIds);
   };
 
   const handleNewChatFromSidebar = () => {
@@ -144,6 +147,9 @@ function App() {
             onInputChange={setWelcomeInput}
             onSend={handleWelcomeSend}
             onNavigate={setActiveView}
+            attachments={attachments}
+            onFilesSelected={(files) => void uploadFiles(files)}
+            onRemoveAttachment={(clientId) => void removeAttachment(clientId)}
           />
         ) : (
           <ChatContainer
@@ -166,6 +172,9 @@ function App() {
             approvalCallId={approvalCallId}
             approvalSubmitting={approvalSubmitting}
             onViewTask={(taskId) => { setSelectedTaskId(taskId); setActiveView('tasks'); }}
+            attachments={attachments}
+            onFilesSelected={(files) => void uploadFiles(files)}
+            onRemoveAttachment={(clientId) => void removeAttachment(clientId)}
           />
         )}
       </main>

@@ -33,11 +33,14 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    attachment_ids: list[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: f"message_{uuid.uuid4().hex}")
 
     def __post_init__(self) -> None:
         if self.role not in {"system", "user", "assistant", "tool"}:
             raise ValueError(f"Unsupported message role: {self.role}")
+        if not isinstance(self.attachment_ids, list) or any(not isinstance(item, str) or not item for item in self.attachment_ids):
+            raise ValueError("attachment_ids must be a list of non-empty strings")
 
 
 @dataclass(slots=True)

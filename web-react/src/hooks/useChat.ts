@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createSession, deleteSession, getSession, listSessions } from '../api/chat';
+import { createSession, deleteSession, getSession, listSessions, streamChat, streamToolApproval } from '../api/chat';
+import { deleteAttachment, uploadAttachment } from '../api/attachments';
 import { cancelTask, createTask, getTask, resolveTaskApproval } from '../api/tasks';
-import type { AgentEvent, Message, Session, TaskStatus } from '../types';
+import type { AgentEvent, Message, PendingAttachment, Session, TaskStatus } from '../types';
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'stopped']);
 type TaskPoller = {
@@ -12,12 +13,21 @@ type TaskPoller = {
   approvalCallId: string | null;
 };
 
+type AttachmentStream = {
+  sessionId: string;
+  callId: string;
+  signal: AbortSignal;
+  onEvent: (event: AgentEvent) => void;
+  complete: () => void;
+};
+
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingContent] = useState('');
+  const [streamingContent, setStreamingContent] = useState('');
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [toast, setToast] = useState('');
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<Extract<AgentEvent, { type: 'tool_approval_requested' }>['data'] | null>(null);
@@ -30,6 +40,8 @@ export function useChat() {
   const pollersRef = useRef(new Map<string, TaskPoller>());
   const approvalRequestsRef = useRef(new Set<string>());
   const sessionSwitchRequestRef = useRef(0);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const attachmentStreamRef = useRef<AttachmentStream | null>(null);
 
   const refreshSessions = useCallback(async () => setSessions(await listSessions()), []);
   useEffect(() => { refreshSessions().catch(() => undefined); }, [refreshSessions]);
@@ -118,6 +130,26 @@ export function useChat() {
   }, [pollTask]);
 
   const resolvePendingApproval = useCallback(async (callId: string, approved: boolean) => {
+    const attachmentStream = attachmentStreamRef.current;
+    if (attachmentStream?.callId === callId && currentSessionRef.current === attachmentStream.sessionId) {
+      setApprovalSubmitting(true);
+      try {
+        await streamToolApproval(attachmentStream.sessionId, callId, approved, attachmentStream.signal, attachmentStream.onEvent);
+        setPendingApproval(null);
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') showToast(error instanceof Error ? error.message : '附件工具审批失败');
+      } finally {
+        if (attachmentStreamRef.current?.callId === callId) {
+          attachmentStream.complete();
+          attachmentStreamRef.current = null;
+          streamAbortRef.current = null;
+          setIsStreaming(false);
+          setStreamingContent('');
+          setApprovalSubmitting(false);
+        }
+      }
+      return;
+    }
     if (!currentTaskId || currentTaskStatus !== 'awaiting_approval' || approvalCallId !== callId) return;
     const taskId = currentTaskId;
     const sessionId = currentSessionId;
@@ -147,11 +179,133 @@ export function useChat() {
     }
   }, [approvalCallId, currentSessionId, currentTaskId, currentTaskStatus, showToast]);
 
-  const handleSendWithSession = useCallback(async (message: string) => {
-    if (!message.trim()) return;
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+    let id = currentSessionRef.current || currentSessionId;
+    if (!id) {
+      const session = await createSession(files[0].name.slice(0, 30));
+      id = session.id;
+      currentSessionRef.current = id;
+      setCurrentSessionId(id);
+    }
+    const pending = files.map((file) => ({ client_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, original_name: file.name, status: 'uploading' as const }));
+    setAttachments((prev) => [...prev, ...pending]);
+    await Promise.all(files.map(async (file, index) => {
+      const item = pending[index];
+      try {
+        const metadata = await uploadAttachment(id, file);
+        setAttachments((prev) => prev.map((attachment) => attachment.client_id === item.client_id ? { ...metadata, client_id: item.client_id, status: 'ready' as const } : attachment));
+      } catch (error) {
+        setAttachments((prev) => prev.map((attachment) => attachment.client_id === item.client_id ? { ...item, status: 'error' as const, error: error instanceof Error ? error.message : '上传失败' } : attachment));
+      }
+    }));
+  }, [currentSessionId]);
+
+  const removeAttachment = useCallback(async (clientId: string) => {
+    const item = attachments.find((attachment) => attachment.client_id === clientId);
+    if (item?.id && (currentSessionRef.current || currentSessionId)) {
+      try {
+        await deleteAttachment(currentSessionRef.current || currentSessionId, item.id);
+      } catch (error) {
+        setAttachments((prev) => prev.map((attachment) => attachment.client_id === clientId
+          ? { ...attachment, status: 'error', error: error instanceof Error ? error.message : '删除失败，请重试' }
+          : attachment));
+        showToast(error instanceof Error ? error.message : '删除失败，请重试');
+        return;
+      }
+    }
+    setAttachments((prev) => prev.filter((attachment) => attachment.client_id !== clientId));
+  }, [attachments, currentSessionId, showToast]);
+
+  const handleSendWithSession = useCallback(async (message: string, attachmentIds: string[] = []) => {
+    const selectedIds = attachmentIds.filter(Boolean);
+    if (!message.trim() && !selectedIds.length) return;
     let id = currentSessionId;
-    if (!id) { const session = await createSession(message.slice(0, 30)); id = session.id; setCurrentSessionId(id); }
-    setMessages(prev => [...prev, { role: 'user', content: message }]);
+    if (!id) { const session = await createSession(message.slice(0, 30) || '附件会话'); id = session.id; currentSessionRef.current = id; setCurrentSessionId(id); }
+    const selectedAttachments = attachments
+      .filter((attachment) => selectedIds.includes(attachment.id ?? '') && attachment.status === 'ready' && Boolean(attachment.id))
+      .map((attachment) => ({
+        id: attachment.id as string,
+        original_name: attachment.original_name,
+        media_type: attachment.media_type ?? 'application/octet-stream',
+        size_bytes: attachment.size_bytes ?? 0,
+        created_at: attachment.created_at ?? '',
+        extraction_status: attachment.extraction_status ?? 'pending',
+        extraction_message: attachment.extraction_message,
+        text_truncated: attachment.text_truncated ?? false,
+        sources: attachment.sources ?? [],
+      }));
+    setMessages(prev => [...prev, { role: 'user', content: message, attachment_ids: selectedIds, attachments: selectedAttachments }]);
+    setAttachments((prev) => prev.filter((attachment) => !selectedIds.includes(attachment.id ?? '')));
+    if (selectedIds.length) {
+      const controller = new AbortController();
+      let streamedContent = '';
+      let finalContent = '';
+      streamAbortRef.current = controller;
+      setStreamingContent('');
+      setIsStreaming(true);
+      try {
+        const onEvent = (event: AgentEvent) => {
+          if (event.type === 'task_started') {
+            currentTaskRef.current = event.data.task_id;
+            setCurrentTaskId(event.data.task_id);
+            setCurrentTaskStatus('running');
+            setQueuePosition(null);
+            setApprovalCallId(null);
+            return;
+          }
+          if (event.type === 'text_delta') {
+            streamedContent += event.data.content;
+            setStreamingContent(streamedContent);
+            return;
+          }
+          if (event.type === 'tool_started' || event.type === 'tool_finished') {
+            setCurrentTaskStatus('running');
+            return;
+          }
+          if (event.type === 'tool_approval_requested') {
+            attachmentStreamRef.current = { sessionId: id, callId: event.data.call_id, signal: controller.signal, onEvent, complete };
+            if (!currentTaskRef.current) setPendingApproval(event.data);
+            setCurrentTaskStatus('awaiting_approval');
+            setApprovalCallId(event.data.call_id);
+            return;
+          }
+          if (event.type === 'paused') {
+            setCurrentTaskStatus('awaiting_approval');
+            if (event.data.call_id) setApprovalCallId(event.data.call_id);
+            return;
+          }
+          if (event.type === 'error') {
+            setCurrentTaskStatus('failed');
+            showToast(event.data.message);
+            return;
+          }
+          if (event.type === 'message_completed' && event.data.content?.trim()) {
+            finalContent = event.data.content;
+            setStreamingContent(finalContent);
+          }
+          if (event.type === 'message_completed') setCurrentTaskStatus('completed');
+        };
+        const complete = () => {
+          const completedContent = finalContent || streamedContent;
+          if (completedContent) setMessages((prev) => [...prev, { role: 'assistant', content: completedContent, attachments: selectedAttachments }]);
+        };
+        attachmentStreamRef.current = { sessionId: id, callId: '', signal: controller.signal, onEvent, complete };
+        await streamChat(id, message, controller.signal, onEvent, selectedIds);
+        if (attachmentStreamRef.current?.sessionId === id && attachmentStreamRef.current.callId) return;
+        complete();
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') showToast(error instanceof Error ? error.message : '发送失败');
+      } finally {
+        if (!attachmentStreamRef.current || attachmentStreamRef.current.sessionId !== id || !attachmentStreamRef.current.callId) {
+          streamAbortRef.current = null;
+          attachmentStreamRef.current = null;
+          setIsStreaming(false);
+          setStreamingContent('');
+        }
+      }
+      return;
+    }
     try {
       const task = await createTask(id, message);
       currentTaskRef.current = task.id;
@@ -160,7 +314,7 @@ export function useChat() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : '发送失败');
     }
-  }, [currentSessionId, showToast, startPolling]);
+  }, [attachments, currentSessionId, showToast, startPolling]);
 
   const handleSwitchSession = useCallback(async (id: string) => {
     const requestId = ++sessionSwitchRequestRef.current;
@@ -169,6 +323,7 @@ export function useChat() {
     clearPollers(id);
     currentSessionRef.current = id;
     setCurrentSessionId(id);
+    setAttachments([]);
     const active = restoreSessionTask(id);
     if (active) {
       const [taskId, poller] = active;
@@ -185,13 +340,18 @@ export function useChat() {
       currentSessionRef.current = '';
       setCurrentSessionId('');
       setMessages([]);
+      setAttachments([]);
       setPendingApproval(null);
       clearCurrentTaskState();
     }
     await refreshSessions();
   }, [clearCurrentTaskState, currentSessionId, discardSessionTasks, refreshSessions]);
-  const handleNewChat = useCallback(() => { clearPollers(); sessionSwitchRequestRef.current += 1; currentSessionRef.current = ''; setCurrentSessionId(''); setMessages([]); setPendingApproval(null); clearCurrentTaskState(); }, [clearCurrentTaskState, clearPollers]);
+  const handleNewChat = useCallback(() => { clearPollers(); sessionSwitchRequestRef.current += 1; currentSessionRef.current = ''; setCurrentSessionId(''); setMessages([]); setAttachments([]); setPendingApproval(null); clearCurrentTaskState(); }, [clearCurrentTaskState, clearPollers]);
   const handleStop = useCallback(async () => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      return;
+    }
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
     const taskId = currentTaskId;
     const sessionId = currentSessionId;
@@ -222,5 +382,5 @@ export function useChat() {
   const handleRegenerate = useCallback(() => showToast('当前版本暂不支持重新生成'), [showToast]);
   const handleEditMessage = useCallback((_index: number, _content: string) => showToast('当前版本暂不支持编辑历史消息'), [showToast]);
 
-  return { messages, isStreaming, streamingContent, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleDeleteSession };
+  return { messages, isStreaming, streamingContent, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, attachments, uploadFiles, removeAttachment, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleDeleteSession };
 }

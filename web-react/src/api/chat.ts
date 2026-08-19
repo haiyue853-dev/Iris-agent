@@ -10,10 +10,10 @@ async function checked(response: Response): Promise<Response> {
   return response;
 }
 
-export async function streamChat(sessionId: string, message: string, signal: AbortSignal, onEvent: (event: AgentEvent) => void): Promise<void> {
+export async function streamChat(sessionId: string, message: string, signal: AbortSignal, onEvent: (event: AgentEvent) => void, attachmentIds: string[] = []): Promise<void> {
   const response = await checked(await fetch(`${API_BASE}/api/chat/stream`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, message }), signal,
+    body: JSON.stringify({ session_id: sessionId, message, attachment_ids: attachmentIds }), signal,
   }));
   const reader = response.body?.getReader();
   if (!reader) throw new Error('服务器未返回响应流');

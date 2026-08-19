@@ -124,4 +124,7 @@ class JsonSessionRepository:
     @staticmethod
     def _message(raw: dict) -> Message:
         calls = [ToolCall(str(item["id"]), str(item["name"]), dict(item.get("arguments", {})), item.get("argument_error")) for item in raw.get("tool_calls", [])]
-        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), id=raw.get("id") or f"message_{uuid.uuid4().hex}")
+        attachment_ids = raw.get("attachment_ids", [])
+        if not isinstance(attachment_ids, list):
+            raise SessionError("消息附件引用格式错误")
+        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), attachment_ids=attachment_ids, id=raw.get("id") or f"message_{uuid.uuid4().hex}")

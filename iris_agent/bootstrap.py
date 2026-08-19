@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 import atexit
 
@@ -30,6 +31,9 @@ from iris_agent.profile.repository import ProfileRepository
 from iris_agent.profile.service import ProfileService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
 from iris_agent.reports.attachments import AttachmentRepository
+from iris_agent.attachments.extraction import LocalAttachmentExtractor
+from iris_agent.attachments.service import AttachmentService
+from iris_agent.attachments.storage import AttachmentStorage
 from iris_agent.reports.repository import JsonDailyReportRepository
 from iris_agent.reports.service import DailyReportService
 from iris_agent.session_search.service import SessionSearchService
@@ -72,6 +76,7 @@ class ApplicationServices:
     qq_adapter: QQOneBotAdapter | None
     wecom_adapter: WeComAdapter | None
     settings: Settings
+    chat_attachments: AttachmentService
 
 
 def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServices:
@@ -141,6 +146,18 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         max_total_bytes=settings.reports.max_attachment_total_bytes,
         max_count=settings.reports.max_attachment_count,
     )
+    chat_attachments = AttachmentService(
+        AttachmentStorage(
+            settings.attachments.directory,
+            settings.attachments.max_file_bytes,
+            settings.attachments.max_total_bytes,
+            settings.attachments.max_count,
+            temporary_ttl=timedelta(seconds=settings.attachments.temporary_ttl_seconds),
+        ),
+        sessions,
+        LocalAttachmentExtractor(settings.attachments.max_text_chars),
+    )
+    agent.attachment_service = chat_attachments
     skills = SkillCenterService(
         Path(__file__).parent / "skill_center" / "bundled",
         settings.skills.settings_file,
@@ -286,4 +303,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             qq_adapter.push_text(qq_target, text)
 
         automation.push = _push
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings, chat_attachments)

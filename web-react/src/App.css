@@ -364,6 +364,33 @@ body {
   gap: 6px;
 }
 
+.attachment-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #dcdcdf;
+  border-radius: 6px;
+  background: #f7f7f8;
+  color: #4d4c54;
+  font-size: 12px;
+}
+
+.attachment-chip.uploading { color: #625bf6; }
+.attachment-chip.error { border-color: #d89a9a; color: #a33b3b; }
+.attachment-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.attachment-chip-status { color: inherit; white-space: nowrap; }
+.attachment-chip-remove { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }
+.attachment-chip-remove:hover { background: #e8e8ea; }
+
 .action-btn {
   width: 30px;
   height: 30px;
@@ -1708,6 +1735,25 @@ button.view-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+}
+
+.message-attachments,
+.message-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.message-attachment-name,
+.message-source {
+  border: 1px solid #dcdcdf;
+  border-radius: 5px;
+  padding: 3px 6px;
+  background: #f7f7f8;
+  color: #5d5c63;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 /* AI 气泡（白底） */

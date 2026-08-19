@@ -65,6 +65,15 @@ def test_extracts_utf8_text_and_reports_source(tmp_path: Path) -> None:
     assert result.sources[0].file_name == "notes.txt"
 
 
+def test_repository_attachment_extraction_uses_original_name_as_source(tmp_path: Path) -> None:
+    attachments = repository(tmp_path)
+    saved = attachments.save("2026-08-05", "notes.txt", b"report", "text/plain", preserve=True)
+
+    result = LocalAttachmentExtractor(max_chars=100).extract(attachments.path_for(saved.id))
+
+    assert result.sources[0].file_name == "notes.txt"
+
+
 def test_extracts_markdown_as_utf8_text(tmp_path: Path) -> None:
     result = LocalAttachmentExtractor(max_chars=100).extract(extraction_file(tmp_path, "notes.md", b"# Done\n- report"))
     assert "# Done" in result.text

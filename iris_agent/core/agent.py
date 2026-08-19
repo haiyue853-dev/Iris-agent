@@ -11,6 +11,7 @@ from iris_agent.tools.base import ToolExecutionResult
 from iris_agent.providers.base import ModelProvider
 from iris_agent.sessions.base import Session, SessionRepository
 from iris_agent.tools.registry import ToolRegistry
+from iris_agent.attachments.service import AttachmentService
 
 
 class AgentLoop:
@@ -19,11 +20,12 @@ class AgentLoop:
         self.tools = tools
         self.max_tool_rounds = max_tool_rounds
 
-    def run(self, messages: list[Message]) -> Iterator[AgentEvent]:
+    def run(self, messages: list[Message], tools: ToolRegistry | None = None) -> Iterator[AgentEvent]:
+        registry = tools or self.tools
         working = list(messages)
         tool_rounds = 0
         while True:
-            response = self.provider.complete(working, self.tools.schemas())
+            response = self.provider.complete(working, registry.schemas())
             if not response.tool_calls:
                 if response.content:
                     yield AgentEvent("text_delta", {"content": response.content})
@@ -36,19 +38,19 @@ class AgentLoop:
             working.append(Message(role="assistant", content=response.content, tool_calls=response.tool_calls))
             for call in response.tool_calls:
                 yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
-                if self.tools.requires_approval(call.name):
+                if registry.requires_approval(call.name):
                     yield AgentEvent("tool_approval_requested", {
                         "call_id": call.id,
                         "name": call.name,
                         "arguments": call.arguments,
-                        "context": self.tools.approval_context(call.name),
+                        "context": registry.approval_context(call.name),
                     })
                     return
                 if call.argument_error:
                     from iris_agent.tools.base import ToolExecutionResult
                     result = ToolExecutionResult(False, error_code=call.argument_error, error_message="工具参数不是有效 JSON")
                 else:
-                    result = self.tools.invoke(call.name, call.arguments)
+                    result = registry.invoke(call.name, call.arguments)
                 data = {"call_id": call.id, "name": call.name, "ok": result.ok}
                 if result.ok:
                     data["result"] = result.value
@@ -60,14 +62,15 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None, compressor: ContextCompressor | None = None):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None, compressor: ContextCompressor | None = None, attachment_service: AttachmentService | None = None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
         self.memory = memory
         self.profile_service = profile_service
         self.compressor = compressor
-        self._pending_approvals: dict[tuple[str, str], ToolCall] = {}
+        self.attachment_service = attachment_service
+        self._pending_approvals: dict[tuple[str, str], tuple[ToolCall, ToolRegistry]] = {}
         self._approval_lock = threading.RLock()
 
     def _build_messages(self, session: Session) -> list[Message]:
@@ -82,26 +85,39 @@ class AgentService:
         if self.memory is not None:
             for memory in self.memory.inject():
                 messages.append(Message(role="system", content=f"[记忆·{memory.category}] {memory.content}"))
-        messages.extend(session.messages)
+        for message in session.messages:
+            if message.attachment_ids and self.attachment_service is not None:
+                details = []
+                for attachment_id in message.attachment_ids:
+                    try:
+                        item = self.attachment_service.read(session.id, attachment_id)
+                        details.append(f"- {item.original_name} (attachment_id: {attachment_id}; 提取状态: {item.extraction_status}; 来源: {', '.join(item.sources) or '无'})")
+                    except Exception:
+                        details.append(f"- {attachment_id} (附件信息不可用)")
+                enriched = Message(role=message.role, content=message.content + "\n\n[当前消息附件]\n" + "\n".join(details) + "\n如需读取附件内容，必须先调用 read_attachment，并使用对应的 attachment_id。", tool_calls=message.tool_calls, tool_call_id=message.tool_call_id, name=message.name, attachment_ids=list(message.attachment_ids), id=message.id)
+                messages.append(enriched)
+            else:
+                messages.append(message)
         return messages
 
-    def run(self, session_id: str, user_message: str) -> Iterator[AgentEvent]:
+    def run(self, session_id: str, user_message: str, attachment_ids: list[str] | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
-            self.sessions.append(session_id, Message(role="user", content=user_message))
+            self.sessions.append(session_id, Message(role="user", content=user_message, attachment_ids=list(attachment_ids or [])))
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
-            yield from self._run_loop(session_id, messages)
+            yield from self._run_loop(session_id, messages, self._registry_for(session_id))
             if self.profile_service is not None:
                 self.profile_service.maybe_update(user_message)
 
     def resolve_tool_approval(self, session_id: str, call_id: str, approved: bool) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             with self._approval_lock:
-                call = self._pending_approvals.pop((session_id, call_id), None)
-            if call is None:
+                pending = self._pending_approvals.pop((session_id, call_id), None)
+            if pending is None:
                 raise ToolApprovalNotFoundError("待确认的工具调用不存在或已处理")
+            call, registry = pending
             if approved:
-                result = self.loop.tools.invoke(call.name, call.arguments)
+                result = registry.invoke(call.name, call.arguments)
             else:
                 result = ToolExecutionResult(False, error_code="tool_approval_rejected", error_message="用户拒绝执行此工具调用")
             event = self._tool_finished_event(call, result)
@@ -109,22 +125,29 @@ class AgentService:
             yield event
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
-            yield from self._run_loop(session_id, messages)
+            yield from self._run_loop(session_id, messages, registry)
 
     def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
         """Discard a pending approval without invoking its tool."""
         with self._approval_lock:
             return self._pending_approvals.pop((session_id, call_id), None) is not None
 
-    def _run_loop(self, session_id: str, messages: list[Message]) -> Iterator[AgentEvent]:
-        for event in self.loop.run(messages):
+    def _registry_for(self, session_id: str) -> ToolRegistry:
+        registry = self.loop.tools.copy()
+        if self.attachment_service is not None:
+            from iris_agent.tools.builtin.attachments import build_read_attachment_tool
+            registry.register(build_read_attachment_tool(self.attachment_service, session_id))
+        return registry
+
+    def _run_loop(self, session_id: str, messages: list[Message], registry: ToolRegistry) -> Iterator[AgentEvent]:
+        for event in self.loop.run(messages, registry):
             if event.type == "tool_started":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
                 self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
             elif event.type == "tool_approval_requested":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
                 with self._approval_lock:
-                    self._pending_approvals[(session_id, call.id)] = call
+                    self._pending_approvals[(session_id, call.id)] = (call, registry)
             elif event.type == "tool_finished":
                 self._persist_tool_result(session_id, event)
             elif event.type == "message_completed":

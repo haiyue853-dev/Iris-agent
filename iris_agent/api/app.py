@@ -19,6 +19,9 @@ from iris_agent.api.report_schemas import (
     SaveReportRequest,
 )
 from iris_agent.api.schemas import ChatRequest, CreateSessionRequest, ToolApprovalRequest
+from iris_agent.api.attachment_api import register_attachment_routes
+from iris_agent.attachments.errors import AttachmentError, AttachmentNotFoundError, AttachmentStorageError
+from iris_agent.attachments.service import AttachmentService
 from iris_agent.api.aihot_daily_api import router as aihot_daily_router
 from iris_agent.api.world_news_api import router as world_news_router
 from iris_agent.api.tech_news_api import router as tech_news_router
@@ -75,10 +78,38 @@ from iris_agent.sessions.base import Session, SessionRepository
 logger = logging.getLogger(__name__)
 
 
-def _session_data(session: Session, include_messages: bool = True) -> dict:
+def _chat_attachment_data(attachment) -> dict:
+    data = {
+        "id": attachment.id,
+        "original_name": attachment.original_name,
+        "media_type": attachment.media_type,
+        "size_bytes": attachment.size_bytes,
+        "created_at": attachment.created_at,
+        "extraction_status": attachment.extraction_status,
+        "text_truncated": attachment.text_truncated,
+        "sources": list(attachment.sources),
+    }
+    if attachment.extraction_message is not None:
+        data["extraction_message"] = attachment.extraction_message
+    return data
+
+
+def _session_data(session: Session, include_messages: bool = True, chat_attachments: AttachmentService | None = None) -> dict:
     data = {"id": session.id, "name": session.name, "created_at": session.created_at, "updated_at": session.updated_at}
     if include_messages:
-        data["messages"] = [{"role": message.role, "content": message.content} for message in session.messages if message.role in {"user", "assistant"}]
+        messages = []
+        for message in session.messages:
+            if message.role not in {"user", "assistant"}:
+                continue
+            item = {"role": message.role, "content": message.content, "attachment_ids": list(message.attachment_ids), "attachments": []}
+            if chat_attachments is not None:
+                for attachment_id in message.attachment_ids:
+                    try:
+                        item["attachments"].append(_chat_attachment_data(chat_attachments.read(session.id, attachment_id)))
+                    except AttachmentError:
+                        continue
+            messages.append(item)
+        data["messages"] = messages
     return data
 
 
@@ -170,9 +201,14 @@ def create_app(
     wecom_adapter: WeComAdapter | None = None,
     qq_ws_path: str = "/gateway/qq/ws",
     wecom_callback_path: str = "/gateway/wecom/callback",
+    chat_attachments: AttachmentService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    if chat_attachments is not None:
+        @app.on_event("startup")
+        def cleanup_expired_chat_attachments() -> None:
+            chat_attachments.cleanup_expired()
 
     # AI HOT 每日资讯日报（独立于工作日报助手）
     app.include_router(aihot_daily_router)
@@ -207,6 +243,8 @@ def create_app(
         register_knowledge_routes(app, knowledge)
     if curator is not None:
         register_curator_routes(app, curator)
+    if chat_attachments is not None:
+        register_attachment_routes(app, chat_attachments)
 
     if qq_adapter is not None:
         @app.websocket(qq_ws_path)
@@ -270,11 +308,13 @@ def create_app(
 
     @app.exception_handler(IrisError)
     async def iris_error_handler(_, exc: IrisError):
-        if isinstance(exc, (SessionNotFoundError, ReportNotFoundError, ReportAttachmentNotFoundError, ReportSuggestionNotFoundError)):
+        if isinstance(exc, (SessionNotFoundError, ReportNotFoundError, ReportAttachmentNotFoundError, ReportSuggestionNotFoundError, AttachmentNotFoundError)):
             code = 404
         elif isinstance(exc, ReportVersionConflictError):
             code = 409
-        elif isinstance(exc, (ReportValidationError, ReportAttachmentError)):
+        elif isinstance(exc, AttachmentStorageError):
+            code = 500
+        elif isinstance(exc, (ReportValidationError, ReportAttachmentError, AttachmentError)):
             code = 422
         elif isinstance(exc, ReportGenerationError) and exc.code == "report_model_output_invalid":
             code = 422
@@ -302,20 +342,25 @@ def create_app(
 
     @app.get("/api/sessions/{session_id}")
     def get_session(session_id: str):
-        return _session_data(sessions.get(session_id))
+        return _session_data(sessions.get(session_id), chat_attachments=chat_attachments)
 
     @app.delete("/api/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(session_id: str):
+        if chat_attachments is not None:
+            chat_attachments.delete_for_session(session_id)
         sessions.delete(session_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/sessions/{session_id}/reset")
     def reset_session(session_id: str):
-        return _session_data(sessions.clear(session_id))
+        return _session_data(sessions.clear(session_id), chat_attachments=chat_attachments)
 
     @app.post("/api/chat/stream")
     def chat_stream(request: ChatRequest):
         sessions.get(request.session_id)
+        if chat_attachments is not None:
+            for attachment_id in request.attachment_ids:
+                chat_attachments.read(request.session_id, attachment_id)
 
         def generate():
             task_id: str | None = None
@@ -324,7 +369,7 @@ def create_app(
                 if task_center is not None:
                     task_id = task_center.create_task(request.session_id, request.message).id
                     yield json.dumps({"type": "task_started", "data": {"task_id": task_id}}, ensure_ascii=False) + "\n"
-                for event in service.run(request.session_id, request.message):
+                for event in service.run(request.session_id, request.message, request.attachment_ids):
                     if task_id is not None:
                         if event.type == "tool_started":
                             task_center.tool_started(task_id, str(event.data["name"]))

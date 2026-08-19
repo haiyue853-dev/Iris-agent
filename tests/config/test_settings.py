@@ -32,6 +32,36 @@ def test_report_settings_defaults(tmp_path):
     assert settings.reports.max_attachment_text_chars == 20_000
 
 
+def test_chat_attachment_settings_defaults(tmp_path):
+    settings = load_settings(tmp_path / "missing.yaml")
+    assert settings.attachments.directory == Path("data/chat_attachments")
+    assert settings.attachments.max_file_bytes == 10_000_000
+    assert settings.attachments.max_total_bytes == 50_000_000
+    assert settings.attachments.max_count == 10
+    assert settings.attachments.max_text_chars == 50_000
+    assert settings.attachments.temporary_ttl_seconds == 86_400
+
+
+def test_chat_attachment_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("attachments:\n  directory: custom/chat\n  max_file_bytes: 123\n  max_total_bytes: 456\n  max_count: 3\n  max_text_chars: 789\n  temporary_ttl_seconds: 99\n", encoding="utf-8")
+    settings = load_settings(path).attachments
+    assert settings.directory == Path("custom/chat")
+    assert settings.max_file_bytes == 123
+    assert settings.max_total_bytes == 456
+    assert settings.max_count == 3
+    assert settings.max_text_chars == 789
+    assert settings.temporary_ttl_seconds == 99
+
+
+@pytest.mark.parametrize("field", ["max_file_bytes", "max_total_bytes", "max_count", "max_text_chars", "temporary_ttl_seconds"])
+def test_chat_attachment_numeric_settings_must_be_positive(tmp_path, field):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"attachments:\n  {field}: 0\n", encoding="utf-8")
+    with pytest.raises(ConfigurationError):
+        load_settings(path)
+
+
 def test_report_settings_load_from_yaml(tmp_path):
     path = tmp_path / "agent.yaml"
     path.write_text(

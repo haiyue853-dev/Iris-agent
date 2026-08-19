@@ -37,6 +37,14 @@ reports:
   max_attachment_count: 10
   max_attachment_text_chars: 20000
 
+attachments:
+  directory: data/chat_attachments
+  max_file_bytes: 10000000
+  max_total_bytes: 50000000
+  max_count: 10
+  max_text_chars: 50000
+  temporary_ttl_seconds: 86400
+
 tools:
   enabled:
     - current_time
