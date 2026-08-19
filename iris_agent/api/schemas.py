@@ -1,11 +1,18 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatRequest(BaseModel):
     session_id: str
-    message: str = Field(min_length=1)
+    message: str = Field(default="")
+    attachment_ids: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def require_message_or_attachment(self):
+        if not self.message.strip() and not self.attachment_ids:
+            raise ValueError("message or attachment_ids is required")
+        return self
 
 
 class CreateSessionRequest(BaseModel):
