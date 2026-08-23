@@ -163,6 +163,7 @@ class KnowledgeSettings:
     directory: Path = Path("data/knowledge")
     database_file: Path = Path("data/knowledge/knowledge.db")
     files_directory: Path = Path("data/knowledge/files")
+    allowed_upload_extensions: tuple[str, ...] = (".pdf", ".docx", ".xlsx", ".xls", ".md", ".txt")
     max_file_bytes: int = 10_000_000
     max_total_bytes: int = 100_000_000
     max_document_count: int = 100
@@ -316,10 +317,36 @@ def _knowledge_int(data: dict[str, Any], name: str, default: int) -> int:
     value = data.get(name, default)
     if isinstance(value, bool):
         raise ConfigurationError(f"knowledge.{name} 必须是整数")
-    try:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
         return int(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ConfigurationError(f"knowledge.{name} 必须是整数") from exc
+    raise ConfigurationError(f"knowledge.{name} 必须是整数")
+
+
+def _knowledge_upload_extensions(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        values = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        values = value
+    else:
+        raise ConfigurationError("knowledge.allowed_upload_extensions 必须是后缀列表")
+    normalized: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            raise ConfigurationError("knowledge.allowed_upload_extensions 必须是字符串后缀")
+        suffix = item.strip().lower()
+        if not suffix:
+            raise ConfigurationError("knowledge.allowed_upload_extensions 不能为空")
+        if not suffix.startswith("."):
+            suffix = f".{suffix}"
+        if not re.fullmatch(r"\.[a-z0-9]+", suffix):
+            raise ConfigurationError("knowledge.allowed_upload_extensions 包含非法后缀")
+        if suffix not in normalized:
+            normalized.append(suffix)
+    if not normalized:
+        raise ConfigurationError("knowledge.allowed_upload_extensions 不能为空")
+    return tuple(normalized)
 
 
 def _knowledge_float(data: dict[str, Any], name: str, default: float) -> float:
@@ -464,6 +491,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             directory=Path(knowledge.get("directory", "data/knowledge")),
             database_file=Path(knowledge.get("database_file", "data/knowledge/knowledge.db")),
             files_directory=Path(knowledge.get("files_directory", "data/knowledge/files")),
+            allowed_upload_extensions=_knowledge_upload_extensions(
+                knowledge.get("allowed_upload_extensions", KnowledgeSettings().allowed_upload_extensions)
+            ),
             max_file_bytes=_knowledge_int(knowledge, "max_file_bytes", 10_000_000),
             max_total_bytes=_knowledge_int(knowledge, "max_total_bytes", 100_000_000),
             max_document_count=_knowledge_int(knowledge, "max_document_count", 100),

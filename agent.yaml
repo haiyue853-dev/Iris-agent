@@ -124,6 +124,13 @@ knowledge:
   directory: data/knowledge
   database_file: data/knowledge/knowledge.db
   files_directory: data/knowledge/files
+  allowed_upload_extensions:
+    - .pdf
+    - .docx
+    - .xlsx
+    - .xls
+    - .md
+    - .txt
   max_file_bytes: 10000000
   max_total_bytes: 100000000
   max_document_count: 100

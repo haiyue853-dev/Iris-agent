@@ -71,6 +71,15 @@ def test_document_and_chunk_round_trip_through_safe_dicts():
     assert KnowledgeChunk.from_dict(chunk.to_dict()) == chunk
 
 
+def test_chunk_from_dict_rejects_a_tampered_content_hash():
+    chunk = KnowledgeChunk.new("doc-0123456789abcdef0123456789abcdef", 0, "这是切片正文。")
+    data = chunk.to_dict()
+    data["content_hash"] = "0" * 64
+
+    with pytest.raises(ValueError, match="content hash"):
+        KnowledgeChunk.from_dict(data)
+
+
 @pytest.mark.parametrize(
     "factory",
     [

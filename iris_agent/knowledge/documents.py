@@ -108,6 +108,9 @@ class KnowledgeChunk:
             raise ValueError("invalid knowledge chunk location")
         if not isinstance(self.content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", self.content_hash):
             raise ValueError("invalid knowledge chunk content hash")
+        expected_hash = hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+        if self.content_hash != expected_hash:
+            raise ValueError("knowledge chunk content hash does not match content")
 
     @classmethod
     def new(

@@ -14,6 +14,32 @@ def test_default_knowledge_settings_enable_local_rag_paths(tmp_path):
     assert knowledge.chunk_target_chars == 800
     assert knowledge.chunk_overlap_chars == 120
     assert knowledge.embedding_model == "bge-m3"
+    assert knowledge.allowed_upload_extensions == (".pdf", ".docx", ".xlsx", ".xls", ".md", ".txt")
+
+
+def test_knowledge_upload_extensions_are_normalized_to_a_nonempty_tuple(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("knowledge:\n  allowed_upload_extensions: [PDF, .DOCX, txt, .pdf]\n", encoding="utf-8")
+
+    assert load_settings(path).knowledge.allowed_upload_extensions == (".pdf", ".docx", ".txt")
+
+
+@pytest.mark.parametrize("value", ["[]", "[' ']", "true"])
+def test_knowledge_upload_extensions_must_not_be_empty_or_invalid(tmp_path, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  allowed_upload_extensions: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="allowed_upload_extensions"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("value", ["800.5", "true"])
+def test_knowledge_integer_settings_reject_floats_and_booleans(tmp_path, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  chunk_target_chars: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="chunk_target_chars"):
+        load_settings(path)
 
 
 @pytest.mark.parametrize(
