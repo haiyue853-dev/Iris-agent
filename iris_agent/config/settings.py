@@ -161,6 +161,17 @@ class WebSearchSettings:
 @dataclass(slots=True)
 class KnowledgeSettings:
     directory: Path = Path("data/knowledge")
+    database_file: Path = Path("data/knowledge/knowledge.db")
+    files_directory: Path = Path("data/knowledge/files")
+    max_file_bytes: int = 10_000_000
+    max_total_bytes: int = 100_000_000
+    max_document_count: int = 100
+    chunk_target_chars: int = 800
+    chunk_overlap_chars: int = 120
+    embedding_batch_size: int = 16
+    retrieval_limit: int = 5
+    max_context_chars: int = 6_000
+    minimum_relevance_score: float = 0.2
     max_content_chars: int = 50000
     max_hit_chars: int = 500
     default_limit: int = 5
@@ -301,6 +312,26 @@ def _web_search_float(data: dict[str, Any], name: str, default: float) -> float:
         raise ConfigurationError(f"web_search.{name} 必须是数字") from exc
 
 
+def _knowledge_int(data: dict[str, Any], name: str, default: int) -> int:
+    value = data.get(name, default)
+    if isinstance(value, bool):
+        raise ConfigurationError(f"knowledge.{name} 必须是整数")
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ConfigurationError(f"knowledge.{name} 必须是整数") from exc
+
+
+def _knowledge_float(data: dict[str, Any], name: str, default: float) -> float:
+    try:
+        value = float(data.get(name, default))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ConfigurationError(f"knowledge.{name} 必须是数字") from exc
+    if not math.isfinite(value):
+        raise ConfigurationError(f"knowledge.{name} 必须是有限数字")
+    return value
+
+
 def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> Settings:
     path = Path(config_path)
     raw: dict[str, Any] = {}
@@ -431,6 +462,17 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         knowledge=KnowledgeSettings(
             directory=Path(knowledge.get("directory", "data/knowledge")),
+            database_file=Path(knowledge.get("database_file", "data/knowledge/knowledge.db")),
+            files_directory=Path(knowledge.get("files_directory", "data/knowledge/files")),
+            max_file_bytes=_knowledge_int(knowledge, "max_file_bytes", 10_000_000),
+            max_total_bytes=_knowledge_int(knowledge, "max_total_bytes", 100_000_000),
+            max_document_count=_knowledge_int(knowledge, "max_document_count", 100),
+            chunk_target_chars=_knowledge_int(knowledge, "chunk_target_chars", 800),
+            chunk_overlap_chars=_knowledge_int(knowledge, "chunk_overlap_chars", 120),
+            embedding_batch_size=_knowledge_int(knowledge, "embedding_batch_size", 16),
+            retrieval_limit=_knowledge_int(knowledge, "retrieval_limit", 5),
+            max_context_chars=_knowledge_int(knowledge, "max_context_chars", 6_000),
+            minimum_relevance_score=_knowledge_float(knowledge, "minimum_relevance_score", 0.2),
             max_content_chars=int(knowledge.get("max_content_chars", 50000)),
             max_hit_chars=int(knowledge.get("max_hit_chars", 500)),
             default_limit=int(knowledge.get("default_limit", 5)),
@@ -514,4 +556,14 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     for field_name in ("max_snippet_chars", "max_page_chars", "min_text_chars", "max_retries"):
         if getattr(settings.web_search, field_name) < 1:
             raise ConfigurationError(f"web_search.{field_name} 必须大于或等于 1")
+    for field_name in (
+        "max_file_bytes", "max_total_bytes", "max_document_count", "chunk_target_chars",
+        "embedding_batch_size", "retrieval_limit", "max_context_chars",
+    ):
+        if getattr(settings.knowledge, field_name) < 1:
+            raise ConfigurationError(f"knowledge.{field_name} 必须大于 0")
+    if not 0 <= settings.knowledge.chunk_overlap_chars < settings.knowledge.chunk_target_chars:
+        raise ConfigurationError("knowledge.chunk_overlap_chars 必须大于或等于 0 且小于 chunk_target_chars")
+    if not 0 <= settings.knowledge.minimum_relevance_score <= 1:
+        raise ConfigurationError("knowledge.minimum_relevance_score 必须在 0 到 1 之间")
     return settings

@@ -6,6 +6,46 @@ from iris_agent.config.settings import load_settings
 from iris_agent.core.errors import ConfigurationError
 
 
+def test_default_knowledge_settings_enable_local_rag_paths(tmp_path):
+    knowledge = load_settings(tmp_path / "missing.yaml").knowledge
+
+    assert knowledge.database_file == Path("data/knowledge/knowledge.db")
+    assert knowledge.files_directory == Path("data/knowledge/files")
+    assert knowledge.chunk_target_chars == 800
+    assert knowledge.chunk_overlap_chars == 120
+    assert knowledge.embedding_model == "bge-m3"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_file_bytes", 0),
+        ("max_total_bytes", 0),
+        ("max_document_count", 0),
+        ("chunk_target_chars", 0),
+        ("embedding_batch_size", 0),
+        ("retrieval_limit", 0),
+        ("max_context_chars", 0),
+        ("minimum_relevance_score", -0.01),
+        ("minimum_relevance_score", 1.01),
+    ],
+)
+def test_knowledge_settings_reject_invalid_ranges(tmp_path, field, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  {field}: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=field):
+        load_settings(path)
+
+
+def test_knowledge_settings_reject_overlap_at_or_above_target(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("knowledge:\n  chunk_target_chars: 120\n  chunk_overlap_chars: 120\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="chunk_overlap_chars"):
+        load_settings(path)
+
+
 def test_environment_overrides_yaml(tmp_path, monkeypatch):
     path = tmp_path / "agent.yaml"
     path.write_text("llm:\n  model: yaml-model\n", encoding="utf-8")

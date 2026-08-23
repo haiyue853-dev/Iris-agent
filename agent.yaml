@@ -122,6 +122,17 @@ web_search:
 
 knowledge:
   directory: data/knowledge
+  database_file: data/knowledge/knowledge.db
+  files_directory: data/knowledge/files
+  max_file_bytes: 10000000
+  max_total_bytes: 100000000
+  max_document_count: 100
+  chunk_target_chars: 800
+  chunk_overlap_chars: 120
+  embedding_batch_size: 16
+  retrieval_limit: 5
+  max_context_chars: 6000
+  minimum_relevance_score: 0.2
   max_content_chars: 50000
   max_hit_chars: 500
   default_limit: 5
