@@ -292,6 +292,15 @@ class SqliteKnowledgeRepository:
             raise SqliteKnowledgeRepositoryError("unable to read knowledge graph") from exc
         return [KnowledgeGraphNode(**dict(row)) for row in nodes], [KnowledgeGraphEdge(**dict(row)) for row in edges]
 
+    def graph_edge_count(self, document_id: str) -> int:
+        self._validate_document_id(document_id)
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute("SELECT COUNT(*) AS count FROM graph_edges WHERE document_id = ?", (document_id,)).fetchone()
+        except sqlite3.Error as exc:
+            raise SqliteKnowledgeRepositoryError("unable to count knowledge graph edges") from exc
+        return int(row["count"])
+
     def migrate_legacy(self, legacy: KnowledgeRepository) -> int:
         if not isinstance(legacy, KnowledgeRepository):
             raise ValueError("legacy must be a KnowledgeRepository")

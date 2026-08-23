@@ -56,6 +56,13 @@ class RagKnowledgeService:
         return self.repository.delete_document(document_id) is not None
 
     def graph(self, topic: str | None = None) -> dict:
+        for document in self.repository.list_documents():
+            if self.repository.graph_edge_count(document.id):
+                continue
+            chunks = self.repository.chunks_for_document(document.id)
+            if chunks:
+                entities, relations = self._extract_graph(document.title, "\n".join(chunk.content for chunk in chunks))
+                self.repository.replace_document_graph(document.id, entities, relations)
         nodes, edges = self.repository.graph(topic)
         return {"nodes": [{"id": node.id, "label": node.label, "kind": node.kind, "document_count": node.document_count} for node in nodes],
                 "edges": [{"source": edge.source, "target": edge.target, "relation": edge.relation, "document_id": edge.document_id} for edge in edges]}
