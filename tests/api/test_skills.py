@@ -30,7 +30,11 @@ def test_list_skills_returns_public_metadata_only(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body["skills"], list)
-    assert len(body["skills"]) == 3
+    web_research = next(item for item in body["skills"] if item["id"] == "web-research")
+    assert web_research["name"] == "web-research"
+    assert web_research["description"]
+    assert web_research["entry_view"] == "chat"
+    assert web_research["enabled"] is True
     for item in body["skills"]:
         assert set(item.keys()) <= {"id", "name", "description", "icon", "category", "entry_view", "version", "enabled"}
         assert "path" not in item

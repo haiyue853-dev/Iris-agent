@@ -24,6 +24,37 @@ def test_provider_converts_text_response():
     assert completions.kwargs["model"] == "model"
 
 
+def test_provider_close_forwards_to_client_once():
+    calls = []
+    client = SimpleNamespace(close=lambda: calls.append("closed"))
+    provider = OpenAICompatibleProvider(client, "model")
+    provider.close(); provider.close()
+    assert calls == ["closed"]
+
+
+def test_provider_streams_text_deltas():
+    chunks = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="第一段", tool_calls=None))]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="第二段", tool_calls=None))]),
+    ]
+    completions = FakeCompletions(chunks)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    results = list(OpenAICompatibleProvider(client, "model").stream([], []))
+    assert [result.content for result in results] == ["第一段", "第二段"]
+    assert completions.kwargs["stream"] is True
+
+
+def test_provider_assembles_streamed_tool_call_arguments():
+    chunks = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="clock", arguments='{"time'))]))]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(index=0, id=None, function=SimpleNamespace(name=None, arguments='zone":"UTC"}'))]))]),
+    ]
+    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(chunks)))
+    results = list(OpenAICompatibleProvider(client, "model").stream([], []))
+    assert results[-1].tool_calls[0].id == "c1"
+    assert results[-1].tool_calls[0].arguments == {"timezone": "UTC"}
+
+
 def test_provider_converts_tool_calls():
     call = SimpleNamespace(id="c1", function=SimpleNamespace(name="clock", arguments='{"timezone":"UTC"}'))
     message = SimpleNamespace(content=None, tool_calls=[call])

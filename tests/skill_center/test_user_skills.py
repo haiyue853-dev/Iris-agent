@@ -46,7 +46,7 @@ def test_list_merges_bundled_and_user(tmp_path):
 
     ids = {s.id for s in service.list_skills()}
     assert "daily-report" in ids
-    assert len(ids) == 4
+    assert len(ids) == 5
 
 
 def test_load_unknown_skill_raises(tmp_path):

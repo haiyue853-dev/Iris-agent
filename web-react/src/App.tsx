@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
-import WelcomePage from './components/WelcomePage';
-import ChatContainer from './components/ChatContainer';
+import { AssistantChat } from './components/AssistantChat';
 import AihotDailyPage from './components/aihot/AihotDailyPage';
 import UmlFlowPage from './components/uml/UmlFlowPage';
 import DailyReportPage from './components/reports/DailyReportPage';
@@ -20,41 +19,23 @@ export type AppView = 'chat' | 'aihot' | 'uml' | 'reports' | 'skills' | 'automat
 const VALID_VIEWS: AppView[] = ['chat', 'aihot', 'uml', 'reports', 'skills', 'automation', 'radar', 'mcp', 'tasks', 'memory', 'knowledge', 'curator'];
 
 function App() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [welcomeInput, setWelcomeInput] = useState('');
-  const [chatInput, setChatInput] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.innerWidth <= 720,
+  );
   const [activeView, setActiveView] = useState<AppView>(() => {
     const saved = localStorage.getItem('iris_active_view');
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
   const [umlVisited, setUmlVisited] = useState(() => activeView === 'uml');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const {
     messages,
-    isStreaming,
-    streamingContent,
     toast,
-    pendingApproval,
     currentSessionId,
-    currentTaskId,
-    currentTaskStatus,
-    queuePosition,
-    approvalCallId,
-    approvalSubmitting,
     sessions,
-    attachments,
-    uploadFiles,
-    removeAttachment,
-    handleSendWithSession,
-    resolvePendingApproval,
-    handleRegenerate,
-    handleStop,
-    handleNewChat,
-    handleCopy,
-    handleEditMessage,
     handleSwitchSession,
     handleDeleteSession,
+    handleNewChat,
   } = useChat();
 
   useEffect(() => {
@@ -82,29 +63,17 @@ function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [handleNewChat, messages.length]);
 
-  const handleWelcomeSend = (text: string, attachmentIds: string[]) => {
-    const msg = text.trim();
-    if (!msg && !attachmentIds.length) return;
-    setWelcomeInput('');
-    handleSendWithSession(msg, attachmentIds);
-  };
-
-  const handleChatSend = (text: string, attachmentIds: string[]) => {
-    const msg = text.trim();
-    if (!msg && !attachmentIds.length) return;
-    setChatInput('');
-    handleSendWithSession(msg, attachmentIds);
-  };
-
   const handleNewChatFromSidebar = () => {
     setActiveView('chat');
     handleNewChat();
   };
 
-  const hasMessages = messages.length > 0;
+  const handleSessionCreated = useCallback((id: string) => {
+    void handleSwitchSession(id);
+  }, [handleSwitchSession]);
 
   return (
-    <>
+    <div className="iris-app-shell">
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -117,14 +86,14 @@ function App() {
         onViewChange={setActiveView}
       />
 
-      <main className="main-content" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'automation' ? '自动化任务' : undefined}>
+      <main className="main-content iris-main-surface" aria-label={activeView === 'reports' ? 'AI 日报工作台' : activeView === 'skills' ? 'Skills 中心' : activeView === 'automation' ? '自动化任务' : undefined}>
         {umlVisited && (
           <div hidden={activeView !== 'uml'}>
             <UmlFlowPage />
           </div>
         )}
         {activeView === 'uml' ? null : activeView === 'tasks' ? (
-          <TaskCenterPage selectedTaskId={selectedTaskId} />
+          <TaskCenterPage selectedTaskId={null} />
         ) : activeView === 'memory' ? (
           <MemoryPage />
         ) : activeView === 'knowledge' ? (
@@ -141,46 +110,18 @@ function App() {
           <AutomationPage />
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
-        ) : !hasMessages ? (
-          <WelcomePage
-            inputValue={welcomeInput}
-            onInputChange={setWelcomeInput}
-            onSend={handleWelcomeSend}
-            onNavigate={setActiveView}
-            attachments={attachments}
-            onFilesSelected={(files) => void uploadFiles(files)}
-            onRemoveAttachment={(clientId) => void removeAttachment(clientId)}
-          />
         ) : (
-          <ChatContainer
+          <AssistantChat
+            key={currentSessionId || "__new__"}
+            sessionId={currentSessionId}
             messages={messages}
-            streamingContent={streamingContent}
-            isStreaming={isStreaming}
-            inputValue={chatInput}
-            onInputChange={setChatInput}
-            onSend={handleChatSend}
-            onStop={handleStop}
-            onCopy={handleCopy}
-            onRegenerate={handleRegenerate}
-            onEdit={handleEditMessage}
-            pendingApproval={pendingApproval}
-            onApproveTool={(callId) => void resolvePendingApproval(callId, true)}
-            onRejectTool={(callId) => void resolvePendingApproval(callId, false)}
-            currentTaskId={currentTaskId}
-            currentTaskStatus={currentTaskStatus}
-            queuePosition={queuePosition}
-            approvalCallId={approvalCallId}
-            approvalSubmitting={approvalSubmitting}
-            onViewTask={(taskId) => { setSelectedTaskId(taskId); setActiveView('tasks'); }}
-            attachments={attachments}
-            onFilesSelected={(files) => void uploadFiles(files)}
-            onRemoveAttachment={(clientId) => void removeAttachment(clientId)}
+            onSessionCreated={handleSessionCreated}
           />
         )}
       </main>
 
       {toast && <div className="copy-toast show">{toast}</div>}
-    </>
+    </div>
   );
 }
 

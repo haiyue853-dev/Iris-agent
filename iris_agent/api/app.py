@@ -31,6 +31,7 @@ from iris_agent.api.mcp_api import register_mcp_routes
 from iris_agent.api.hot_radar_api import register_hot_radar_routes
 from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
+from iris_agent.core.cancellation import ChatCancellationRegistry
 from iris_agent.core.errors import IrisError, SessionNotFoundError
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.mcp_center.service import McpCenterService
@@ -47,6 +48,7 @@ from iris_agent.api.memory_api import register_memory_routes
 from iris_agent.session_search.service import SessionSearchService
 from iris_agent.api.search_api import register_search_routes
 from iris_agent.profile.service import ProfileService
+from iris_agent.settings_profiles.service import ProfileService as SettingsProfileService
 from iris_agent.api.profile_api import register_profile_routes
 from iris_agent.knowledge.service import KnowledgeService
 from iris_agent.api.knowledge_api import register_knowledge_routes
@@ -202,9 +204,25 @@ def create_app(
     qq_ws_path: str = "/gateway/qq/ws",
     wecom_callback_path: str = "/gateway/wecom/callback",
     chat_attachments: AttachmentService | None = None,
+    settings_profiles: SettingsProfileService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    chat_cancellations = ChatCancellationRegistry()
+
+    def cancel_active_chat(task_id: str) -> bool:
+        cancelled = chat_cancellations.cancel(task_id)
+        if cancelled:
+            # The running generator retains the Event object; removing the
+            # registry entry prevents stopped approval waits from leaking.
+            chat_cancellations.unregister(task_id)
+        return cancelled
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     if chat_attachments is not None:
         @app.on_event("startup")
         def cleanup_expired_chat_attachments() -> None:
@@ -216,8 +234,8 @@ def create_app(
     app.include_router(world_news_router)
     # 计算机行业新闻
     app.include_router(tech_news_router)
-    # AI 配置设置（API Key 等，读写 .env 并动态生效）
-    register_settings_routes(app, service)
+    if settings_profiles is not None:
+        register_settings_routes(app, settings_profiles)
     # UML 流程图生成（复用现有 LLM provider）
     register_uml_routes(app, service)
     # Skills 中心（可选注入；不注入则不注册路由，保持既有测试兼容）
@@ -232,7 +250,7 @@ def create_app(
     if notifications is not None:
         register_notification_routes(app, notifications)
     if task_center is not None:
-        register_task_routes(app, task_center, sessions, task_queue)
+        register_task_routes(app, task_center, sessions, task_queue, cancel_active_chat)
     if memory is not None:
         register_memory_routes(app, memory)
     if search is not None:
@@ -368,8 +386,11 @@ def create_app(
             try:
                 if task_center is not None:
                     task_id = task_center.create_task(request.session_id, request.message).id
+                    cancel_signal = chat_cancellations.register(task_id)
                     yield json.dumps({"type": "task_started", "data": {"task_id": task_id}}, ensure_ascii=False) + "\n"
-                for event in service.run(request.session_id, request.message, request.attachment_ids):
+                else:
+                    cancel_signal = None
+                for event in service.run(request.session_id, request.message, request.attachment_ids, is_cancelled=None if cancel_signal is None else cancel_signal.is_set):
                     if task_id is not None:
                         if event.type == "tool_started":
                             task_center.tool_started(task_id, str(event.data["name"]))
@@ -415,6 +436,11 @@ def create_app(
                     clear_task_approvals(task_id)
                 logger.exception("流式对话发生未处理异常")
                 yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "服务内部错误"}}, ensure_ascii=False) + "\n"
+            finally:
+                if task_id is not None:
+                    task = task_center.get_task(task_id)
+                    if terminal or task is None or task.status in {"completed", "failed", "stopped"}:
+                        chat_cancellations.unregister(task_id)
 
         return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

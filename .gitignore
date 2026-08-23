@@ -6,11 +6,15 @@ __pycache__/
 .venv/
 .worktrees/
 .superpowers/
+.workbuddy/
 .env
-data/
+data/*
+!data/settings_profiles.example.json
+data/settings_profiles.json
 web/node_modules/
 web-react/node_modules/
 web-react/dist/
+web-react/.tsbuild/
 diagrams/drafts/
 diagrams/exports/
 workspace/

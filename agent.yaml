@@ -107,11 +107,14 @@ context:
 
 web_search:
   enabled: true
-  timeout_seconds: 15
+  timeout_seconds: 6
   max_results: 5
   max_snippet_chars: 300
   max_page_chars: 30000
-  max_retries: 2
+  max_download_bytes: 2000000
+  max_retries: 1
+  enable_tavily: true
+  default_search_depth: basic
   enable_duckduckgo: false
   enable_browser_fallback: false
   browser_channel: msedge
@@ -161,4 +164,3 @@ gateway:
   push:
     enabled: true
     qq_target: "1905499552"
-

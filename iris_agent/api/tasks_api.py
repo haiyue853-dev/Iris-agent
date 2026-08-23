@@ -1,5 +1,7 @@
 """Public, payload-free endpoints for Agent task timelines and queue control."""
 
+from collections.abc import Callable
+
 from fastapi import APIRouter, HTTPException, status
 
 from iris_agent.api.schemas import QueueTaskRequest, ToolApprovalRequest
@@ -14,6 +16,7 @@ def register_task_routes(
     task_center: TaskCenterService,
     sessions: SessionRepository,
     task_queue: TaskQueueService | None = None,
+    cancel_active_chat: Callable[[str], bool] | None = None,
 ) -> None:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -71,7 +74,11 @@ def register_task_routes(
     def cancel_task(task_id: str):
         task = get_existing(task_id)
         if task.status in {"completed", "failed", "stopped"}:
-            raise HTTPException(409, detail={"code": "task_not_active", "message": "任务已结束，不能取消"})
+            if any(event.type == "request_queued" for event in task.events):
+                raise HTTPException(409, detail={"code": "task_not_active", "message": "任务已结束，不能取消"})
+            return task_data(task, include_events=True, include_queue_position=False)
+        if cancel_active_chat is not None and cancel_active_chat(task_id):
+            return task_data(task_center.stop(task_id), include_events=True, include_queue_position=False)
         try:
             return task_data(require_queue().cancel(task_id), include_events=True, include_queue_position=False)
         except KeyError:

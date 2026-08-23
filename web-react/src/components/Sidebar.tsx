@@ -67,7 +67,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </button>
       )}
 
-      <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+      <aside className={`sidebar iris-sidebar ${collapsed ? 'collapsed' : ''}`} data-collapsed={collapsed}>
         <div className="sidebar-inner">
           <div className="sidebar-header">
             <div className="sidebar-logo">Iris</div>
@@ -88,7 +88,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="shortcut">Ctrl K</span>
           </button>
 
-          <nav className="sidebar-view-nav">
+          <nav className="sidebar-view-nav iris-primary-nav" aria-label="功能导航">
             <div
               className={`view-item ${activeView === 'chat' ? 'active' : ''}`}
               onClick={() => onViewChange('chat')}
@@ -172,7 +172,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </nav>
 
-          <nav className="sidebar-menu">
+          <nav className="sidebar-menu iris-session-nav" aria-label="历史对话">
             <div className="menu-section-title">对话</div>
             {sessions.map((session) => (
               <div

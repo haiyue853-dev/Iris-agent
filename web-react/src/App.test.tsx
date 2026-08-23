@@ -5,13 +5,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { useChat } from './hooks/useChat';
 
+const assistantChatProps = vi.hoisted(() => [] as Array<{ onSessionCreated?: (id: string) => void }>);
+
 vi.mock('./hooks/useChat', () => ({
   useChat: vi.fn(),
 }));
 
+vi.mock('./components/AssistantChat', () => ({
+  AssistantChat: (props: { onSessionCreated?: (id: string) => void }) => {
+    assistantChatProps.push(props);
+    return <div data-testid="assistant-chat" />;
+  },
+}));
+
 describe('App workspace navigation', () => {
   beforeEach(() => {
+    assistantChatProps.length = 0;
     localStorage.clear();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     vi.mocked(useChat).mockReturnValue({
       messages: [],
       isStreaming: false,
@@ -38,6 +49,21 @@ describe('App workspace navigation', () => {
       handleSwitchSession: vi.fn(),
       handleDeleteSession: vi.fn(),
     });
+  });
+
+  it('starts with the sidebar collapsed on narrow screens', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+
+    render(<App />);
+
+    expect(screen.getByTitle('展开侧边栏')).toBeInTheDocument();
+    expect(document.querySelector('.sidebar')).toHaveClass('collapsed');
+  });
+
+  it('renders the AI Elements inspired application shell', () => {
+    render(<App />);
+    expect(document.querySelector('.iris-app-shell')).toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveClass('iris-main-surface');
   });
 
   it('opens the AI daily report workspace from the left sidebar', async () => {
@@ -86,30 +112,14 @@ describe('App workspace navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('passes approval submission state to the visible chat controls', () => {
-    vi.mocked(useChat).mockReturnValue({
-      ...useChat(),
-      messages: [{ role: 'user', content: '需要审批' }],
-      isStreaming: true,
-      currentTaskId: 'task-1',
-      currentTaskStatus: 'awaiting_approval',
-      approvalCallId: 'call-1',
-      approvalSubmitting: true,
-    });
+  it('keeps the session-created callback stable across parent rerenders', () => {
+    const { rerender } = render(<App />);
+    const firstCallback = assistantChatProps.at(-1)?.onSessionCreated;
 
-    render(<App />);
+    rerender(<App />);
 
-    expect(screen.getByRole('button', { name: '批准执行' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+    expect(firstCallback).toBeDefined();
+    expect(assistantChatProps.at(-1)?.onSessionCreated).toBe(firstCallback);
   });
 
-  it('offers attachment selection on the welcome screen', async () => {
-    const user = userEvent.setup();
-    const uploadFiles = vi.fn();
-    vi.mocked(useChat).mockReturnValue({ ...useChat(), uploadFiles });
-    render(<App />);
-
-    await user.upload(screen.getByLabelText('添加附件'), new File(['notes'], 'notes.txt', { type: 'text/plain' }));
-    expect(uploadFiles).toHaveBeenCalledWith([expect.any(File)]);
-  });
 });

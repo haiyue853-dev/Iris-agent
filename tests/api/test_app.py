@@ -38,9 +38,24 @@ def test_unknown_session_returns_stable_error(tmp_path):
 
 
 def test_validation_uses_stable_error_code(tmp_path):
-    response = make_client(tmp_path).post("/api/chat/stream", json={})
+    secret = "sk-secret-must-not-be-echoed"
+    response = make_client(tmp_path).post("/api/sessions", json={"name": {"secret": secret}})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "validation_error"
+    assert secret not in response.text
+
+
+def test_local_ip_frontend_is_allowed_by_cors(tmp_path):
+    response = make_client(tmp_path).options(
+        "/api/sessions",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
 
 
 def test_approved_tool_call_resumes_streaming_chat(tmp_path):

@@ -1,1 +1,51 @@
-/* Reset */
+@import "tailwindcss";
+
+/* assistant-ui / tool-ui 语义主题 —— 对齐 Iris 的中性灰/黑配色，避免蓝紫 */
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #18181b;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #1d1c23;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1d1c23;
+
+  --color-primary: #1d1c23;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #f2f2f3;
+  --color-secondary-foreground: #1d1c23;
+
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+
+  --color-accent: #f2f2f3;
+  --color-accent-foreground: #1d1c23;
+
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-border: #e4e4e7;
+  --color-input: #e4e4e7;
+  --color-ring: #a1a1aa;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+  }
+}

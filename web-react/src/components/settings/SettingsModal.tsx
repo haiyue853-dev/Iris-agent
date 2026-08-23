@@ -1,129 +1,51 @@
-import { useEffect, useState } from 'react';
-import { fetchSettings, updateSettings } from '../../api/settings';
+import { useEffect, useRef, useState } from 'react';
+import { activateSettingsProfile, createSettingsProfile, deleteSettingsProfile, fetchSettingsProfiles, testSettingsProfileConnection, updateSettingsProfile } from '../../api/settings';
+import type { ApiProfile, CreateProfileInput, SettingsProfilesState, UpdateProfileInput } from '../../types';
 
-interface SettingsModalProps {
-  onClose: () => void;
-}
+interface SettingsModalProps { onClose: () => void }
+type Draft = { name:string; base_url:string; api_key:string; model:string; clear_api_key:boolean };
+type Message = { type:'ok'|'err'; text:string } | null;
+const emptyDraft = ():Draft => ({name:'',base_url:'',api_key:'',model:'',clear_api_key:false});
+const profileDraft = (p:ApiProfile):Draft => ({name:p.name,base_url:p.base_url,api_key:'',model:p.model,clear_api_key:false});
+const errorText = (e:unknown, fallback:string) => e instanceof Error ? e.message : fallback;
+function normalizeHttpUrl(value:string):string|null { try { const v=value.trim().replace(/\/+$/,''); const u=new URL(v); return (u.protocol==='http:'||u.protocol==='https:')&&u.hostname ? v:null; } catch { return null; } }
+const profileStatusText:Record<ApiProfile['last_test_status'],string> = {untested:'未测试',connected:'连接成功',failed:'连接失败'};
+const shortDateTime = new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'});
+function formatTestedAt(value:string|null):string|null { if(!value)return null;const date=new Date(value);return Number.isNaN(date.getTime())?null:shortDateTime.format(date); }
 
-export default function SettingsModal({ onClose }: SettingsModalProps) {
-  const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [model, setModel] = useState('');
-  const [apiKeySet, setApiKeySet] = useState(false);
-  const [apiKeyMasked, setApiKeyMasked] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-
-  useEffect(() => {
-    fetchSettings()
-      .then((s) => {
-        setBaseUrl(s.base_url);
-        setModel(s.model);
-        setApiKeySet(s.api_key_set);
-        setApiKeyMasked(s.api_key_masked);
-      })
-      .catch((err) => setMessage({ type: 'err', text: err instanceof Error ? err.message : '加载配置失败' }))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const patch: { api_key?: string; base_url?: string; model?: string } = {};
-      if (apiKey.trim()) patch.api_key = apiKey.trim();
-      if (baseUrl.trim()) patch.base_url = baseUrl.trim();
-      if (model.trim()) patch.model = model.trim();
-      if (Object.keys(patch).length === 0) {
-        setMessage({ type: 'err', text: '没有需要保存的修改' });
-        return;
-      }
-      const updated = await updateSettings(patch);
-      setApiKey('');
-      setApiKeySet(updated.api_key_set);
-      setApiKeyMasked(updated.api_key_masked);
-      setBaseUrl(updated.base_url);
-      setModel(updated.model);
-      setMessage({ type: 'ok', text: '已保存，立即生效' });
-    } catch (err) {
-      setMessage({ type: 'err', text: err instanceof Error ? err.message : '保存失败' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-head">
-          <h3 className="settings-title">设置</h3>
-          <button className="settings-close" onClick={onClose} title="关闭">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="settings-loading">加载中…</div>
-        ) : (
-          <>
-            <div className="settings-body">
-              <div className="settings-field">
-                <label className="settings-label">
-                  API Key
-                  {apiKeySet ? (
-                    <span className="settings-badge ok">已设置 {apiKeyMasked}</span>
-                  ) : (
-                    <span className="settings-badge warn">未设置</span>
-                  )}
-                </label>
-                <input
-                  type="password"
-                  className="settings-input"
-                  placeholder={apiKeySet ? '输入新 Key 以替换（留空则保持不变）' : 'sk-…'}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                />
-                <p className="settings-hint">仅保存到本地 .env 文件，不经过第三方</p>
-              </div>
-
-              <div className="settings-field">
-                <label className="settings-label">Base URL</label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder="https://api.deepseek.com/v1"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                />
-              </div>
-
-              <div className="settings-field">
-                <label className="settings-label">模型</label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder="deepseek-chat"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                />
-              </div>
-            </div>
-
-            {message && <div className={`settings-message ${message.type}`}>{message.text}</div>}
-
-            <div className="settings-foot">
-              <button className="settings-btn primary" onClick={handleSave} disabled={saving}>
-                {saving ? '保存中…' : '保存'}
-              </button>
-              <button className="settings-btn" onClick={onClose}>取消</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
+export default function SettingsModal({onClose}:SettingsModalProps) {
+ const modalRef=useRef<HTMLDivElement>(null); const firstActionRef=useRef<HTMLButtonElement>(null);
+ const openerRef=useRef<HTMLElement|null>(document.activeElement instanceof HTMLElement?document.activeElement:null);
+ const [state,setState]=useState<SettingsProfilesState>({active_id:'',profiles:[]});
+ const [selectedId,setSelectedId]=useState(''); const [draft,setDraft]=useState<Draft>(emptyDraft());
+ const [isCreating,setIsCreating]=useState(false); const [dirty,setDirty]=useState(false);
+ const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [testing,setTesting]=useState(false); const [message,setMessage]=useState<Message>(null);
+ const busy=loading||saving||testing; const selected=state.profiles.find(p=>p.id===selectedId);
+ useEffect(()=>{ let cancelled=false; fetchSettingsProfiles().then(s=>{ if(cancelled)return; setState(s); const id=s.profiles.some(p=>p.id===s.active_id)?s.active_id:(s.profiles[0]?.id||''); setSelectedId(id); const p=s.profiles.find(x=>x.id===id); if(p)setDraft(profileDraft(p)); }).catch(e=>{if(!cancelled)setMessage({type:'err',text:errorText(e,'加载配置失败')});}).finally(()=>{if(!cancelled)setLoading(false);}); return()=>{cancelled=true;}; },[]);
+ useEffect(()=>()=>{const opener=openerRef.current;if(opener?.isConnected)opener.focus();},[]);
+ useEffect(()=>{ if(!loading)firstActionRef.current?.focus(); },[loading]);
+ useEffect(()=>{const handleDocumentKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){if(!busy)onClose();return;}if(event.key==='Tab'&&modalRef.current&&!modalRef.current.contains(document.activeElement)){event.preventDefault();const first=modalRef.current.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled])');first?.focus();}};document.addEventListener('keydown',handleDocumentKey);return()=>document.removeEventListener('keydown',handleDocumentKey);},[busy,onClose]);
+ const trapFocus=(event:React.KeyboardEvent<HTMLDivElement>)=>{if(event.key!=='Tab')return;const nodes=Array.from(modalRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')??[]);if(!nodes.length)return;const first=nodes[0],last=nodes[nodes.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}};
+ const edit=(key:keyof Draft,value:string|boolean)=>{ setDraft(d=>({...d,[key]:value})); setDirty(true); setMessage(null); };
+ const choose=(p:ApiProfile)=>{ if(dirty){setMessage({type:'err',text:'请先保存或取消修改'});return;} setSelectedId(p.id);setDraft(profileDraft(p));setIsCreating(false);setMessage(null); };
+ const startCreate=()=>{ if(dirty){setMessage({type:'err',text:'请先保存或取消修改'});return;} setIsCreating(true);setDraft(emptyDraft());setDirty(false);setMessage(null); };
+ const cancelChanges=()=>{ if(isCreating){ const p=state.profiles.find(x=>x.id===selectedId); if(p)setDraft(profileDraft(p)); setIsCreating(false); } else if(selected)setDraft(profileDraft(selected)); setDirty(false);setMessage(null); };
+ const valid=()=>{ if(!draft.name.trim()){setMessage({type:'err',text:'请填写名称'});return null;} const url=normalizeHttpUrl(draft.base_url); if(!url){setMessage({type:'err',text:'Base URL 必须是完整的 HTTP(S) 地址'});return null;} if(!draft.model.trim()){setMessage({type:'err',text:'请先填写模型名称'});return null;} return {name:draft.name.trim(),base_url:url,model:draft.model.trim()}; };
+ const persist=async():Promise<ApiProfile|null>=>{ const base=valid();if(!base)return null; try { let saved:ApiProfile; if(isCreating){const payload:CreateProfileInput={...base};if(draft.api_key.trim())payload.api_key=draft.api_key.trim();saved=await createSettingsProfile(payload);setState(s=>({...s,profiles:[...s.profiles,saved]}));setSelectedId(saved.id);setIsCreating(false);} else {if(!selected)return null;const patch:UpdateProfileInput={};if(base.name!==selected.name)patch.name=base.name;if(base.base_url!==(normalizeHttpUrl(selected.base_url)??selected.base_url.trim()))patch.base_url=base.base_url;if(base.model!==selected.model)patch.model=base.model;if(draft.clear_api_key)patch.clear_api_key=true;else if(draft.api_key.trim())patch.api_key=draft.api_key.trim();saved=Object.keys(patch).length?await updateSettingsProfile(selected.id,patch):selected;setState(s=>({...s,profiles:s.profiles.map(p=>p.id===saved.id?saved:p)}));} setDraft(profileDraft(saved));setDirty(false);return saved; } catch(e){setMessage({type:'err',text:errorText(e,'保存失败')});return null;} };
+ const save=async(activate=false)=>{setMessage(null);setSaving(true);const saved=await persist();if(saved&&activate){try{await activateSettingsProfile(saved.id);setState(s=>({...s,active_id:saved.id}));setMessage({type:'ok',text:'已保存并设为当前'});}catch(e){setMessage({type:'err',text:errorText(e,'设为当前失败')});}}else if(saved)setMessage({type:'ok',text:'保存成功'});setSaving(false);};
+ const test=async()=>{setMessage(null);const url=normalizeHttpUrl(draft.base_url);if(!url){setMessage({type:'err',text:'Base URL 必须是完整的 HTTP(S) 地址'});return;}if(!draft.model.trim()){setMessage({type:'err',text:'请先填写模型名称'});return;}setTesting(true);try{const payload:{base_url:string;model:string;api_key?:string;profile_id?:string}={base_url:url,model:draft.model.trim()};if(!isCreating&&selectedId)payload.profile_id=selectedId;if(draft.clear_api_key)payload.api_key='';else if(draft.api_key.trim())payload.api_key=draft.api_key.trim();const result=await testSettingsProfileConnection(payload);if(!isCreating){const fresh=await fetchSettingsProfiles();setState(fresh);}setMessage({type:result.ok?'ok':'err',text:result.message});}catch(e){setMessage({type:'err',text:errorText(e,'测试连接失败')});}finally{setTesting(false);}};
+ const remove=async()=>{if(!selected||selected.id===state.active_id||state.profiles.length<=1)return;setSaving(true);setMessage(null);try{await deleteSettingsProfile(selected.id);const profiles=state.profiles.filter(p=>p.id!==selected.id);const id=profiles.some(p=>p.id===state.active_id)?state.active_id:(profiles[0]?.id||'');setState(s=>({...s,profiles}));setSelectedId(id);const p=profiles.find(x=>x.id===id);if(p)setDraft(profileDraft(p));setDirty(false);}catch(e){setMessage({type:'err',text:errorText(e,'删除失败')});}finally{setSaving(false);}};
+ return <div className="settings-overlay"><div ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={trapFocus}>
+  <div className="settings-head"><h3 id="settings-title" className="settings-title">设置</h3><button className="settings-close" onClick={onClose} disabled={busy} title={busy?'操作进行中，暂时无法关闭':'关闭'} aria-label="关闭">×</button></div>
+  {loading?<div className="settings-loading">加载中…</div>:<div className="settings-layout">
+   <aside className="settings-profiles"><button ref={firstActionRef} className="settings-btn" onClick={startCreate} disabled={busy}>新增配置</button>{state.profiles.map(p=>{const testedAt=formatTestedAt(p.last_tested_at);const current=p.id===state.active_id;return <button key={p.id} className={`settings-profile ${p.id===selectedId?'selected':''}`} onClick={()=>choose(p)} disabled={busy} aria-pressed={p.id===selectedId}><span className="settings-profile-main">{current&&<span className="settings-current-dot" aria-hidden="true">●</span>}<span>{p.name} · {p.model}</span>{current&&<span> · 当前</span>}</span><span className="settings-profile-meta"><span className="settings-profile-status">{profileStatusText[p.last_test_status]}</span>{testedAt&&<span className="settings-profile-time">{testedAt}</span>}</span></button>;})}</aside>
+   <section className="settings-editor">
+    <div className="settings-field"><label htmlFor="settings-name">名称</label><input id="settings-name" className="settings-input" value={draft.name} onChange={e=>edit('name',e.target.value)} disabled={busy}/></div>
+    <div className="settings-field"><label htmlFor="settings-base-url">Base URL</label><input id="settings-base-url" className="settings-input" value={draft.base_url} onChange={e=>edit('base_url',e.target.value)} disabled={busy}/></div>
+    <div className="settings-field"><label htmlFor="settings-model">模型</label><input id="settings-model" className="settings-input" value={draft.model} onChange={e=>edit('model',e.target.value)} disabled={busy}/></div>
+    <div className="settings-field"><label htmlFor="settings-api-key">API Key</label>{!isCreating&&selected?.api_key_set&&<span className="settings-badge ok">已设置 {selected.api_key_masked}</span>}<input id="settings-api-key" type="password" className="settings-input" value={draft.api_key} onChange={e=>{edit('api_key',e.target.value);if(e.target.value)setDraft(d=>({...d,clear_api_key:false}));}} disabled={busy||draft.clear_api_key}/>{!isCreating&&selected?.api_key_set&&<label className="settings-clear"><input type="checkbox" checked={draft.clear_api_key} onChange={e=>{edit('clear_api_key',e.target.checked);if(e.target.checked)setDraft(d=>({...d,api_key:''}));}} disabled={busy}/>清除已保存的 API Key</label>}</div>
+    {message&&<div className={`settings-message ${message.type}`}>{message.text}</div>}
+    <div className="settings-foot"><button className="settings-btn" onClick={test} disabled={busy}>测试连接</button><button className="settings-btn primary" onClick={()=>save(false)} disabled={busy}>保存</button><button className="settings-btn" onClick={()=>save(true)} disabled={busy}>保存并设为当前</button><button className="settings-btn" onClick={cancelChanges} disabled={busy||!dirty}>取消修改</button><button className="settings-btn danger" onClick={remove} disabled={busy||isCreating||!selected||selected.id===state.active_id||state.profiles.length<=1} title={selected?.id===state.active_id?'当前配置不能删除':state.profiles.length<=1?'至少保留一个配置':''}>删除当前配置</button><button className="settings-btn" onClick={onClose} disabled={busy}>取消</button></div>
+   </section></div>}
+ </div></div>;
 }

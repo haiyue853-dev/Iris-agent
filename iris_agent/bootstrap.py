@@ -1,7 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 import atexit
+import logging
+from typing import Callable
 
 from openai import OpenAI
 
@@ -28,8 +30,11 @@ from iris_agent.memory.repository import MemoryRepository
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.extractor import ProfileExtractor
 from iris_agent.profile.repository import ProfileRepository
-from iris_agent.profile.service import ProfileService
+from iris_agent.profile.service import ProfileService as UserProfileService
+from iris_agent.settings_profiles import ApiProfile, MigrationDefaults, ProfileStore, ProfileStoreError
+from iris_agent.settings_profiles.service import ProfileService as SettingsProfileService
 from iris_agent.providers.openai_compat import OpenAICompatibleProvider
+from iris_agent.providers.switchable import SwitchableProvider
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.attachments.extraction import LocalAttachmentExtractor
 from iris_agent.attachments.service import AttachmentService
@@ -48,8 +53,10 @@ from iris_agent.tools.builtin import build_current_time_tool, build_list_directo
 from iris_agent.web_search.browser_fetcher import BrowserFetcher
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
-from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSource
+from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSource, TavilySearchSource
 from iris_agent.tools.registry import ToolRegistry
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +74,7 @@ class ApplicationServices:
     memory: MemoryService
     session_search: SessionSearchService
     subagent: SubagentRunner
-    profile: ProfileService
+    profile: UserProfileService
     knowledge: KnowledgeService
     curator: CuratorService
     mcp: McpCenterService
@@ -76,13 +83,65 @@ class ApplicationServices:
     qq_adapter: QQOneBotAdapter | None
     wecom_adapter: WeComAdapter | None
     settings: Settings
+    settings_profiles: SettingsProfileService
     chat_attachments: AttachmentService
+    _closers: tuple[Callable[[], None], ...] = field(default_factory=tuple, repr=False, compare=False)
+    _closed: bool = field(default=False, repr=False, compare=False)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        object.__setattr__(self, "_closed", True)
+        first_error: Exception | None = None
+        for closer in reversed(self._closers):
+            try:
+                closer()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
 
 def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServices:
+    resource_closers: list[Callable[[], None]] = []
+    try:
+        return _build_application(config_path, resource_closers)
+    except Exception:
+        for closer in reversed(resource_closers):
+            try:
+                closer()
+            except Exception:
+                pass
+        raise
+
+
+def _build_application(
+    config_path: str | Path,
+    resource_closers: list[Callable[[], None]],
+) -> ApplicationServices:
     settings = load_settings(config_path)
-    client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
-    provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
+    profile_store = ProfileStore(
+        PROJECT_ROOT / "data" / "settings_profiles.json",
+        PROJECT_ROOT / ".env",
+        MigrationDefaults(settings.llm.base_url, settings.llm.model, settings.llm.api_key),
+    )
+
+    def make_provider(value: ApiProfile) -> OpenAICompatibleProvider:
+        client = OpenAI(api_key=value.api_key or "local-no-key", base_url=value.base_url, timeout=settings.llm.timeout_seconds)
+        return OpenAICompatibleProvider(client, value.model, settings.llm.temperature)
+
+    try:
+        profile_collection = profile_store.load()
+        active_profile = next(item for item in profile_collection.profiles if item.id == profile_collection.active_id)
+        provider = make_provider(active_profile)
+    except ProfileStoreError:
+        logging.getLogger(__name__).warning("Settings profile store unavailable; using configured LLM fallback")
+        client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
+        provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
+    provider_handle = SwitchableProvider(provider)
+    resource_closers.append(provider_handle.close)
+    provider = provider_handle
     registry = ToolRegistry()
     factories = {
         "current_time": lambda: build_current_time_tool(),
@@ -112,7 +171,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         default_limit=settings.session_search.default_limit,
     )
     registry.register(build_recall_tool(session_search))
-    profile = ProfileService(
+    profile = UserProfileService(
         ProfileRepository(settings.profile.directory),
         ProfileExtractor(provider),
         max_items_per_field=settings.profile.max_items_per_field,
@@ -128,6 +187,7 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
         enabled=settings.context.enabled,
     )
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
+    settings_profiles = SettingsProfileService(profile_store, make_provider, provider_handle.replace, provider_handle.current)
     agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
@@ -179,37 +239,58 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
     )
     registry.register(build_delegate_task_tool(subagent))
     registry.register(build_delegate_tasks_tool(subagent))
-    search_sources = [BingSearchSource(
-        timeout=settings.web_search.timeout_seconds,
-        max_snippet_chars=settings.web_search.max_snippet_chars,
-    )]
-    if settings.web_search.enable_duckduckgo:
-        search_sources.append(DuckDuckGoSearchSource(
+    search_sources = []
+    if settings.web_search.enable_tavily and settings.web_search.tavily_api_key:
+        tavily_source = TavilySearchSource(
+            api_key=settings.web_search.tavily_api_key,
             timeout=settings.web_search.timeout_seconds,
             max_snippet_chars=settings.web_search.max_snippet_chars,
-        ))
+        )
+        search_sources.append(tavily_source)
+        resource_closers.append(tavily_source.close)
+    bing_source = BingSearchSource(
+        timeout=settings.web_search.timeout_seconds,
+        max_snippet_chars=settings.web_search.max_snippet_chars,
+    )
+    search_sources.append(bing_source)
+    resource_closers.append(bing_source.close)
+    if settings.web_search.enable_duckduckgo:
+        duckduckgo_source = DuckDuckGoSearchSource(
+            timeout=settings.web_search.timeout_seconds,
+            max_snippet_chars=settings.web_search.max_snippet_chars,
+        )
+        search_sources.append(duckduckgo_source)
+        resource_closers.append(duckduckgo_source.close)
     web_search_client = WebSearchClient(
         timeout=settings.web_search.timeout_seconds,
         max_results=settings.web_search.max_results,
         max_snippet_chars=settings.web_search.max_snippet_chars,
         enabled=settings.web_search.enabled,
         sources=search_sources,
+        max_retries=settings.web_search.max_retries,
     )
     browser_fetcher = None
     if settings.web_search.enable_browser_fallback:
         browser_fetcher = BrowserFetcher(
             channel=settings.web_search.browser_channel,
+            timeout=settings.web_search.timeout_seconds,
             max_page_chars=settings.web_search.max_page_chars,
+            max_download_bytes=settings.web_search.max_download_bytes,
         )
     page_fetcher = PageFetcher(
         timeout=settings.web_search.timeout_seconds,
         max_page_chars=settings.web_search.max_page_chars,
+        max_download_bytes=settings.web_search.max_download_bytes,
         enabled=settings.web_search.enabled,
         max_retries=settings.web_search.max_retries,
         min_text_chars=settings.web_search.min_text_chars,
         browser_fetcher=browser_fetcher,
     )
-    registry.register(build_web_search_tool(web_search_client))
+    resource_closers.append(page_fetcher.close)
+    registry.register(build_web_search_tool(
+        web_search_client,
+        default_search_depth=settings.web_search.default_search_depth,
+    ))
     registry.register(build_fetch_page_tool(page_fetcher))
     knowledge_repository = KnowledgeRepository(settings.knowledge.directory)
     keyword_retriever = KeywordRetriever(
@@ -303,4 +384,4 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             qq_adapter.push_text(qq_target, text)
 
         automation.push = _push
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings, chat_attachments)
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings, settings_profiles, chat_attachments, tuple(resource_closers))

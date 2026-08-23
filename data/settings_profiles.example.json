@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "active_id": "remote-openai-compatible",
+  "profiles": [
+    {
+      "id": "remote-openai-compatible",
+      "name": "Remote OpenAI-compatible API",
+      "base_url": "https://api.example.com/v1",
+      "api_key": "",
+      "model": "example-chat-model",
+      "last_test_status": "untested",
+      "last_tested_at": null
+    },
+    {
+      "id": "local-openai-compatible",
+      "name": "Local OpenAI-compatible API",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key": "",
+      "model": "local-model",
+      "last_test_status": "untested",
+      "last_tested_at": null
+    }
+  ]
+}

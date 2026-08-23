@@ -179,6 +179,35 @@ def test_closing_chat_stream_marks_started_task_stopped(tmp_path):
     assert task_center.get_task(first["data"]["task_id"]).status == "stopped"
 
 
+def test_active_chat_task_can_be_cancelled_through_task_api(tmp_path):
+    client, sessions, task_center = _client(tmp_path)
+    session = sessions.create("chat")
+    route = next(route for route in client.app.routes if getattr(route, "path", None) == "/api/chat/stream")
+    response = route.endpoint(ChatRequest(session_id=session.id, message="stop me"))
+
+    async def cancel_after_task_started():
+        first = json.loads(await anext(response.body_iterator))
+        cancelled = client.delete(f"/api/tasks/{first['data']['task_id']}")
+        await response.body_iterator.aclose()
+        return first, cancelled
+
+    first, cancelled = asyncio.run(cancel_after_task_started())
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "stopped"
+    assert task_center.get_task(first["data"]["task_id"]).status == "stopped"
+
+
+def test_cancelling_a_terminal_task_is_idempotent(tmp_path):
+    client, sessions, task_center = _client(tmp_path)
+    task = task_center.create_task("session-a", "done")
+    task_center.complete(task.id)
+
+    response = client.delete(f"/api/tasks/{task.id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+
 def test_duplicate_concurrent_approval_does_not_change_completed_task(tmp_path):
     class Provider:
         def __init__(self):

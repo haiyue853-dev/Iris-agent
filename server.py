@@ -33,6 +33,7 @@ app = create_app(
     qq_ws_path=application.settings.gateway.qq.path,
     wecom_callback_path=application.settings.gateway.wecom.callback_path,
     chat_attachments=application.chat_attachments,
+    settings_profiles=application.settings_profiles,
 )
 scheduler = AutomationScheduler(application.automation)
 attachment_cleanup_scheduler = AttachmentCleanupScheduler(
@@ -62,6 +63,7 @@ def stop_automation_scheduler() -> None:
     scheduler.stop()
     if curator_scheduler is not None:
         curator_scheduler.stop()
+    application.close()
 
 
 if __name__ == "__main__":

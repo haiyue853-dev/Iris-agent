@@ -5,6 +5,23 @@ import { describe, expect, it, vi } from 'vitest';
 import Sidebar from './Sidebar';
 
 describe('Sidebar navigation', () => {
+  const renderSidebar = (overrides: Partial<React.ComponentProps<typeof Sidebar>> = {}) => render(
+    <Sidebar collapsed={false} onToggle={vi.fn()} onNewChat={vi.fn()} currentSessionId="" sessions={[]} onSessionSwitch={vi.fn()} onSessionDelete={vi.fn()} activeView="chat" onViewChange={vi.fn()} {...overrides} />,
+  );
+
+  it('keeps all navigation regions in the compact sidebar', () => {
+    renderSidebar({ sessions: [{ id: 's1', name: '设计讨论', created_at: 1, updated_at: 1 }] });
+    expect(screen.getByText('Iris')).toBeVisible();
+    expect(screen.getByRole('button', { name: /新建会话/ })).toBeVisible();
+    expect(screen.getByRole('navigation', { name: '功能导航' })).toBeVisible();
+    expect(screen.getByRole('navigation', { name: '历史对话' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '设置' })).toBeVisible();
+  });
+
+  it('exposes the collapsed state on the sidebar shell', () => {
+    const { container } = renderSidebar({ collapsed: true });
+    expect(container.querySelector('.iris-sidebar')).toHaveAttribute('data-collapsed', 'true');
+  });
   it('switches from chat to the independent AI daily report view', async () => {
     const onViewChange = vi.fn();
     render(

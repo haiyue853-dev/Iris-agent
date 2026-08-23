@@ -1,9 +1,11 @@
 import json
 import threading
-from collections.abc import Iterator
+from contextlib import nullcontext
+from collections.abc import Callable, Iterator
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from iris_agent.core.errors import ToolApprovalNotFoundError
-from iris_agent.core.models import AgentEvent, Message, ToolCall
+from iris_agent.core.models import AgentEvent, Message, ProviderResponse, ToolCall
 from iris_agent.context_compression.compressor import ContextCompressor
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.service import ProfileService
@@ -16,18 +18,56 @@ from iris_agent.attachments.service import AttachmentService
 
 class AgentLoop:
     def __init__(self, provider: ModelProvider, tools: ToolRegistry, max_tool_rounds: int = 8):
-        self.provider = provider
+        self._provider = provider
+        self._provider_lock = threading.RLock()
         self.tools = tools
         self.max_tool_rounds = max_tool_rounds
 
-    def run(self, messages: list[Message], tools: ToolRegistry | None = None) -> Iterator[AgentEvent]:
+    @property
+    def provider(self) -> ModelProvider:
+        return self.get_provider()
+
+    def get_provider(self) -> ModelProvider:
+        with self._provider_lock:
+            return self._provider
+
+    def replace_provider(self, provider: ModelProvider) -> None:
+        with self._provider_lock:
+            self._provider = provider
+
+    def run(self, messages: list[Message], tools: ToolRegistry | None = None, is_cancelled: Callable[[], bool] | None = None) -> Iterator[AgentEvent]:
+        with self._provider_lock:
+            provider = self._provider
+        lease = getattr(provider, "lease", None)
+        context = lease() if callable(lease) else nullcontext(provider)
+        with context as request_provider:
+            yield from self._run_with_provider(request_provider, messages, tools, is_cancelled)
+
+    def _run_with_provider(self, provider: ModelProvider, messages: list[Message], tools: ToolRegistry | None = None, is_cancelled: Callable[[], bool] | None = None) -> Iterator[AgentEvent]:
         registry = tools or self.tools
+        cancelled = is_cancelled or (lambda: False)
         working = list(messages)
         tool_rounds = 0
         while True:
-            response = self.provider.complete(working, registry.schemas())
+            if cancelled():
+                return
+            stream = getattr(provider, "stream", None)
+            if callable(stream):
+                content_parts: list[str] = []
+                tool_calls: list[ToolCall] = []
+                for chunk in stream(working, registry.schemas()):
+                    if cancelled():
+                        return
+                    if chunk.content:
+                        content_parts.append(chunk.content)
+                        yield AgentEvent("text_delta", {"content": chunk.content})
+                    if chunk.tool_calls:
+                        tool_calls = chunk.tool_calls
+                response = ProviderResponse("".join(content_parts), tool_calls)
+            else:
+                response = provider.complete(working, registry.schemas())
             if not response.tool_calls:
-                if response.content:
+                if response.content and not callable(stream):
                     yield AgentEvent("text_delta", {"content": response.content})
                 yield AgentEvent("message_completed", {"content": response.content})
                 return
@@ -36,7 +76,51 @@ class AgentLoop:
                 return
             tool_rounds += 1
             working.append(Message(role="assistant", content=response.content, tool_calls=response.tool_calls))
-            for call in response.tool_calls:
+            call_index = 0
+            while call_index < len(response.tool_calls):
+                call = response.tool_calls[call_index]
+                fetch_batch: list[ToolCall] = []
+                while (
+                    call_index < len(response.tool_calls)
+                    and response.tool_calls[call_index].name == "fetch_page"
+                    and not response.tool_calls[call_index].argument_error
+                    and not registry.requires_approval("fetch_page")
+                ):
+                    fetch_batch.append(response.tool_calls[call_index])
+                    call_index += 1
+                if len(fetch_batch) >= 2:
+                    for fetch_call in fetch_batch:
+                        yield AgentEvent("tool_started", {"call_id": fetch_call.id, "name": fetch_call.name, "arguments": fetch_call.arguments})
+                    executor = ThreadPoolExecutor(max_workers=min(3, len(fetch_batch)), thread_name_prefix="iris-fetch")
+                    futures = [executor.submit(registry.invoke, fetch_call.name, fetch_call.arguments) for fetch_call in fetch_batch]
+                    pending = set(futures)
+                    while pending:
+                        if cancelled():
+                            for future in pending:
+                                future.cancel()
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            return
+                        _, pending = wait(pending, timeout=0.05, return_when=FIRST_COMPLETED)
+                    executor.shutdown(wait=True)
+                    if cancelled():
+                        return
+                    for fetch_call, future in zip(fetch_batch, futures):
+                        result = future.result()
+                        data = {"call_id": fetch_call.id, "name": fetch_call.name, "ok": result.ok}
+                        if result.ok:
+                            data["result"] = result.value
+                        else:
+                            data.update({"error_code": result.error_code, "error_message": result.error_message})
+                        yield AgentEvent("tool_finished", data)
+                        content = json.dumps(result.value if result.ok else {"error": result.error_code, "message": result.error_message}, ensure_ascii=False)
+                        working.append(Message(role="tool", content=content, tool_call_id=fetch_call.id, name=fetch_call.name))
+                    continue
+                if fetch_batch:
+                    call = fetch_batch[0]
+                else:
+                    call_index += 1
+                if cancelled():
+                    return
                 yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
                 if registry.requires_approval(call.name):
                     yield AgentEvent("tool_approval_requested", {
@@ -51,6 +135,8 @@ class AgentLoop:
                     result = ToolExecutionResult(False, error_code=call.argument_error, error_message="工具参数不是有效 JSON")
                 else:
                     result = registry.invoke(call.name, call.arguments)
+                if cancelled():
+                    return
                 data = {"call_id": call.id, "name": call.name, "ok": result.ok}
                 if result.ok:
                     data["result"] = result.value
@@ -70,7 +156,7 @@ class AgentService:
         self.profile_service = profile_service
         self.compressor = compressor
         self.attachment_service = attachment_service
-        self._pending_approvals: dict[tuple[str, str], tuple[ToolCall, ToolRegistry]] = {}
+        self._pending_approvals: dict[tuple[str, str], tuple[ToolCall, ToolRegistry, Callable[[], bool]]] = {}
         self._approval_lock = threading.RLock()
 
     def _build_messages(self, session: Session) -> list[Message]:
@@ -100,12 +186,12 @@ class AgentService:
                 messages.append(message)
         return messages
 
-    def run(self, session_id: str, user_message: str, attachment_ids: list[str] | None = None) -> Iterator[AgentEvent]:
+    def run(self, session_id: str, user_message: str, attachment_ids: list[str] | None = None, is_cancelled: Callable[[], bool] | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
             self.sessions.append(session_id, Message(role="user", content=user_message, attachment_ids=list(attachment_ids or [])))
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
-            yield from self._run_loop(session_id, messages, self._registry_for(session_id))
+            yield from self._run_loop(session_id, messages, self._registry_for(session_id), is_cancelled)
             if self.profile_service is not None:
                 self.profile_service.maybe_update(user_message)
 
@@ -115,17 +201,21 @@ class AgentService:
                 pending = self._pending_approvals.pop((session_id, call_id), None)
             if pending is None:
                 raise ToolApprovalNotFoundError("待确认的工具调用不存在或已处理")
-            call, registry = pending
+            call, registry, is_cancelled = pending
+            if is_cancelled():
+                return
             if approved:
                 result = registry.invoke(call.name, call.arguments)
             else:
                 result = ToolExecutionResult(False, error_code="tool_approval_rejected", error_message="用户拒绝执行此工具调用")
+            if is_cancelled():
+                return
             event = self._tool_finished_event(call, result)
             self._persist_tool_result(session_id, event)
             yield event
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
-            yield from self._run_loop(session_id, messages, registry)
+            yield from self._run_loop(session_id, messages, registry, is_cancelled)
 
     def cancel_tool_approval(self, session_id: str, call_id: str) -> bool:
         """Discard a pending approval without invoking its tool."""
@@ -139,15 +229,16 @@ class AgentService:
             registry.register(build_read_attachment_tool(self.attachment_service, session_id))
         return registry
 
-    def _run_loop(self, session_id: str, messages: list[Message], registry: ToolRegistry) -> Iterator[AgentEvent]:
-        for event in self.loop.run(messages, registry):
+    def _run_loop(self, session_id: str, messages: list[Message], registry: ToolRegistry, is_cancelled: Callable[[], bool] | None = None) -> Iterator[AgentEvent]:
+        cancelled = is_cancelled or (lambda: False)
+        for event in self.loop.run(messages, registry, cancelled):
             if event.type == "tool_started":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
                 self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
             elif event.type == "tool_approval_requested":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
                 with self._approval_lock:
-                    self._pending_approvals[(session_id, call.id)] = (call, registry)
+                    self._pending_approvals[(session_id, call.id)] = (call, registry, cancelled)
             elif event.type == "tool_finished":
                 self._persist_tool_result(session_id, event)
             elif event.type == "message_completed":

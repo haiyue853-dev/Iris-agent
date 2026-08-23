@@ -32,8 +32,16 @@ export type PendingAttachment = Omit<ChatAttachment, 'id' | 'media_type' | 'size
 export type Message = {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
+  sources?: ChatSource[];
   attachment_ids?: string[];
   attachments?: ChatAttachment[];
+};
+
+export type ChatSource = {
+  id: string;
+  url: string;
+  title?: string;
 };
 export type Session = { id: string; name: string; created_at: number; updated_at: number };
 
@@ -78,11 +86,48 @@ export type WorldNewsItem = {
 export type TechNewsItem = WorldNewsItem;
 
 // ---------- AI 配置设置 ----------
-export type SettingsState = {
-  model: string;
+export type ApiProfile = {
+  id: string;
+  name: string;
   base_url: string;
+  model: string;
   api_key_set: boolean;
   api_key_masked: string;
+  last_test_status: 'untested' | 'connected' | 'failed';
+  last_tested_at: string | null;
+};
+
+export type SettingsProfilesState = {
+  active_id: string;
+  profiles: ApiProfile[];
+};
+
+export type SettingsConnectionResult = {
+  ok: boolean;
+  code: string;
+  message: string;
+};
+
+export type CreateProfileInput = {
+  name: string;
+  base_url: string;
+  model: string;
+  api_key?: string;
+};
+
+export type UpdateProfileInput = {
+  name?: string;
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+};
+
+export type ConnectionTestInput = {
+  base_url: string;
+  model: string;
+  api_key?: string;
+  profile_id?: string;
 };
 
 // ---------- UML 流程图生成 ----------

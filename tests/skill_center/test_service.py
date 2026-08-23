@@ -19,7 +19,8 @@ def _build_service(tmp_path: Path) -> SkillCenterService:
 def test_all_skills_enabled_by_default(tmp_path):
     service = _build_service(tmp_path)
     skills = service.list_skills()
-    assert len(skills) == 3
+    expected_bundled_ids = {"daily-report", "uml", "hot-radar", "web-research"}
+    assert expected_bundled_ids <= {skill.id for skill in skills}
     assert all(s.enabled for s in skills)
 
 

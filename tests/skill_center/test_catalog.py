@@ -35,7 +35,7 @@ def test_loads_bundled_skills_without_document_workbench():
     catalog = SkillCatalog(BUNDLED)
     skills = catalog.list()
     ids = {s.id for s in skills}
-    assert ids == {"daily-report", "uml", "hot-radar"}
+    assert ids == {"daily-report", "uml", "hot-radar", "web-research"}
     for s in skills:
         assert s.name and s.description and s.entry_view and s.icon
 
@@ -46,6 +46,19 @@ def test_bundled_skill_has_expected_entry_views():
     assert views["daily-report"] == "reports"
     assert views["uml"] == "uml"
     assert views["hot-radar"] == "radar"
+
+
+def test_catalog_discovers_and_reads_web_research_skill():
+    skill = SkillCatalog(BUNDLED).get("web-research")
+
+    assert skill is not None
+    assert skill.name == "web-research"
+    assert skill.description
+    assert skill.icon and skill.category
+    assert skill.entry_view == "chat"
+    assert skill.version >= 1
+    assert skill.source == "bundled"
+    assert skill.body.strip()
 
 
 def test_rejects_missing_required_field(tmp_path):
@@ -85,3 +98,12 @@ def test_catalog_parses_body_and_source(tmp_path):
     skill = SkillCatalog(tmp_path).get("demo-skill")
     assert skill.body == "# Demo\n这是正文指令"
     assert skill.source == "bundled"
+
+
+def test_web_research_defaults_to_a_bounded_quick_mode():
+    skill = SkillCatalog(BUNDLED).get("web-research")
+
+    assert "一次精准搜索" in skill.body
+    assert "最多读取两个" in skill.body
+    assert "明确要求深入研究" in skill.body
+    assert "最多读取三个" in skill.body

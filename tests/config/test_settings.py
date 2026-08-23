@@ -13,6 +13,180 @@ def test_environment_overrides_yaml(tmp_path, monkeypatch):
     assert load_settings(path).llm.model == "env-model"
 
 
+def test_tavily_key_comes_only_from_environment(tmp_path, monkeypatch):
+    path = tmp_path / "agent.yaml"
+    path.write_text("web_search:\n  tavily_api_key: yaml-secret\n", encoding="utf-8")
+    monkeypatch.setenv("TAVILY_API_KEY", "env-secret")
+
+    assert load_settings(path).web_search.tavily_api_key == "env-secret"
+
+
+def test_tavily_key_is_excluded_from_settings_repr(tmp_path, monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "super-secret-tavily-key")
+
+    settings = load_settings(tmp_path / "missing.yaml")
+
+    assert "super-secret-tavily-key" not in repr(settings.web_search)
+    assert "super-secret-tavily-key" not in repr(settings)
+
+
+def test_tavily_yaml_key_is_ignored_when_environment_missing(tmp_path, monkeypatch):
+    path = tmp_path / "agent.yaml"
+    path.write_text("web_search:\n  tavily_api_key: yaml-secret\n", encoding="utf-8")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    assert load_settings(path).web_search.tavily_api_key == ""
+
+
+def test_tavily_settings_defaults(tmp_path, monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    web_search = load_settings(tmp_path / "missing.yaml").web_search
+
+    assert web_search.enable_tavily is True
+    assert web_search.tavily_api_key == ""
+    assert web_search.default_search_depth == "basic"
+    assert web_search.max_download_bytes == 2_000_000
+    assert web_search.timeout_seconds == 6
+    assert web_search.max_retries == 1
+
+
+def test_tavily_non_secret_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "web_search:\n  enable_tavily: false\n  default_search_depth: advanced\n",
+        encoding="utf-8",
+    )
+
+    web_search = load_settings(path).web_search
+
+    assert web_search.enable_tavily is False
+    assert web_search.default_search_depth == "advanced"
+
+
+def test_tavily_search_depth_must_be_supported(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("web_search:\n  default_search_depth: exhaustive\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError):
+        load_settings(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_results", 0),
+        ("max_results", 21),
+        ("timeout_seconds", 0),
+        ("max_snippet_chars", 0),
+        ("max_page_chars", 0),
+        ("min_text_chars", 0),
+        ("max_retries", 0),
+    ],
+)
+def test_web_search_numeric_settings_reject_invalid_ranges(tmp_path, field, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  {field}: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("max_results", [1, 20])
+def test_web_search_max_results_accepts_boundaries(tmp_path, max_results):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  max_results: {max_results}\n", encoding="utf-8")
+
+    assert load_settings(path).web_search.max_results == max_results
+
+
+@pytest.mark.parametrize("max_download_bytes", [1, 20_000_000])
+def test_web_search_max_download_bytes_accepts_boundaries(tmp_path, max_download_bytes):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        f"web_search:\n  max_download_bytes: {max_download_bytes}\n",
+        encoding="utf-8",
+    )
+
+    assert load_settings(path).web_search.max_download_bytes == max_download_bytes
+
+
+@pytest.mark.parametrize("value", [0, -1, 20_000_001, "not-a-number"])
+def test_web_search_max_download_bytes_rejects_invalid_values(tmp_path, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  max_download_bytes: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="max_download_bytes"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_results", "not-a-number"),
+        ("max_snippet_chars", "not-a-number"),
+        ("max_page_chars", "not-a-number"),
+        ("min_text_chars", "not-a-number"),
+        ("max_retries", "not-a-number"),
+        ("timeout_seconds", "not-a-number"),
+    ],
+)
+def test_web_search_numeric_settings_wrap_conversion_errors(tmp_path, field, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  {field}: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=field):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("value", [".nan", ".inf", "-.inf"])
+def test_web_search_timeout_rejects_non_finite_values(tmp_path, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  timeout_seconds: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="timeout_seconds"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["max_results", "max_snippet_chars", "max_page_chars", "min_text_chars", "max_retries"],
+)
+def test_web_search_integer_settings_reject_negative_values(tmp_path, field):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  {field}: -1\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError):
+        load_settings(path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "max_results",
+        "max_snippet_chars",
+        "max_page_chars",
+        "max_download_bytes",
+        "min_text_chars",
+        "max_retries",
+    ],
+)
+@pytest.mark.parametrize("yaml_value", ["true", "1.0", "'1.5'", "'1e2'"])
+def test_web_search_integer_settings_reject_non_integer_types(tmp_path, field, yaml_value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"web_search:\n  {field}: {yaml_value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=field):
+        load_settings(path)
+
+
+def test_web_search_integer_settings_accept_decimal_strings(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("web_search:\n  max_results: '20'\n", encoding="utf-8")
+
+    assert load_settings(path).web_search.max_results == 20
+
+
 def test_explicit_override_wins_over_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "env-model")
     assert load_settings(tmp_path / "missing.yaml", model="explicit").llm.model == "explicit"

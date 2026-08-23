@@ -7,6 +7,7 @@ from iris_agent.knowledge.retriever import HybridRetriever, KeywordRetriever
 from iris_agent.reports.attachments import AttachmentRepository
 from iris_agent.reports.service import DailyReportService
 from iris_agent.mcp_center.service import McpServer, McpCenterService
+from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSource, TavilySearchSource
 
 
 def _write_config(tmp_path: Path) -> Path:
@@ -235,9 +236,278 @@ def test_build_application_default_search_sources_are_bing_only(tmp_path, monkey
     application = build_application(config)
 
     assert application.settings.web_search.enable_duckduckgo is False
-    assert application.settings.web_search.max_retries == 2
+    assert application.settings.web_search.max_retries == 1
+    assert application.settings.web_search.timeout_seconds == 6
     assert application.settings.web_search.enable_browser_fallback is False
     assert application.settings.web_search.browser_channel == "msedge"
+
+
+def _capture_web_search_client(monkeypatch):
+    captured = {}
+
+    class FakeWebSearchClient:
+        last_error = None
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def search(self, query, limit=None, options=None):
+            return []
+
+    monkeypatch.setattr("iris_agent.bootstrap.WebSearchClient", FakeWebSearchClient)
+    return captured
+
+
+def test_build_application_does_not_add_tavily_without_key(tmp_path, monkeypatch):
+    captured = _capture_web_search_client(monkeypatch)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+    build_application(_write_config(tmp_path))
+
+    assert [type(source) for source in captured["sources"]] == [BingSearchSource]
+
+
+def test_build_application_adds_tavily_first_when_key_present(tmp_path, monkeypatch):
+    captured = _capture_web_search_client(monkeypatch)
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "web_search:\n  enable_duckduckgo: true\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert [type(source) for source in captured["sources"]] == [
+        TavilySearchSource,
+        BingSearchSource,
+        DuckDuckGoSearchSource,
+    ]
+
+
+def test_build_application_respects_disabled_tavily(tmp_path, monkeypatch):
+    captured = _capture_web_search_client(monkeypatch)
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "web_search:\n  enable_tavily: false\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert [type(source) for source in captured["sources"]] == [BingSearchSource]
+
+
+def test_build_application_passes_search_retries(tmp_path, monkeypatch):
+    captured = _capture_web_search_client(monkeypatch)
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "web_search:\n  max_retries: 7\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert captured["max_retries"] == 7
+
+
+def test_build_application_passes_configured_default_search_depth(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_build_web_search_tool(client, default_search_depth="basic"):
+        captured["default_search_depth"] = default_search_depth
+        from iris_agent.tools.builtin.web_tools import build_web_search_tool
+        return build_web_search_tool(client, default_search_depth=default_search_depth)
+
+    monkeypatch.setattr("iris_agent.bootstrap.build_web_search_tool", fake_build_web_search_tool)
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "web_search:\n  default_search_depth: advanced\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert captured["default_search_depth"] == "advanced"
+
+
+def test_build_application_passes_max_download_bytes_to_page_fetcher(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakePageFetcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def fetch(self, url):
+            return ""
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("iris_agent.bootstrap.PageFetcher", FakePageFetcher)
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "web_search:\n  max_download_bytes: 123456\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert captured["max_download_bytes"] == 123456
+
+
+def test_build_application_passes_max_download_bytes_to_browser_fetcher(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeBrowserFetcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def fetch(self, url):
+            return ""
+
+    monkeypatch.setattr("iris_agent.bootstrap.BrowserFetcher", FakeBrowserFetcher)
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "web_search:\n  enable_browser_fallback: true\n  max_download_bytes: 654321\n  timeout_seconds: 7.5\n",
+        encoding="utf-8",
+    )
+
+    build_application(config)
+
+    assert captured["max_download_bytes"] == 654321
+    assert captured["timeout"] == 7.5
+
+
+def test_application_close_releases_tavily_once(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    monkeypatch.setattr("iris_agent.bootstrap.TavilySearchSource.close", lambda self: calls.append(self))
+
+    application = build_application(_write_config(tmp_path))
+    application.close()
+    application.close()
+
+    assert len(calls) == 1
+
+
+def test_application_close_runs_all_closers_in_reverse_and_reraises_first_error():
+    calls = []
+
+    def closer(name, error=None):
+        def run():
+            calls.append(name)
+            if error is not None:
+                raise error
+        return run
+
+    application = object.__new__(ApplicationServices)
+    object.__setattr__(
+        application,
+        "_closers",
+        (closer("first", ValueError("first error")), closer("second"), closer("third", RuntimeError("third error"))),
+    )
+    object.__setattr__(application, "_closed", False)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="third error"):
+        application.close()
+    application.close()
+
+    assert calls == ["third", "second", "first"]
+
+
+def test_multiple_applications_own_independent_tavily_resources(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    monkeypatch.setattr("iris_agent.bootstrap.TavilySearchSource.close", lambda self: calls.append(self))
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = build_application(_write_config(first_root))
+    second = build_application(_write_config(second_root))
+    first.close()
+    second.close()
+
+    assert len(calls) == 2
+    assert calls[0] is not calls[1]
+
+
+def test_build_failure_releases_created_tavily(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    monkeypatch.setattr("iris_agent.bootstrap.TavilySearchSource.close", lambda self: calls.append(self))
+
+    def fail_repository(*args, **kwargs):
+        raise RuntimeError("build failed")
+
+    monkeypatch.setattr("iris_agent.bootstrap.KnowledgeRepository", fail_repository)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="build failed"):
+        build_application(_write_config(tmp_path))
+
+    assert len(calls) == 1
+
+
+def test_application_close_releases_owned_html_sources_and_page_fetcher(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr("iris_agent.bootstrap.BingSearchSource.close", lambda self: calls.append("bing"))
+    monkeypatch.setattr("iris_agent.bootstrap.DuckDuckGoSearchSource.close", lambda self: calls.append("ddg"))
+    monkeypatch.setattr("iris_agent.bootstrap.PageFetcher.close", lambda self: calls.append("page"))
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8") + "web_search:\n  enable_duckduckgo: true\n",
+        encoding="utf-8",
+    )
+
+    application = build_application(config)
+    application.close()
+
+    assert calls == ["page", "ddg", "bing"]
+
+
+def test_multiple_applications_release_their_own_html_and_page_resources(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr("iris_agent.bootstrap.BingSearchSource.close", lambda self: calls.append(("bing", self)))
+    monkeypatch.setattr("iris_agent.bootstrap.PageFetcher.close", lambda self: calls.append(("page", self)))
+    first_root = tmp_path / "first-extra"
+    second_root = tmp_path / "second-extra"
+    first_root.mkdir()
+    second_root.mkdir()
+
+    first = build_application(_write_config(first_root))
+    second = build_application(_write_config(second_root))
+    first.close()
+    second.close()
+
+    assert [name for name, _ in calls] == ["page", "bing", "page", "bing"]
+    assert len({id(resource) for _, resource in calls}) == 4
+
+
+def test_build_failure_releases_html_sources_and_page_fetcher(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr("iris_agent.bootstrap.BingSearchSource.close", lambda self: calls.append("bing"))
+    monkeypatch.setattr("iris_agent.bootstrap.PageFetcher.close", lambda self: calls.append("page"))
+    monkeypatch.setattr(
+        "iris_agent.bootstrap.KnowledgeRepository",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("build failed")),
+    )
+
+    import pytest
+    with pytest.raises(RuntimeError, match="build failed"):
+        build_application(_write_config(tmp_path))
+
+    assert calls == ["page", "bing"]
 
 
 def test_build_application_preserves_existing_services(tmp_path, monkeypatch):
@@ -283,11 +553,12 @@ def test_server_lifecycle_starts_and_stops_task_queue(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(server.application.task_queue, "start", lambda: calls.append("start"))
     monkeypatch.setattr(server.application.task_queue, "stop", lambda: calls.append("stop"))
+    monkeypatch.setattr(type(server.application), "close", lambda self: calls.append("close"))
 
     with TestClient(server.app):
         assert calls == ["start"]
 
-    assert calls == ["start", "stop"]
+    assert calls == ["start", "stop", "close"]
 
 
 def test_build_application_gateway_disabled_by_default(tmp_path, monkeypatch):

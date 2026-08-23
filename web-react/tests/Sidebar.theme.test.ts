@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 const appCss = readFileSync(resolve(process.cwd(), 'src', 'App.css'), 'utf8');
 
 describe('AI daily report sidebar theme', () => {
+  it('defines the compact responsive Iris sidebar', () => {
+    expect(appCss).toContain('.iris-sidebar');
+    expect(appCss).toContain(".iris-sidebar[data-collapsed='true']");
+    expect(appCss).toContain('width: min(86vw, 300px)');
+  });
   it('reuses the shared menu font and interaction states', () => {
     const sharedItemIndex = appCss.indexOf('.view-item {');
     const buttonResetIndex = appCss.indexOf('button.view-item {');

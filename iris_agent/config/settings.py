@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
+import math
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -141,11 +143,15 @@ class ContextSettings:
 @dataclass(slots=True)
 class WebSearchSettings:
     enabled: bool = True
-    timeout_seconds: float = 15
+    timeout_seconds: float = 6
     max_results: int = 5
     max_snippet_chars: int = 300
     max_page_chars: int = 30000
-    max_retries: int = 2
+    max_download_bytes: int = 2_000_000
+    max_retries: int = 1
+    enable_tavily: bool = True
+    tavily_api_key: str = field(default="", repr=False)
+    default_search_depth: str = "basic"
     enable_duckduckgo: bool = False
     enable_browser_fallback: bool = False
     browser_channel: str = "msedge"
@@ -275,6 +281,26 @@ def _split_csv(value: Any) -> list[str]:
     return []
 
 
+def _web_search_int(data: dict[str, Any], name: str, default: int) -> int:
+    value = data.get(name, default)
+    if isinstance(value, bool):
+        raise ConfigurationError(f"web_search.{name} 必须是整数")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if re.fullmatch(r"[+-]?\d+", normalized):
+            return int(normalized)
+    raise ConfigurationError(f"web_search.{name} 必须是整数")
+
+
+def _web_search_float(data: dict[str, Any], name: str, default: float) -> float:
+    try:
+        return float(data.get(name, default))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ConfigurationError(f"web_search.{name} 必须是数字") from exc
+
+
 def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> Settings:
     path = Path(config_path)
     raw: dict[str, Any] = {}
@@ -389,15 +415,19 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         web_search=WebSearchSettings(
             enabled=bool(web_search.get("enabled", True)),
-            timeout_seconds=float(web_search.get("timeout_seconds", 15)),
-            max_results=int(web_search.get("max_results", 5)),
-            max_snippet_chars=int(web_search.get("max_snippet_chars", 300)),
-            max_page_chars=int(web_search.get("max_page_chars", 30000)),
-            max_retries=int(web_search.get("max_retries", 2)),
+            timeout_seconds=_web_search_float(web_search, "timeout_seconds", 6),
+            max_results=_web_search_int(web_search, "max_results", 5),
+            max_snippet_chars=_web_search_int(web_search, "max_snippet_chars", 300),
+            max_page_chars=_web_search_int(web_search, "max_page_chars", 30000),
+            max_download_bytes=_web_search_int(web_search, "max_download_bytes", 2_000_000),
+            max_retries=_web_search_int(web_search, "max_retries", 1),
+            enable_tavily=bool(web_search.get("enable_tavily", True)),
+            tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
+            default_search_depth=str(web_search.get("default_search_depth", "basic")),
             enable_duckduckgo=bool(web_search.get("enable_duckduckgo", False)),
             enable_browser_fallback=bool(web_search.get("enable_browser_fallback", False)),
             browser_channel=str(web_search.get("browser_channel", "msedge")),
-            min_text_chars=int(web_search.get("min_text_chars", 200)),
+            min_text_chars=_web_search_int(web_search, "min_text_chars", 200),
         ),
         knowledge=KnowledgeSettings(
             directory=Path(knowledge.get("directory", "data/knowledge")),
@@ -473,4 +503,15 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         settings.hot_radar.poll_interval_seconds < 1
     ):
         raise ConfigurationError("热点雷达轮询间隔必须大于 0")
+    if settings.web_search.default_search_depth not in {"basic", "advanced"}:
+        raise ConfigurationError("默认搜索深度必须是 basic 或 advanced")
+    if not 1 <= settings.web_search.max_results <= 20:
+        raise ConfigurationError("web_search.max_results 必须在 1 到 20 之间")
+    if not math.isfinite(settings.web_search.timeout_seconds) or settings.web_search.timeout_seconds <= 0:
+        raise ConfigurationError("web_search.timeout_seconds 必须是大于 0 的有限数字")
+    if not 1 <= settings.web_search.max_download_bytes <= 20_000_000:
+        raise ConfigurationError("web_search.max_download_bytes 必须在 1 到 20000000 之间")
+    for field_name in ("max_snippet_chars", "max_page_chars", "min_text_chars", "max_retries"):
+        if getattr(settings.web_search, field_name) < 1:
+            raise ConfigurationError(f"web_search.{field_name} 必须大于或等于 1")
     return settings
