@@ -12,8 +12,8 @@ class ChunkDraft:
     location: str | None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.content, str) or not self.content:
-            raise ValueError("chunk draft content must be non-empty")
+        if not isinstance(self.content, str) or not self.content.strip():
+            raise ValueError("chunk draft content must be non-blank")
 
 
 def _units(text: str) -> list[str]:
@@ -57,4 +57,14 @@ def chunk_text(
             break
     if current:
         completed.append(current)
-    return [ChunkDraft(content=content, location=location) for content in completed]
+    draft_contents: list[str] = []
+    pending_whitespace = ""
+    for content in completed:
+        if content.strip():
+            if draft_contents and pending_whitespace:
+                content = pending_whitespace + content
+            pending_whitespace = ""
+            draft_contents.append(content)
+        else:
+            pending_whitespace += content
+    return [ChunkDraft(content=content, location=location) for content in draft_contents]

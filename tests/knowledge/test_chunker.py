@@ -28,13 +28,21 @@ def test_chunker_returns_no_drafts_for_whitespace():
 
 
 @pytest.mark.parametrize("suffix", [" " * 1000, "\n" * 1000])
-def test_chunker_preserves_whitespace_after_nonblank_text(suffix):
+def test_chunker_discards_whitespace_only_tail_drafts(suffix):
     text = "甲" + suffix
     chunks = chunk_text(text, location="第 4 页", target_chars=800, overlap_chars=0)
 
     assert chunks
     assert all(chunk.location == "第 4 页" for chunk in chunks)
-    assert "".join(chunk.content for chunk in chunks) == text
+    assert all(chunk.content.strip() for chunk in chunks)
+    assert "甲" in "".join(chunk.content for chunk in chunks)
+
+
+def test_chunker_drafts_with_long_whitespace_tail_convert_to_knowledge_chunks():
+    drafts = chunk_text("甲" + " " * 1000, location=None, target_chars=800, overlap_chars=0)
+
+    for ordinal, draft in enumerate(drafts):
+        KnowledgeChunk.new("doc-0123456789abcdef0123456789abcdef", ordinal, draft.content, location=draft.location)
 
 
 def test_chunker_preserves_paragraph_newlines_when_hard_splitting():
