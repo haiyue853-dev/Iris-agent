@@ -45,11 +45,21 @@ def test_chunker_drafts_with_long_whitespace_tail_convert_to_knowledge_chunks():
         KnowledgeChunk.new("doc-0123456789abcdef0123456789abcdef", ordinal, draft.content, location=draft.location)
 
 
+def test_chunker_bounds_internal_long_whitespace_without_losing_neighboring_text():
+    chunks = chunk_text("A" + " " * 1600 + "B", location=None, target_chars=800, overlap_chars=0)
+
+    assert all(len(chunk.content) <= 800 for chunk in chunks)
+    assert all(chunk.content.strip() for chunk in chunks)
+    assert "A" in "".join(chunk.content for chunk in chunks)
+    assert "B" in "".join(chunk.content for chunk in chunks)
+
+
 def test_chunker_preserves_paragraph_newlines_when_hard_splitting():
     text = "甲\n\n乙"
-    chunks = chunk_text(text, location=None, target_chars=1, overlap_chars=0)
+    chunks = chunk_text(text, location=None, target_chars=3, overlap_chars=0)
 
     assert "".join(chunk.content for chunk in chunks) == text
+    assert all(len(chunk.content) <= 3 for chunk in chunks)
 
 
 def test_chunker_hard_split_never_exceeds_target_when_remainder_exactly_fills_target():

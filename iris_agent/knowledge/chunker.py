@@ -62,7 +62,8 @@ def chunk_text(
     for content in completed:
         if content.strip():
             if draft_contents and pending_whitespace:
-                content = pending_whitespace + content
+                capacity = target_chars - len(content)
+                content = (pending_whitespace[-capacity:] if capacity > 0 else "") + content
             pending_whitespace = ""
             draft_contents.append(content)
         else:
