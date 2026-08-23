@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ _CHUNK_FIELDS = frozenset({"id", "document_id", "ordinal", "content", "location"
 
 
 def _is_timestamp(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 @dataclass(frozen=True, slots=True)

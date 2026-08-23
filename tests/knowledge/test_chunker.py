@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import multiprocessing
 
 import pytest
@@ -27,12 +28,20 @@ def test_chunker_returns_no_drafts_for_whitespace():
 
 
 @pytest.mark.parametrize("suffix", [" " * 1000, "\n" * 1000])
-def test_chunker_ignores_whitespace_only_chunks_after_nonblank_text(suffix):
-    chunks = chunk_text("甲" + suffix, location="第 4 页", target_chars=800, overlap_chars=120)
+def test_chunker_preserves_whitespace_after_nonblank_text(suffix):
+    text = "甲" + suffix
+    chunks = chunk_text(text, location="第 4 页", target_chars=800, overlap_chars=0)
 
     assert chunks
-    assert all(chunk.content.strip() and chunk.location == "第 4 页" for chunk in chunks)
-    assert "甲" in "".join(chunk.content for chunk in chunks)
+    assert all(chunk.location == "第 4 页" for chunk in chunks)
+    assert "".join(chunk.content for chunk in chunks) == text
+
+
+def test_chunker_preserves_paragraph_newlines_when_hard_splitting():
+    text = "甲\n\n乙"
+    chunks = chunk_text(text, location=None, target_chars=1, overlap_chars=0)
+
+    assert "".join(chunk.content for chunk in chunks) == text
 
 
 def test_chunker_hard_splits_oversized_unbroken_text_without_losing_content():
@@ -78,6 +87,16 @@ def test_chunk_from_dict_rejects_a_tampered_content_hash():
 
     with pytest.raises(ValueError, match="content hash"):
         KnowledgeChunk.from_dict(data)
+
+
+@pytest.mark.parametrize("timestamp", [math.nan, math.inf, -math.inf])
+def test_document_rejects_non_finite_timestamps(timestamp):
+    with pytest.raises(ValueError, match="timestamp"):
+        KnowledgeDocument(
+            id="doc-0123456789abcdef0123456789abcdef", title="标题", source_type="manual", media_type=None,
+            size_bytes=0, original_name=None, status="ready", error_message=None,
+            created_at=timestamp, updated_at=1.0,
+        )
 
 
 @pytest.mark.parametrize(
