@@ -323,7 +323,7 @@ export type MemoryEntry = {
 };
 
 // ---------- 知识库 ----------
-export type KnowledgeSourceType = 'scrape' | 'manual';
+export type KnowledgeSourceType = 'scrape' | 'manual' | 'upload';
 
 export type KnowledgeEntry = {
   id: string;

@@ -148,7 +148,7 @@ class AgentLoop:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None, compressor: ContextCompressor | None = None, attachment_service: AttachmentService | None = None):
+    def __init__(self, loop: AgentLoop, sessions: SessionRepository, system_prompt: str, memory: MemoryService | None = None, profile_service: ProfileService | None = None, compressor: ContextCompressor | None = None, attachment_service: AttachmentService | None = None, knowledge=None):
         self.loop = loop
         self.sessions = sessions
         self.system_prompt = system_prompt
@@ -156,6 +156,7 @@ class AgentService:
         self.profile_service = profile_service
         self.compressor = compressor
         self.attachment_service = attachment_service
+        self.knowledge = knowledge
         self._pending_approvals: dict[tuple[str, str], tuple[ToolCall, ToolRegistry, Callable[[], bool]]] = {}
         self._approval_lock = threading.RLock()
 
@@ -171,6 +172,13 @@ class AgentService:
         if self.memory is not None:
             for memory in self.memory.inject():
                 messages.append(Message(role="system", content=f"[记忆·{memory.category}] {memory.content}"))
+        if self.knowledge is not None and session.messages:
+            try:
+                context, _ = self.knowledge.context_for(session.messages[-1].content)
+                if context:
+                    messages.append(Message(role="system", content=context))
+            except Exception:
+                pass
         for message in session.messages:
             if message.attachment_ids and self.attachment_service is not None:
                 details = []

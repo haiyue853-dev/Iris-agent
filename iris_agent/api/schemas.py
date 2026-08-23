@@ -48,6 +48,13 @@ class KnowledgeCreateRequest(BaseModel):
     source_url: str | None = Field(default=None, max_length=2000)
 
 
+class KnowledgeUploadRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    original_name: str = Field(min_length=1, max_length=255)
+    media_type: str | None = Field(default=None, max_length=200)
+    content_base64: str = Field(min_length=1)
+
+
 class CuratorApplyRequest(BaseModel):
     suggestion_ids: list[str] | None = None
     all: bool = False

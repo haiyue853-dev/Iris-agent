@@ -37,6 +37,16 @@ class KeywordSearchHit:
     score: float
 
 
+@dataclass(frozen=True, slots=True)
+class EmbeddingSearchCandidate:
+    chunk_id: str
+    document_id: str
+    title: str
+    content: str
+    location: str | None
+    vector: list[float]
+
+
 EmbeddingMappings: TypeAlias = Mapping[str, Sequence[float]] | Iterable[tuple[str, Sequence[float]]]
 
 
@@ -192,6 +202,32 @@ class SqliteKnowledgeRepository:
         except sqlite3.Error as exc:
             raise SqliteKnowledgeRepositoryError("unable to count knowledge embeddings") from exc
         return int(row["count"])
+
+    def embedding_candidates(self, limit: int = 200) -> list[EmbeddingSearchCandidate]:
+        self._validate_limit(limit)
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """SELECT e.chunk_id, c.document_id, d.title, c.content, c.location, e.vector_json
+                       FROM chunk_embeddings AS e JOIN chunks AS c ON c.id = e.chunk_id
+                       JOIN documents AS d ON d.id = c.document_id
+                       WHERE d.status = 'ready' ORDER BY c.ordinal LIMIT ?""", (limit,)
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise SqliteKnowledgeRepositoryError("unable to read knowledge embeddings") from exc
+        return [EmbeddingSearchCandidate(
+            chunk_id=row["chunk_id"], document_id=row["document_id"], title=row["title"],
+            content=row["content"], location=row["location"], vector=json.loads(row["vector_json"]),
+        ) for row in rows]
+
+    def chunks_for_document(self, document_id: str) -> list[KnowledgeChunk]:
+        self._validate_document_id(document_id)
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute("SELECT * FROM chunks WHERE document_id = ? ORDER BY ordinal", (document_id,)).fetchall()
+        except sqlite3.Error as exc:
+            raise SqliteKnowledgeRepositoryError("unable to read knowledge chunks") from exc
+        return [KnowledgeChunk(**dict(row)) for row in rows]
 
     def migrate_legacy(self, legacy: KnowledgeRepository) -> int:
         if not isinstance(legacy, KnowledgeRepository):

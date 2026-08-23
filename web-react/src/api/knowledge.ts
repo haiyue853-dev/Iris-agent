@@ -12,7 +12,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function listKnowledge(): Promise<KnowledgeEntry[]> {
-  return (await request<{ entries: KnowledgeEntry[] }>('/api/knowledge')).entries;
+  const result = await request<{ entries?: KnowledgeEntry[]; documents?: KnowledgeEntry[] }>('/api/knowledge');
+  return result.documents || result.entries || [];
 }
 
 export async function createKnowledge(input: {
@@ -45,4 +46,17 @@ export async function searchKnowledge(query: string, limit?: number): Promise<Kn
   const params = new URLSearchParams({ query });
   if (limit) params.set('limit', String(limit));
   return (await request<{ hits: KnowledgeSearchHit[] }>(`/api/knowledge/search?${params.toString()}`)).hits;
+}
+
+export async function uploadKnowledge(file: File, title = ''): Promise<KnowledgeEntry> {
+  const contentBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  return request<KnowledgeEntry>('/api/knowledge/upload', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, original_name: file.name, media_type: file.type || null, content_base64: contentBase64 }),
+  });
 }

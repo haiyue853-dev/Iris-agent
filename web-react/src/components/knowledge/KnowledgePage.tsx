@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { createKnowledge, deleteKnowledge, getKnowledge, listKnowledge, searchKnowledge } from '../../api/knowledge';
+import { createKnowledge, deleteKnowledge, getKnowledge, listKnowledge, searchKnowledge, uploadKnowledge } from '../../api/knowledge';
 import type { KnowledgeDetail, KnowledgeEntry, KnowledgeSearchHit } from '../../types';
 
 function formatTime(ts: number): string {
@@ -18,6 +18,7 @@ export default function KnowledgePage() {
   const [question, setQuestion] = useState('');
   const [hits, setHits] = useState<KnowledgeSearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,6 +88,12 @@ export default function KnowledgePage() {
       setSearching(false);
     }
   };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try { const document = await uploadKnowledge(file); setEntries((prev) => [document, ...prev]); setError(false); }
+    catch { setError(true); } finally { setUploading(false); }
+  };
 
   return (
     <section className="knowledge-page" aria-label="知识库">
@@ -104,6 +111,7 @@ export default function KnowledgePage() {
         <input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="来源链接（可选）" maxLength={2000} />
         <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="正文内容" rows={5} />
         <button onClick={() => void add()} disabled={!title.trim() || !content.trim()}>添加到知识库</button>
+        <label>导入本地文件（PDF、Word、Excel、Markdown、TXT）<input type="file" accept=".pdf,.docx,.xlsx,.xls,.md,.txt" onChange={(event) => void upload(event.target.files?.[0])} disabled={uploading} /></label>
       </div>
 
       <div className="knowledge-ask">
@@ -119,7 +127,7 @@ export default function KnowledgePage() {
           ) : (
             <ul className="knowledge-hit-list">
               {hits.map((hit) => (
-                <li key={hit.entry_id} className="knowledge-hit-item">
+                <li key={(hit as KnowledgeSearchHit & { chunk_id?: string }).chunk_id || hit.entry_id} className="knowledge-hit-item">
                   <div className="knowledge-hit-title">{hit.title}</div>
                   <p className="knowledge-hit-content">{hit.content}</p>
                 </li>
@@ -139,7 +147,7 @@ export default function KnowledgePage() {
             <li key={entry.id} className="knowledge-item">
               <button className="knowledge-item-main" onClick={() => void openDetail(entry.id)}>
                 <span className="knowledge-item-title">{entry.title}</span>
-                <span className="knowledge-item-meta">{entry.category} · {entry.source_type === 'scrape' ? '抓取' : '手动'}</span>
+                <span className="knowledge-item-meta">{entry.category || '文档'} · {entry.source_type === 'upload' ? '本地文件' : entry.source_type === 'scrape' ? '抓取' : '手动'}</span>
               </button>
               <span className="knowledge-item-time">{formatTime(entry.updated_at)}</span>
               <button className="knowledge-delete" onClick={() => void remove(entry.id)}>删除</button>
@@ -157,7 +165,7 @@ export default function KnowledgePage() {
           {selected.source_url && (
             <a href={selected.source_url} target="_blank" rel="noreferrer">查看原文</a>
           )}
-          <pre className="knowledge-detail-content">{selected.content}</pre>
+          <pre className="knowledge-detail-content">{selected.content || (selected as KnowledgeDetail & { chunks?: { content: string }[] }).chunks?.map((item) => item.content).join('\n\n')}</pre>
         </div>
       )}
     </section>
