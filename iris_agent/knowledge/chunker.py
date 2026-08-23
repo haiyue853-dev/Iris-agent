@@ -56,4 +56,4 @@ def chunk_text(
             break
     if current:
         completed.append(current)
-    return [ChunkDraft(content=content, location=location) for content in completed]
+    return [ChunkDraft(content=content, location=location) for content in completed if content.strip()]

@@ -26,6 +26,15 @@ def test_chunker_returns_no_drafts_for_whitespace():
     assert chunk_text(" \n\t ", location=None, target_chars=800, overlap_chars=120) == []
 
 
+@pytest.mark.parametrize("suffix", [" " * 1000, "\n" * 1000])
+def test_chunker_ignores_whitespace_only_chunks_after_nonblank_text(suffix):
+    chunks = chunk_text("甲" + suffix, location="第 4 页", target_chars=800, overlap_chars=120)
+
+    assert chunks
+    assert all(chunk.content.strip() and chunk.location == "第 4 页" for chunk in chunks)
+    assert "甲" in "".join(chunk.content for chunk in chunks)
+
+
 def test_chunker_hard_splits_oversized_unbroken_text_without_losing_content():
     text = "甲" * 1601
     context = multiprocessing.get_context("spawn")
