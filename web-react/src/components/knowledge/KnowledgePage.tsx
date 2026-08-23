@@ -22,6 +22,7 @@ export default function KnowledgePage() {
   const [topics, setTopics] = useState<string[]>([]);
   const [topic, setTopic] = useState('');
   const [graph, setGraph] = useState<{ nodes: { id: string; label: string; kind: string; document_count: number }[]; edges: { source: string; target: string; relation: string }[] }>({ nodes: [], edges: [] });
+  const [graphNode, setGraphNode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +100,13 @@ export default function KnowledgePage() {
     try { const document = await uploadKnowledge(file); setEntries((prev) => [document, ...prev]); setError(false); }
     catch { setError(true); } finally { setUploading(false); }
   };
+  const graphNodes = graph.nodes.slice(0, 24);
+  const graphPosition = new Map(graphNodes.map((node, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(graphNodes.length, 1) - Math.PI / 2;
+    const radius = node.kind === 'topic' ? 0 : 155 + (index % 3) * 22;
+    return [node.id, { x: 260 + Math.cos(angle) * radius, y: 205 + Math.sin(angle) * radius }] as const;
+  }));
+  const activeGraphNode = graph.nodes.find((node) => node.id === graphNode);
 
   return (
     <section className="knowledge-page" aria-label="知识库">
@@ -115,7 +123,7 @@ export default function KnowledgePage() {
         <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="搜索资料、主题或关系…" />
         <button onClick={() => void ask()} disabled={!question.trim() || searching}>{searching ? '检索中' : '检索'}</button>
       </div>
-      <section className="knowledge-graph" aria-label="知识图谱"><div className="knowledge-graph-heading"><div><span>RELATION MAP</span><h2>{topic || '全部知识图谱'}</h2></div><small>{graph.nodes.length} 个节点 · {graph.edges.length} 条关系</small></div>{graph.nodes.length === 0 ? <p className="knowledge-empty">导入资料后自动生成图谱。</p> : <div className="knowledge-graph-nodes">{graph.nodes.map((node) => <span key={node.id} className={`knowledge-graph-node ${node.kind}`}>{node.label}<small>{node.document_count}</small></span>)}</div>}</section>
+      <section className="knowledge-graph" aria-label="知识图谱"><div className="knowledge-graph-heading"><div><span>RELATION MAP</span><h2>{topic || '全部知识图谱'}</h2></div><small>{graph.nodes.length} 个节点 · {graph.edges.length} 条关系</small></div>{graph.nodes.length === 0 ? <p className="knowledge-empty">导入资料后自动生成图谱。</p> : <div className="knowledge-graph-canvas"><svg viewBox="0 0 520 410" role="img" aria-label="知识实体关系网络">{graph.edges.map((edge, index) => { const source = graphPosition.get(edge.source); const target = graphPosition.get(edge.target); return source && target ? <line key={`${edge.source}-${edge.target}-${index}`} x1={source.x} y1={source.y} x2={target.x} y2={target.y} /> : null; })}{graphNodes.map((node) => { const point = graphPosition.get(node.id)!; const selected = graphNode === node.id; return <g key={node.id} className={`knowledge-graph-svg-node ${node.kind} ${selected ? 'selected' : ''}`} transform={`translate(${point.x} ${point.y})`} onClick={() => setGraphNode(node.id)}><circle r={node.kind === 'topic' ? 28 : 17 + Math.min(node.document_count, 5)} /><text y={node.kind === 'topic' ? 45 : 34}>{node.label.slice(0, 12)}</text></g>; })}</svg><div className="knowledge-graph-legend"><span><i className="topic" />主题</span><span><i />实体</span>{activeGraphNode && <strong>{activeGraphNode.label} · {activeGraphNode.document_count} 篇资料</strong>}</div></div>}</section>
 
       <details className="knowledge-add"><summary>手动添加资料</summary><div className="knowledge-add-form">
         <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题" maxLength={200} />
