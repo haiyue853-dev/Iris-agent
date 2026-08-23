@@ -370,6 +370,14 @@ def _knowledge_nonblank_string(data: dict[str, Any], name: str, default: str) ->
     return value.strip()
 
 
+def _knowledge_path(value: Any, name: str) -> Path:
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str) and value.strip():
+        return Path(value)
+    raise ConfigurationError(f"knowledge.{name} 必须是非空路径字符串")
+
+
 def _knowledge_http_url(data: dict[str, Any], name: str, default: str) -> str:
     value = _knowledge_nonblank_string(data, name, default)
     parsed = urlparse(value)
@@ -507,9 +515,9 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             min_text_chars=_web_search_int(web_search, "min_text_chars", 200),
         ),
         knowledge=KnowledgeSettings(
-            directory=Path(knowledge.get("directory", "data/knowledge")),
-            database_file=Path(knowledge.get("database_file", "data/knowledge/knowledge.db")),
-            files_directory=Path(knowledge.get("files_directory", "data/knowledge/files")),
+            directory=_knowledge_path(knowledge.get("directory", "data/knowledge"), "directory"),
+            database_file=_knowledge_path(knowledge.get("database_file", "data/knowledge/knowledge.db"), "database_file"),
+            files_directory=_knowledge_path(knowledge.get("files_directory", "data/knowledge/files"), "files_directory"),
             allowed_upload_extensions=_knowledge_upload_extensions(
                 knowledge.get("allowed_upload_extensions", KnowledgeSettings().allowed_upload_extensions)
             ),

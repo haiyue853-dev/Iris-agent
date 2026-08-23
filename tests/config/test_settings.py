@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from iris_agent.config.settings import load_settings
+from iris_agent.config.settings import _knowledge_path, load_settings
 from iris_agent.core.errors import ConfigurationError
 
 
@@ -116,6 +116,23 @@ def test_knowledge_embedding_timeout_must_be_finite_and_positive(tmp_path, timeo
 
     with pytest.raises(ConfigurationError, match="embedding_timeout_seconds"):
         load_settings(path)
+
+
+@pytest.mark.parametrize("field", ["directory", "database_file", "files_directory"])
+@pytest.mark.parametrize("value", ["true", "''", "[]"])
+def test_knowledge_paths_require_nonblank_strings(tmp_path, field, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  {field}: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=field):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("field", ["directory", "database_file", "files_directory"])
+def test_knowledge_paths_accept_path_instances(field, tmp_path):
+    relative_path = Path("data/knowledge")
+
+    assert _knowledge_path(relative_path, field) == relative_path
 
 
 def test_environment_overrides_yaml(tmp_path, monkeypatch):
