@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 
@@ -112,6 +113,37 @@ def test_legacy_migration_uses_stable_id_when_source_url_changes(tmp_path):
     ))
 
     assert repository.migrate_legacy(legacy) == 0
+
+
+def test_concurrent_legacy_migration_is_idempotent(tmp_path):
+    legacy = KnowledgeRepository(tmp_path / "legacy")
+    legacy.save(KnowledgeEntry(
+        id="kb-0123456789ab", title="旧条目", content="旧正文", category="面经",
+        source_url=None, source_type="manual", created_at=3.0, updated_at=4.0,
+    ))
+    db_path = tmp_path / "knowledge.db"
+    first = SqliteKnowledgeRepository(db_path)
+    second = SqliteKnowledgeRepository(db_path)
+    barrier = threading.Barrier(2)
+    results: list[int] = []
+    errors: list[Exception] = []
+
+    def migrate(repository):
+        try:
+            barrier.wait()
+            results.append(repository.migrate_legacy(legacy))
+        except Exception as exc:  # The regression is a database UNIQUE error.
+            errors.append(exc)
+
+    threads = [threading.Thread(target=migrate, args=(repository,)) for repository in (first, second)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert sorted(results) == [0, 1]
+    assert len(first.list_documents()) == 1
 
 
 def test_database_reopens_and_retains_search_index(tmp_path):

@@ -97,23 +97,7 @@ class SqliteKnowledgeRepository:
         persisted_chunks = self._normalise_chunks(document.id, chunks)
         try:
             with self._write_transaction() as connection:
-                connection.execute(
-                    """INSERT INTO documents (
-                        id, title, source_type, media_type, size_bytes, original_name, status,
-                        error_message, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    self._document_values(document),
-                )
-                for chunk in persisted_chunks:
-                    connection.execute(
-                        """INSERT INTO chunks (id, document_id, ordinal, content, location, content_hash)
-                        VALUES (?, ?, ?, ?, ?, ?)""",
-                        (chunk.id, chunk.document_id, chunk.ordinal, chunk.content, chunk.location, chunk.content_hash),
-                    )
-                    connection.execute(
-                        "INSERT INTO chunks_fts (chunk_id, title, content) VALUES (?, ?, ?)",
-                        (chunk.id, self._fts_text(document.title), self._fts_text(chunk.content)),
-                    )
+                self._insert_document_with_chunks(connection, document, persisted_chunks)
         except sqlite3.Error as exc:
             raise SqliteKnowledgeRepositoryError("unable to save knowledge document") from exc
 
@@ -215,16 +199,6 @@ class SqliteKnowledgeRepository:
         migrated = 0
         for entry in legacy.list():
             marker = self._legacy_marker(entry)
-            try:
-                with closing(self._connect()) as connection:
-                    exists = connection.execute(
-                        "SELECT 1 FROM documents WHERE original_name = ? OR original_name LIKE ?",
-                        (marker, f"{marker}\n%"),
-                    ).fetchone()
-            except sqlite3.Error as exc:
-                raise SqliteKnowledgeRepositoryError("unable to inspect legacy migration") from exc
-            if exists is not None:
-                continue
             document = KnowledgeDocument(
                 id=f"doc-{hashlib.sha256(entry.id.encode('utf-8')).hexdigest()[:32]}",
                 title=entry.title,
@@ -237,8 +211,18 @@ class SqliteKnowledgeRepository:
                 created_at=entry.created_at,
                 updated_at=entry.updated_at,
             )
-            self.save_document_with_chunks(document, [ChunkDraft(entry.content, None)])
-            migrated += 1
+            chunks = self._normalise_chunks(document.id, [ChunkDraft(entry.content, None)])
+            try:
+                with self._write_transaction() as connection:
+                    exists = connection.execute(
+                        "SELECT 1 FROM documents WHERE original_name = ? OR original_name LIKE ?",
+                        (marker, f"{marker}\n%"),
+                    ).fetchone()
+                    if exists is None:
+                        self._insert_document_with_chunks(connection, document, chunks)
+                        migrated += 1
+            except sqlite3.Error as exc:
+                raise SqliteKnowledgeRepositoryError("unable to migrate legacy knowledge") from exc
         return migrated
 
     def _connect(self) -> sqlite3.Connection:
@@ -266,6 +250,28 @@ class SqliteKnowledgeRepository:
             document.id, document.title, document.source_type, document.media_type, document.size_bytes,
             document.original_name, document.status, document.error_message, document.created_at, document.updated_at,
         )
+
+    def _insert_document_with_chunks(
+        self, connection: sqlite3.Connection, document: KnowledgeDocument, chunks: list[KnowledgeChunk]
+    ) -> None:
+        """Write related rows on an already-open immediate transaction."""
+        connection.execute(
+            """INSERT INTO documents (
+                id, title, source_type, media_type, size_bytes, original_name, status,
+                error_message, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            self._document_values(document),
+        )
+        for chunk in chunks:
+            connection.execute(
+                """INSERT INTO chunks (id, document_id, ordinal, content, location, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (chunk.id, chunk.document_id, chunk.ordinal, chunk.content, chunk.location, chunk.content_hash),
+            )
+            connection.execute(
+                "INSERT INTO chunks_fts (chunk_id, title, content) VALUES (?, ?, ?)",
+                (chunk.id, self._fts_text(document.title), self._fts_text(chunk.content)),
+            )
 
     @staticmethod
     def _document_from_row(row: sqlite3.Row) -> KnowledgeDocument:
