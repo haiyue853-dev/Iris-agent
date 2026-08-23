@@ -3467,6 +3467,12 @@ button.view-item {
 .iris-sources-list a:hover { color: var(--aui-text); }
 .iris-assistant-message-content { font-size: 14px; line-height: 1.75; }
 .iris-tool-terminal { min-width: 0; margin-top: 8px; gap: 0; overflow: hidden; border: 1px solid var(--aui-border); border-radius: 9px; }
+.knowledge-topics, .knowledge-graph-nodes { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.knowledge-topics button { border: 1px solid var(--aui-border); border-radius: 999px; background: var(--aui-page); padding: 6px 11px; color: var(--aui-muted); }
+.knowledge-topics button.active, .knowledge-topics button:hover { background: var(--aui-accent, #5b5bd6); color: white; }
+.knowledge-graph { margin: 18px 0; border: 1px solid var(--aui-border); border-radius: 14px; background: var(--aui-page); padding: 16px; }
+.knowledge-graph h2 { margin: 0; font-size: 17px; }.knowledge-graph p { color: var(--aui-muted); }
+.knowledge-graph-node { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--aui-border); border-radius: 999px; padding: 7px 10px; background: var(--aui-soft); }.knowledge-graph-node.topic { background: #4f46e5; color: white; }.knowledge-graph-node small { opacity: .7; }
 
 @media (max-width: 720px) {
   .iris-chat-viewport { padding-inline: 12px; }
