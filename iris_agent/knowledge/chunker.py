@@ -39,17 +39,21 @@ def chunk_text(
     for unit in _units(text):
         remainder = unit
         while remainder:
-            available = target_chars - len(current)
-            if len(remainder) <= available:
+            if len(current) + len(remainder) <= target_chars:
                 current += remainder
                 break
             if current:
                 completed.append(current)
-                current = current[-overlap_chars:] if overlap_chars else ""
-                continue
-            completed.append(remainder[:target_chars])
-            current = remainder[target_chars - overlap_chars:target_chars] if overlap_chars else ""
-            remainder = remainder[target_chars:]
+            overlap = current[-overlap_chars:] if overlap_chars else ""
+            while len(remainder) > target_chars:
+                available = target_chars - len(overlap)
+                chunk = overlap + remainder[:available]
+                completed.append(chunk)
+                remainder = remainder[available:]
+                overlap = chunk[-overlap_chars:] if overlap_chars else ""
+            carry = overlap[-min(len(overlap), target_chars - len(remainder)):] if overlap else ""
+            current = carry + remainder
+            break
     if current:
         completed.append(current)
     return [ChunkDraft(content=content, location=location) for content in completed]

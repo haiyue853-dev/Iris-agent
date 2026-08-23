@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import multiprocessing
+
 import pytest
 
 from iris_agent.knowledge.chunker import chunk_text
 from iris_agent.knowledge.documents import KnowledgeChunk, KnowledgeDocument
+
+
+def _chunk_in_child(results, text: str) -> None:
+    chunks = chunk_text(text, location="第 9 页", target_chars=800, overlap_chars=120)
+    results.put([(chunk.content, chunk.location) for chunk in chunks])
 
 
 def test_chunker_preserves_chinese_text_overlap_and_location():
@@ -17,6 +24,25 @@ def test_chunker_preserves_chinese_text_overlap_and_location():
 
 def test_chunker_returns_no_drafts_for_whitespace():
     assert chunk_text(" \n\t ", location=None, target_chars=800, overlap_chars=120) == []
+
+
+def test_chunker_hard_splits_oversized_unbroken_text_without_losing_content():
+    text = "甲" * 1601
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    process = context.Process(target=_chunk_in_child, args=(results, text))
+    process.start()
+    process.join(timeout=2)
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        pytest.fail("chunk_text did not return for an oversized unbroken paragraph")
+
+    chunks = results.get(timeout=1)
+    assert process.exitcode == 0
+    assert len(chunks) == 3
+    assert all(len(content) <= 800 and location == "第 9 页" for content, location in chunks)
+    assert chunks[0][0] + "".join(content[120:] for content, _ in chunks[1:]) == text
 
 
 def test_chunker_rejects_invalid_limits():
