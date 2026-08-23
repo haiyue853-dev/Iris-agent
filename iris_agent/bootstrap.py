@@ -17,6 +17,8 @@ from iris_agent.knowledge.embedder import OllamaEmbedder
 from iris_agent.knowledge.repository import KnowledgeRepository
 from iris_agent.knowledge.retriever import EmbeddingRetriever, HybridRetriever, KeywordRetriever
 from iris_agent.knowledge.service import KnowledgeService
+from iris_agent.knowledge.rag_service import RagKnowledgeService
+from iris_agent.knowledge.sqlite_repository import SqliteKnowledgeRepository
 from iris_agent.curator.referee import ConflictReferee
 from iris_agent.curator.repository import CuratorRepository
 from iris_agent.curator.service import CuratorService
@@ -188,7 +190,7 @@ def _build_application(
     )
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
     settings_profiles = SettingsProfileService(profile_store, make_provider, provider_handle.replace, provider_handle.current)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor)
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor, knowledge=None)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -292,37 +294,19 @@ def _build_application(
         default_search_depth=settings.web_search.default_search_depth,
     ))
     registry.register(build_fetch_page_tool(page_fetcher))
-    knowledge_repository = KnowledgeRepository(settings.knowledge.directory)
-    keyword_retriever = KeywordRetriever(
-        knowledge_repository.list, max_hit_chars=settings.knowledge.max_hit_chars
+    rag_embedder = OllamaEmbedder(model=settings.knowledge.embedding_model,
+                                  base_url=settings.knowledge.embedding_base_url,
+                                  timeout=settings.knowledge.embedding_timeout_seconds)
+    knowledge = RagKnowledgeService(
+        SqliteKnowledgeRepository(settings.knowledge.database_file), embedder=rag_embedder,
+        files_directory=settings.knowledge.files_directory, chunk_target_chars=settings.knowledge.chunk_target_chars,
+        chunk_overlap_chars=settings.knowledge.chunk_overlap_chars, embedding_batch_size=settings.knowledge.embedding_batch_size,
+        retrieval_limit=settings.knowledge.retrieval_limit, max_context_chars=settings.knowledge.max_context_chars,
+        minimum_relevance_score=settings.knowledge.minimum_relevance_score, max_file_bytes=settings.knowledge.max_file_bytes,
+        max_total_bytes=settings.knowledge.max_total_bytes, max_document_count=settings.knowledge.max_document_count,
+        allowed_extensions=settings.knowledge.allowed_upload_extensions,
     )
-    primary_retriever = keyword_retriever
-    fallback_retriever = None
-    if settings.knowledge.retriever in ("embedding", "hybrid"):
-        embedder = OllamaEmbedder(
-            model=settings.knowledge.embedding_model,
-            base_url=settings.knowledge.embedding_base_url,
-            timeout=settings.knowledge.embedding_timeout_seconds,
-        )
-        embedding_retriever = EmbeddingRetriever(
-            knowledge_repository.list, embedder, max_hit_chars=settings.knowledge.max_hit_chars
-        )
-        if settings.knowledge.retriever == "hybrid":
-            primary_retriever = HybridRetriever(
-                keyword_retriever, embedding_retriever, max_hit_chars=settings.knowledge.max_hit_chars
-            )
-        else:
-            primary_retriever = embedding_retriever
-        fallback_retriever = keyword_retriever
-    knowledge = KnowledgeService(
-        knowledge_repository,
-        primary_retriever,
-        max_content_chars=settings.knowledge.max_content_chars,
-        default_limit=settings.knowledge.default_limit,
-        fallback_retriever=fallback_retriever,
-    )
-    registry.register(build_add_knowledge_tool(knowledge))
-    registry.register(build_search_knowledge_tool(knowledge))
+    agent.knowledge = knowledge
     curator_embedder = OllamaEmbedder(
         model=settings.knowledge.embedding_model,
         base_url=settings.knowledge.embedding_base_url,
@@ -338,7 +322,7 @@ def _build_application(
             conflict_threshold=settings.curator.conflict_threshold,
         ),
         skills=skills,
-        knowledge=knowledge,
+        knowledge=None,
         referee=ConflictReferee(provider),
         enable_llm=settings.curator.enable_llm,
         max_pairs_per_run=settings.curator.max_pairs_per_run,
