@@ -72,6 +72,52 @@ def test_knowledge_settings_reject_overlap_at_or_above_target(tmp_path):
         load_settings(path)
 
 
+@pytest.mark.parametrize("field", ["max_content_chars", "max_hit_chars", "default_limit"])
+@pytest.mark.parametrize("value", ["true", "800.5", "'1.5'"])
+def test_legacy_knowledge_integer_settings_reject_non_integers(tmp_path, field, value):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  {field}: {value}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=field):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("retriever", ["unknown", "' '", "true"])
+def test_knowledge_retriever_must_be_supported(tmp_path, retriever):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  retriever: {retriever}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="retriever"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("model", ["' '", "true"])
+def test_knowledge_embedding_model_must_be_a_nonblank_string(tmp_path, model):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  embedding_model: {model}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="embedding_model"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("base_url", ["localhost:11434", "ftp://localhost:11434", "''", "true"])
+def test_knowledge_embedding_base_url_must_be_http_url(tmp_path, base_url):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  embedding_base_url: {base_url}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="embedding_base_url"):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("timeout", ["0", "-.inf", "true"])
+def test_knowledge_embedding_timeout_must_be_finite_and_positive(tmp_path, timeout):
+    path = tmp_path / "agent.yaml"
+    path.write_text(f"knowledge:\n  embedding_timeout_seconds: {timeout}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="embedding_timeout_seconds"):
+        load_settings(path)
+
+
 def test_environment_overrides_yaml(tmp_path, monkeypatch):
     path = tmp_path / "agent.yaml"
     path.write_text("llm:\n  model: yaml-model\n", encoding="utf-8")

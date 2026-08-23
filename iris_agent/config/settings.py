@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -350,12 +351,30 @@ def _knowledge_upload_extensions(value: Any) -> tuple[str, ...]:
 
 
 def _knowledge_float(data: dict[str, Any], name: str, default: float) -> float:
+    raw_value = data.get(name, default)
+    if isinstance(raw_value, bool):
+        raise ConfigurationError(f"knowledge.{name} 必须是数字")
     try:
-        value = float(data.get(name, default))
+        value = float(raw_value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ConfigurationError(f"knowledge.{name} 必须是数字") from exc
     if not math.isfinite(value):
         raise ConfigurationError(f"knowledge.{name} 必须是有限数字")
+    return value
+
+
+def _knowledge_nonblank_string(data: dict[str, Any], name: str, default: str) -> str:
+    value = data.get(name, default)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigurationError(f"knowledge.{name} 必须是非空字符串")
+    return value.strip()
+
+
+def _knowledge_http_url(data: dict[str, Any], name: str, default: str) -> str:
+    value = _knowledge_nonblank_string(data, name, default)
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigurationError(f"knowledge.{name} 必须是 http 或 https URL")
     return value
 
 
@@ -503,13 +522,13 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             retrieval_limit=_knowledge_int(knowledge, "retrieval_limit", 5),
             max_context_chars=_knowledge_int(knowledge, "max_context_chars", 6_000),
             minimum_relevance_score=_knowledge_float(knowledge, "minimum_relevance_score", 0.2),
-            max_content_chars=int(knowledge.get("max_content_chars", 50000)),
-            max_hit_chars=int(knowledge.get("max_hit_chars", 500)),
-            default_limit=int(knowledge.get("default_limit", 5)),
-            retriever=str(knowledge.get("retriever", "keyword")),
-            embedding_model=str(knowledge.get("embedding_model", "bge-m3")),
-            embedding_base_url=str(knowledge.get("embedding_base_url", "http://localhost:11434")),
-            embedding_timeout_seconds=float(knowledge.get("embedding_timeout_seconds", 60)),
+            max_content_chars=_knowledge_int(knowledge, "max_content_chars", 50_000),
+            max_hit_chars=_knowledge_int(knowledge, "max_hit_chars", 500),
+            default_limit=_knowledge_int(knowledge, "default_limit", 5),
+            retriever=_knowledge_nonblank_string(knowledge, "retriever", "keyword"),
+            embedding_model=_knowledge_nonblank_string(knowledge, "embedding_model", "bge-m3"),
+            embedding_base_url=_knowledge_http_url(knowledge, "embedding_base_url", "http://localhost:11434"),
+            embedding_timeout_seconds=_knowledge_float(knowledge, "embedding_timeout_seconds", 60),
         ),
         curator=CuratorSettings(
             directory=Path(curator.get("directory", "data/curator")),
@@ -588,7 +607,8 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             raise ConfigurationError(f"web_search.{field_name} 必须大于或等于 1")
     for field_name in (
         "max_file_bytes", "max_total_bytes", "max_document_count", "chunk_target_chars",
-        "embedding_batch_size", "retrieval_limit", "max_context_chars",
+        "embedding_batch_size", "retrieval_limit", "max_context_chars", "max_content_chars",
+        "max_hit_chars", "default_limit",
     ):
         if getattr(settings.knowledge, field_name) < 1:
             raise ConfigurationError(f"knowledge.{field_name} 必须大于 0")
@@ -596,4 +616,8 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         raise ConfigurationError("knowledge.chunk_overlap_chars 必须大于或等于 0 且小于 chunk_target_chars")
     if not 0 <= settings.knowledge.minimum_relevance_score <= 1:
         raise ConfigurationError("knowledge.minimum_relevance_score 必须在 0 到 1 之间")
+    if settings.knowledge.retriever not in {"keyword", "embedding", "hybrid"}:
+        raise ConfigurationError("knowledge.retriever 必须是 keyword、embedding 或 hybrid")
+    if settings.knowledge.embedding_timeout_seconds <= 0:
+        raise ConfigurationError("knowledge.embedding_timeout_seconds 必须是大于 0 的有限数字")
     return settings
