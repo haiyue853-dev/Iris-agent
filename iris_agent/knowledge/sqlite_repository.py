@@ -47,6 +47,22 @@ class EmbeddingSearchCandidate:
     vector: list[float]
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeGraphNode:
+    id: str
+    label: str
+    kind: str
+    document_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeGraphEdge:
+    source: str
+    target: str
+    relation: str
+    document_id: str
+
+
 EmbeddingMappings: TypeAlias = Mapping[str, Sequence[float]] | Iterable[tuple[str, Sequence[float]]]
 
 
@@ -94,6 +110,16 @@ class SqliteKnowledgeRepository:
                     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
                     USING fts5(chunk_id UNINDEXED, title, content);
                     CREATE INDEX IF NOT EXISTS chunks_document_id_idx ON chunks(document_id);
+                    CREATE TABLE IF NOT EXISTS graph_nodes (
+                        id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, kind TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS graph_edges (
+                        source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+                        target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+                        relation TEXT NOT NULL, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                        UNIQUE(source_id, target_id, relation, document_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS graph_edges_document_idx ON graph_edges(document_id);
                     """
                 )
         except (OSError, sqlite3.Error) as exc:
@@ -228,6 +254,43 @@ class SqliteKnowledgeRepository:
         except sqlite3.Error as exc:
             raise SqliteKnowledgeRepositoryError("unable to read knowledge chunks") from exc
         return [KnowledgeChunk(**dict(row)) for row in rows]
+
+    def replace_document_graph(self, document_id: str, entities: Iterable[tuple[str, str]], relations: Iterable[tuple[str, str, str]]) -> None:
+        self._validate_document_id(document_id)
+        try:
+            with self._write_transaction() as connection:
+                connection.execute("DELETE FROM graph_edges WHERE document_id = ?", (document_id,))
+                ids: dict[str, str] = {}
+                for label, kind in entities:
+                    label, kind = label.strip()[:120], kind.strip()[:40]
+                    if not label or not kind: continue
+                    node_id = f"node-{hashlib.sha256(label.casefold().encode('utf-8')).hexdigest()[:24]}"
+                    connection.execute("INSERT INTO graph_nodes (id, label, kind) VALUES (?, ?, ?) ON CONFLICT(label) DO NOTHING", (node_id, label, kind))
+                    row = connection.execute("SELECT id FROM graph_nodes WHERE label = ?", (label,)).fetchone()
+                    ids[label] = row["id"]
+                for source, target, relation in relations:
+                    if source in ids and target in ids and source != target:
+                        connection.execute("INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation, document_id) VALUES (?, ?, ?, ?)", (ids[source], ids[target], relation[:80] or "关联", document_id))
+        except sqlite3.Error as exc:
+            raise SqliteKnowledgeRepositoryError("unable to save knowledge graph") from exc
+
+    def graph(self, topic: str | None = None, limit: int = 200) -> tuple[list[KnowledgeGraphNode], list[KnowledgeGraphEdge]]:
+        self._validate_limit(limit)
+        try:
+            with closing(self._connect()) as connection:
+                clause, args = "", []
+                if topic and topic.strip():
+                    clause, args = "WHERE lower(n.label) = lower(?)", [topic.strip()]
+                nodes = connection.execute(f"""SELECT n.id, n.label, n.kind, COUNT(DISTINCT e.document_id) AS document_count
+                    FROM graph_nodes n LEFT JOIN graph_edges e ON n.id=e.source_id OR n.id=e.target_id {clause}
+                    GROUP BY n.id ORDER BY document_count DESC, n.label LIMIT ?""", (*args, limit)).fetchall()
+                node_ids = {row['id'] for row in nodes}
+                if not node_ids: return [], []
+                marks = ','.join('?' for _ in node_ids)
+                edges = connection.execute(f"SELECT source_id AS source, target_id AS target, relation, document_id FROM graph_edges WHERE source_id IN ({marks}) OR target_id IN ({marks}) LIMIT ?", (*node_ids, *node_ids, limit * 3)).fetchall()
+        except sqlite3.Error as exc:
+            raise SqliteKnowledgeRepositoryError("unable to read knowledge graph") from exc
+        return [KnowledgeGraphNode(**dict(row)) for row in nodes], [KnowledgeGraphEdge(**dict(row)) for row in edges]
 
     def migrate_legacy(self, legacy: KnowledgeRepository) -> int:
         if not isinstance(legacy, KnowledgeRepository):

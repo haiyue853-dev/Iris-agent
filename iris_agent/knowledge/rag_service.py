@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +54,14 @@ class RagKnowledgeService:
 
     def delete_document(self, document_id: str) -> bool:
         return self.repository.delete_document(document_id) is not None
+
+    def graph(self, topic: str | None = None) -> dict:
+        nodes, edges = self.repository.graph(topic)
+        return {"nodes": [{"id": node.id, "label": node.label, "kind": node.kind, "document_count": node.document_count} for node in nodes],
+                "edges": [{"source": edge.source, "target": edge.target, "relation": edge.relation, "document_id": edge.document_id} for edge in edges]}
+
+    def topics(self) -> list[str]:
+        return [node.label for node in self.repository.graph(limit=100)[0] if node.kind == "topic"]
 
     def add_text(self, title: str, content: str, *, source_type: str = "manual", original_name: str | None = None) -> KnowledgeDocument:
         if not isinstance(content, str) or not content.strip(): raise ValueError("知识内容不能为空")
@@ -118,6 +127,8 @@ class RagKnowledgeService:
                                          size_bytes=size_bytes, original_name=original_name, status="ready")
         drafts = chunk_text(content, target_chars=self.chunk_target_chars, overlap_chars=self.chunk_overlap_chars, location=location)
         self.repository.save_document_with_chunks(document, drafts)
+        entities, relations = self._extract_graph(title, content)
+        self.repository.replace_document_graph(document.id, entities, relations)
         if self.embedder is not None and drafts:
             try:
                 vectors = self.embedder.embed([item.content for item in drafts])
@@ -136,3 +147,16 @@ class RagKnowledgeService:
     @staticmethod
     def _add_hit(records, scores, chunk_id, document_id, title, content, location, score):
         records.setdefault(chunk_id, RagSearchHit(document_id, chunk_id, title, content, location, 0.0)); scores[chunk_id] = scores.get(chunk_id, 0.0) + score
+
+    @staticmethod
+    def _extract_graph(title: str, content: str) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
+        """Local deterministic extraction: titles are topics; repeated terms become entities."""
+        topic = title.strip()[:120]
+        candidates = re.findall(r"[A-Za-z][A-Za-z0-9+.#_-]{1,40}|[\u4e00-\u9fff]{2,10}", content)
+        seen: list[str] = []
+        for value in candidates:
+            value = value.strip("，。；：、（）()[]【】")
+            if value and value != topic and value not in seen: seen.append(value)
+            if len(seen) == 12: break
+        entities = [(topic, "topic"), *[(value, "entity") for value in seen]]
+        return entities, [(topic, value, "包含") for value in seen]

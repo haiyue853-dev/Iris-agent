@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { createKnowledge, deleteKnowledge, getKnowledge, listKnowledge, searchKnowledge, uploadKnowledge } from '../../api/knowledge';
+import { createKnowledge, deleteKnowledge, getKnowledge, listKnowledge, searchKnowledge, uploadKnowledge, getKnowledgeGraph, listKnowledgeTopics } from '../../api/knowledge';
 import type { KnowledgeDetail, KnowledgeEntry, KnowledgeSearchHit } from '../../types';
 
 function formatTime(ts: number): string {
@@ -19,6 +19,9 @@ export default function KnowledgePage() {
   const [hits, setHits] = useState<KnowledgeSearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topic, setTopic] = useState('');
+  const [graph, setGraph] = useState<{ nodes: { id: string; label: string; kind: string; document_count: number }[]; edges: { source: string; target: string; relation: string }[] }>({ nodes: [], edges: [] });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,6 +37,8 @@ export default function KnowledgePage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void listKnowledgeTopics().then(setTopics).catch(() => setTopics([])); }, [entries.length]);
+  useEffect(() => { void getKnowledgeGraph(topic || undefined).then(setGraph).catch(() => setGraph({ nodes: [], edges: [] })); }, [topic, entries.length]);
 
   const openDetail = async (id: string) => {
     try {
@@ -104,6 +109,7 @@ export default function KnowledgePage() {
       </header>
 
       {error && <div className="knowledge-error" role="alert">知识库服务暂不可用。</div>}
+      <nav className="knowledge-topics" aria-label="知识主题"><button className={!topic ? 'active' : ''} onClick={() => setTopic('')}>全部主题</button>{topics.map((item) => <button key={item} className={topic === item ? 'active' : ''} onClick={() => setTopic(item)}>{item}</button>)}</nav>
 
       <div className="knowledge-add">
         <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题" maxLength={200} />
@@ -118,6 +124,7 @@ export default function KnowledgePage() {
         <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="在知识库中提问，例如：多模态大模型结构怎么答？" />
         <button onClick={() => void ask()} disabled={!question.trim() || searching}>提问</button>
       </div>
+      <section className="knowledge-graph" aria-label="知识图谱"><h2>{topic || '知识图谱'}</h2><p>主题与资料中提取的实体关系。</p>{graph.nodes.length === 0 ? <p className="knowledge-empty">导入资料后自动生成图谱。</p> : <div className="knowledge-graph-nodes">{graph.nodes.map((node) => <span key={node.id} className={`knowledge-graph-node ${node.kind}`}>{node.label}<small>{node.document_count}</small></span>)}</div>}</section>
 
       {hits !== null && (
         <div className="knowledge-hits">

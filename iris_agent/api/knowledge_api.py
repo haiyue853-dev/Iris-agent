@@ -47,6 +47,16 @@ def register_knowledge_routes(app, knowledge) -> None:
         hits = knowledge.search(query, limit=limit)
         return {"hits": [hit.to_dict() for hit in hits]}
 
+    @router.get("/topics")
+    def list_topics():
+        return {"topics": knowledge.topics() if hasattr(knowledge, "topics") else []}
+
+    @router.get("/graph")
+    def knowledge_graph(topic: str | None = Query(default=None, max_length=120)):
+        if not hasattr(knowledge, "graph"):
+            return {"nodes": [], "edges": []}
+        return knowledge.graph(topic)
+
     @router.get("/{entry_id}")
     def get_knowledge(entry_id: str):
         if not hasattr(knowledge, "get_document"):

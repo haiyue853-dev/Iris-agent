@@ -60,3 +60,8 @@ export async function uploadKnowledge(file: File, title = ''): Promise<Knowledge
     body: JSON.stringify({ title, original_name: file.name, media_type: file.type || null, content_base64: contentBase64 }),
   });
 }
+
+export async function listKnowledgeTopics(): Promise<string[]> { return (await request<{ topics: string[] }>('/api/knowledge/topics')).topics; }
+export async function getKnowledgeGraph(topic?: string): Promise<{ nodes: { id: string; label: string; kind: string; document_count: number }[]; edges: { source: string; target: string; relation: string }[] }> {
+  return request(`/api/knowledge/graph${topic ? `?topic=${encodeURIComponent(topic)}` : ''}`);
+}
