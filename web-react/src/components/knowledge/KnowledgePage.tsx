@@ -103,28 +103,27 @@ export default function KnowledgePage() {
   return (
     <section className="knowledge-page" aria-label="知识库">
       <header className="knowledge-header">
-        <span>KNOWLEDGE</span>
-        <h1>知识库</h1>
-        <p>收集面经与资料，随时浏览和提问。</p>
+        <div><span>LOCAL KNOWLEDGE</span><h1>知识库</h1><p>归档、检索并连接你的本地资料。</p></div>
+        <label className="knowledge-upload-button">{uploading ? '正在导入…' : '导入资料'}<input type="file" accept=".pdf,.docx,.xlsx,.xls,.md,.txt" onChange={(event) => void upload(event.target.files?.[0])} disabled={uploading} /></label>
       </header>
 
       {error && <div className="knowledge-error" role="alert">知识库服务暂不可用。</div>}
-      <nav className="knowledge-topics" aria-label="知识主题"><button className={!topic ? 'active' : ''} onClick={() => setTopic('')}>全部主题</button>{topics.map((item) => <button key={item} className={topic === item ? 'active' : ''} onClick={() => setTopic(item)}>{item}</button>)}</nav>
+      <div className="knowledge-workspace">
+      <aside className="knowledge-library"><div className="knowledge-library-title">主题 <span>{topics.length}</span></div><nav className="knowledge-topics" aria-label="知识主题"><button className={!topic ? 'active' : ''} onClick={() => setTopic('')}>全部资料</button>{topics.map((item) => <button key={item} className={topic === item ? 'active' : ''} onClick={() => setTopic(item)}>{item}</button>)}</nav></aside>
+      <main className="knowledge-main">
+      <div className="knowledge-ask">
+        <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="搜索资料、主题或关系…" />
+        <button onClick={() => void ask()} disabled={!question.trim() || searching}>{searching ? '检索中' : '检索'}</button>
+      </div>
+      <section className="knowledge-graph" aria-label="知识图谱"><div className="knowledge-graph-heading"><div><span>RELATION MAP</span><h2>{topic || '全部知识图谱'}</h2></div><small>{graph.nodes.length} 个节点 · {graph.edges.length} 条关系</small></div>{graph.nodes.length === 0 ? <p className="knowledge-empty">导入资料后自动生成图谱。</p> : <div className="knowledge-graph-nodes">{graph.nodes.map((node) => <span key={node.id} className={`knowledge-graph-node ${node.kind}`}>{node.label}<small>{node.document_count}</small></span>)}</div>}</section>
 
-      <div className="knowledge-add">
+      <details className="knowledge-add"><summary>手动添加资料</summary><div className="knowledge-add-form">
         <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题" maxLength={200} />
-        <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="分类（默认面经）" maxLength={50} />
+        <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="主题（可选）" maxLength={50} />
         <input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="来源链接（可选）" maxLength={2000} />
         <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="正文内容" rows={5} />
-        <button onClick={() => void add()} disabled={!title.trim() || !content.trim()}>添加到知识库</button>
-        <label>导入本地文件（PDF、Word、Excel、Markdown、TXT）<input type="file" accept=".pdf,.docx,.xlsx,.xls,.md,.txt" onChange={(event) => void upload(event.target.files?.[0])} disabled={uploading} /></label>
-      </div>
-
-      <div className="knowledge-ask">
-        <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="在知识库中提问，例如：多模态大模型结构怎么答？" />
-        <button onClick={() => void ask()} disabled={!question.trim() || searching}>提问</button>
-      </div>
-      <section className="knowledge-graph" aria-label="知识图谱"><h2>{topic || '知识图谱'}</h2><p>主题与资料中提取的实体关系。</p>{graph.nodes.length === 0 ? <p className="knowledge-empty">导入资料后自动生成图谱。</p> : <div className="knowledge-graph-nodes">{graph.nodes.map((node) => <span key={node.id} className={`knowledge-graph-node ${node.kind}`}>{node.label}<small>{node.document_count}</small></span>)}</div>}</section>
+        <button onClick={() => void add()} disabled={!title.trim() || !content.trim()}>保存资料</button>
+      </div></details>
 
       {hits !== null && (
         <div className="knowledge-hits">
@@ -175,6 +174,7 @@ export default function KnowledgePage() {
           <pre className="knowledge-detail-content">{selected.content || (selected as KnowledgeDetail & { chunks?: { content: string }[] }).chunks?.map((item) => item.content).join('\n\n')}</pre>
         </div>
       )}
+      </main></div>
     </section>
   );
 }
