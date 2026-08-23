@@ -51,7 +51,8 @@ def chunk_text(
                 completed.append(chunk)
                 remainder = remainder[available:]
                 overlap = chunk[-overlap_chars:] if overlap_chars else ""
-            carry = overlap[-min(len(overlap), target_chars - len(remainder)):] if overlap else ""
+            capacity = target_chars - len(remainder)
+            carry = overlap[-min(len(overlap), capacity):] if overlap and capacity > 0 else ""
             current = carry + remainder
             break
     if current:

@@ -44,6 +44,12 @@ def test_chunker_preserves_paragraph_newlines_when_hard_splitting():
     assert "".join(chunk.content for chunk in chunks) == text
 
 
+def test_chunker_hard_split_never_exceeds_target_when_remainder_exactly_fills_target():
+    chunks = chunk_text("abcd", location=None, target_chars=2, overlap_chars=1)
+
+    assert all(len(chunk.content) <= 2 for chunk in chunks)
+
+
 def test_chunker_hard_splits_oversized_unbroken_text_without_losing_content():
     text = "甲" * 1601
     context = multiprocessing.get_context("spawn")
