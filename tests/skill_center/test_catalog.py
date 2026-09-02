@@ -35,7 +35,7 @@ def test_loads_bundled_skills_without_document_workbench():
     catalog = SkillCatalog(BUNDLED)
     skills = catalog.list()
     ids = {s.id for s in skills}
-    assert ids == {"daily-report", "uml", "hot-radar", "web-research"}
+    assert ids == {"daily-report", "uml", "hot-radar", "web-research", "prompt-optimizer"}
     for s in skills:
         assert s.name and s.description and s.entry_view and s.icon
 

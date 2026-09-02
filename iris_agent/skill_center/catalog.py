@@ -6,10 +6,10 @@ from pathlib import Path
 import yaml
 
 from iris_agent.skill_center.errors import SkillValidationError
-from iris_agent.skill_center.models import SkillDefinition
+from iris_agent.skill_center.models import SUPPORTED_SKILL_TOOLSETS, SkillDefinition
 
 # SKILL.md front matter 允许的字段白名单
-_ALLOWED_FIELDS = {"id", "name", "description", "icon", "category", "entry_view", "version"}
+_ALLOWED_FIELDS = {"id", "name", "description", "icon", "category", "entry_view", "version", "allowed_toolsets"}
 _REQUIRED_FIELDS = {"id", "name", "description", "icon", "category", "entry_view", "version"}
 # 允许跳转的视图（与前端视图保持一致）
 _ALLOWED_ENTRY_VIEWS = {"chat", "aihot", "uml", "reports", "radar", "automation"}
@@ -90,6 +90,9 @@ class SkillCatalog:
             raise SkillValidationError(f"{name}/SKILL.md version 必须是整数") from exc
         if version < 1:
             raise SkillValidationError(f"{name}/SKILL.md version 必须大于 0")
+        toolsets = front.get("allowed_toolsets", [])
+        if not isinstance(toolsets, list) or any(item not in SUPPORTED_SKILL_TOOLSETS for item in toolsets) or len(set(toolsets)) != len(toolsets):
+            raise SkillValidationError(f"{name}/SKILL.md allowed_toolsets 非法")
 
         return SkillDefinition(
             id=skill_id,
@@ -101,4 +104,5 @@ class SkillCatalog:
             version=version,
             body=body,
             source=self.source,
+            allowed_toolsets=tuple(toolsets),
         )

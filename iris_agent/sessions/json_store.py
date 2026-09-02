@@ -12,6 +12,7 @@ import uuid
 
 from iris_agent.core.errors import SessionError, SessionNotFoundError
 from iris_agent.core.models import Message, ToolCall
+from iris_agent.core.runtime import SessionRuntimeSnapshot
 from .base import Session
 
 logger = logging.getLogger(__name__)
@@ -48,19 +49,21 @@ class JsonSessionRepository:
         return target
 
     def get(self, session_id: str) -> Session:
-        with self._lock_for(session_id):
-            path = self._path(session_id)
-            if not path.exists():
-                raise SessionNotFoundError(f"会话不存在: {session_id}")
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    return self._read_legacy(session_id, raw)
-                return self._decode(raw)
-            except SessionNotFoundError:
-                raise
-            except Exception as exc:
-                raise SessionError(f"无法读取会话 {session_id}: {exc}") from exc
+        return self._read(session_id)
+
+    def _read(self, session_id: str) -> Session:
+        path = self._path(session_id)
+        if not path.exists():
+            raise SessionNotFoundError(f"会话不存在: {session_id}")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                return self._read_legacy(session_id, raw)
+            return self._decode(raw)
+        except SessionNotFoundError:
+            raise
+        except Exception as exc:
+            raise SessionError(f"无法读取会话 {session_id}: {exc}") from exc
 
     def _read_legacy(self, session_id: str, messages: list[dict]) -> Session:
         meta_path = self.directory / f"{session_id}_meta.json"
@@ -74,7 +77,7 @@ class JsonSessionRepository:
             if path.name.endswith("_meta.json"):
                 continue
             try:
-                sessions.append(self.get(path.stem))
+                sessions.append(self._read(path.stem))
             except SessionError as exc:
                 logger.warning("跳过损坏会话 %s: %s", path, exc)
         return sorted(sessions, key=lambda item: item.updated_at, reverse=True)
@@ -104,22 +107,24 @@ class JsonSessionRepository:
         with self._lock_for(session_id):
             session = self.get(session_id)
             session.messages.clear()
+            session.runtime_snapshot = None
             session.updated_at = time.time()
             self.save(session)
             return session
 
     def delete(self, session_id: str) -> None:
-        with self._lock_for(session_id):
-            path = self._path(session_id)
-            if not path.exists():
-                raise SessionNotFoundError(f"会话不存在: {session_id}")
-            path.unlink()
-            legacy_meta = self.directory / f"{session_id}_meta.json"
-            if legacy_meta.exists():
-                legacy_meta.unlink()
+        path = self._path(session_id)
+        if not path.exists():
+            raise SessionNotFoundError(f"会话不存在: {session_id}")
+        path.unlink()
+        legacy_meta = self.directory / f"{session_id}_meta.json"
+        if legacy_meta.exists():
+            legacy_meta.unlink()
 
     def _decode(self, raw: dict) -> Session:
-        return Session(str(raw["id"]), str(raw["name"]), float(raw["created_at"]), float(raw["updated_at"]), [self._message(item) for item in raw.get("messages", [])])
+        runtime_raw = raw.get("runtime_snapshot")
+        runtime = SessionRuntimeSnapshot.from_dict(runtime_raw) if isinstance(runtime_raw, dict) else None
+        return Session(str(raw["id"]), str(raw["name"]), float(raw["created_at"]), float(raw["updated_at"]), [self._message(item) for item in raw.get("messages", [])], runtime, raw.get("model_profile_id"))
 
     @staticmethod
     def _message(raw: dict) -> Message:
@@ -127,4 +132,7 @@ class JsonSessionRepository:
         attachment_ids = raw.get("attachment_ids", [])
         if not isinstance(attachment_ids, list):
             raise SessionError("消息附件引用格式错误")
-        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), attachment_ids=attachment_ids, id=raw.get("id") or f"message_{uuid.uuid4().hex}")
+        citations = raw.get("citations", [])
+        if not isinstance(citations, list) or any(not isinstance(item, dict) for item in citations):
+            citations = []
+        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), attachment_ids=attachment_ids, prompt_content=raw.get("prompt_content"), runtime_epoch=raw.get("runtime_epoch"), citations=citations, id=raw.get("id") or f"message_{uuid.uuid4().hex}")

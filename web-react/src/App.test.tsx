@@ -27,6 +27,7 @@ describe('App workspace navigation', () => {
       messages: [],
       isStreaming: false,
       streamingContent: '',
+      currentActivity: null,
       toast: '',
       pendingApproval: null,
       currentSessionId: '',
@@ -47,17 +48,17 @@ describe('App workspace navigation', () => {
       handleCopy: vi.fn(),
       handleEditMessage: vi.fn(),
       handleSwitchSession: vi.fn(),
+      handleRefreshSession: vi.fn(),
       handleDeleteSession: vi.fn(),
     });
   });
 
-  it('starts with the sidebar collapsed on narrow screens', () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-
+  it('starts with the sidebar expanded and exposes the toggle', () => {
     render(<App />);
 
-    expect(screen.getByTitle('展开侧边栏')).toBeInTheDocument();
-    expect(document.querySelector('.sidebar')).toHaveClass('collapsed');
+    expect(screen.getByRole('button', { name: 'Toggle Sidebar' })).toBeInTheDocument();
+    const shell = document.querySelector('[data-slot="sidebar"]');
+    expect(shell).toHaveAttribute('data-state', 'expanded');
   });
 
   it('renders the AI Elements inspired application shell', () => {

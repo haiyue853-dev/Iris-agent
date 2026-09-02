@@ -4,6 +4,34 @@ import { deleteAttachment, uploadAttachment } from '../api/attachments';
 import { cancelTask, createTask, getTask, resolveTaskApproval } from '../api/tasks';
 import type { AgentEvent, Message, PendingAttachment, Session, TaskStatus } from '../types';
 
+function toolActivityLabel(toolName: string): string {
+  switch (toolName) {
+    case 'web_search':
+      return '正在联网搜索…';
+    case 'fetch_page':
+      return '正在抓取网页内容…';
+    case 'add_knowledge':
+    case 'search_knowledge':
+      return '正在检索知识库…';
+    case 'remember':
+    case 'recall':
+      return '正在检索历史对话…';
+    case 'use_skill':
+    case 'save_skill':
+      return '正在调用技能…';
+    case 'delegate_task':
+    case 'delegate_tasks':
+      return '正在委派子任务…';
+    case 'read_file':
+    case 'list_directory':
+      return '正在读取文件…';
+    case 'read_attachment':
+      return '正在解析附件…';
+    default:
+      return toolName ? `正在调用 ${toolName}…` : '正在处理…';
+  }
+}
+
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'stopped']);
 type TaskPoller = {
   timer: number | null;
@@ -35,6 +63,8 @@ export function useChat() {
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const [approvalCallId, setApprovalCallId] = useState<string | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [currentActivity, setCurrentActivity] = useState<string | null>(null);
+  const activityResetTimerRef = useRef<number | null>(null);
   const currentSessionRef = useRef('');
   const currentTaskRef = useRef<string | null>(null);
   const pollersRef = useRef(new Map<string, TaskPoller>());
@@ -57,6 +87,12 @@ export function useChat() {
     });
   }, []);
   useEffect(() => () => { clearPollers(); pollersRef.current.clear(); }, [clearPollers]);
+  useEffect(() => () => {
+    if (activityResetTimerRef.current !== null) {
+      window.clearTimeout(activityResetTimerRef.current);
+      activityResetTimerRef.current = null;
+    }
+  }, []);
 
   const clearCurrentTaskState = useCallback(() => {
     currentTaskRef.current = null;
@@ -257,10 +293,28 @@ export function useChat() {
           if (event.type === 'text_delta') {
             streamedContent += event.data.content;
             setStreamingContent(streamedContent);
+            setCurrentActivity('正在生成回复…');
+            if (activityResetTimerRef.current !== null) {
+              window.clearTimeout(activityResetTimerRef.current);
+              activityResetTimerRef.current = null;
+            }
             return;
           }
           if (event.type === 'tool_started' || event.type === 'tool_finished') {
             setCurrentTaskStatus('running');
+            if (event.type === 'tool_started') {
+              const toolName = String(event.data.name || '');
+              setCurrentActivity(toolActivityLabel(toolName));
+            } else {
+              setCurrentActivity('正在分析工具结果…');
+            }
+            if (activityResetTimerRef.current !== null) {
+              window.clearTimeout(activityResetTimerRef.current);
+            }
+            activityResetTimerRef.current = window.setTimeout(() => {
+              setCurrentActivity(null);
+              activityResetTimerRef.current = null;
+            }, 15000);
             return;
           }
           if (event.type === 'tool_approval_requested') {
@@ -284,7 +338,14 @@ export function useChat() {
             finalContent = event.data.content;
             setStreamingContent(finalContent);
           }
-          if (event.type === 'message_completed') setCurrentTaskStatus('completed');
+          if (event.type === 'message_completed') {
+            setCurrentTaskStatus('completed');
+            setCurrentActivity(null);
+            if (activityResetTimerRef.current !== null) {
+              window.clearTimeout(activityResetTimerRef.current);
+              activityResetTimerRef.current = null;
+            }
+          }
         };
         const complete = () => {
           const completedContent = finalContent || streamedContent;
@@ -332,6 +393,14 @@ export function useChat() {
     }
     setMessages(data.messages);
   }, [clearPollers, pollTask, restoreSessionTask, startPolling]);
+  const handleRefreshSession = useCallback(async (id: string) => {
+    const data = await getSession(id);
+    if (currentSessionRef.current === id) {
+      setMessages(data.messages);
+      return data.messages;
+    }
+    return null;
+  }, []);
   const handleDeleteSession = useCallback(async (id: string) => {
     await deleteSession(id);
     discardSessionTasks(id);
@@ -348,30 +417,48 @@ export function useChat() {
   }, [clearCurrentTaskState, currentSessionId, discardSessionTasks, refreshSessions]);
   const handleNewChat = useCallback(() => { clearPollers(); sessionSwitchRequestRef.current += 1; currentSessionRef.current = ''; setCurrentSessionId(''); setMessages([]); setAttachments([]); setPendingApproval(null); clearCurrentTaskState(); }, [clearCurrentTaskState, clearPollers]);
   const handleStop = useCallback(async () => {
-    if (streamAbortRef.current) {
-      streamAbortRef.current.abort();
+    // 1) 立刻清掉所有"还在跑"的 UI 信号——不等 abort 传播完成。
+    //    否则用户点完"停止"还会看见转圈和"正在分析…"几百毫秒。
+    if (activityResetTimerRef.current !== null) {
+      window.clearTimeout(activityResetTimerRef.current);
+      activityResetTimerRef.current = null;
+    }
+    const hadActiveStream = streamAbortRef.current !== null;
+    setIsStreaming(false);
+    setStreamingContent('');
+    setCurrentActivity(null);
+    setApprovalCallId(null);
+    setApprovalSubmitting(false);
+
+    // 2) 立即停掉当前会话任务的轮询器，避免后续 tick 又把 status 覆盖回 running。
+    if (currentTaskId) {
+      const poller = pollersRef.current.get(currentTaskId);
+      if (poller) {
+        if (poller.timer !== null) window.clearInterval(poller.timer);
+        poller.timer = null;
+        poller.status = 'stopped';
+        pollersRef.current.delete(currentTaskId);
+      }
+    }
+    setCurrentTaskStatus('stopped');
+    setQueuePosition(null);
+
+    // 3) 关流。流式路径下，AbortController 一旦 abort 就会驱动 runtime 立即停止 yield。
+    if (hadActiveStream) {
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
       return;
     }
+
+    // 4) 队列/任务路径：后台 cancelTask 异步执行，UI 已经先一步反映"已停止"。
     if (!currentTaskId || !currentTaskStatus || TERMINAL_TASK_STATUSES.has(currentTaskStatus)) return;
     const taskId = currentTaskId;
     const sessionId = currentSessionId;
     try {
       const task = await cancelTask(taskId);
-      const poller = pollersRef.current.get(taskId);
-      if (poller) {
-        poller.status = task.status;
-        poller.queuePosition = task.queue_position ?? null;
-        poller.approvalCallId = null;
-        if (TERMINAL_TASK_STATUSES.has(task.status)) {
-          if (poller.timer !== null) window.clearInterval(poller.timer);
-          pollersRef.current.delete(taskId);
-        }
-      }
       if (currentTaskRef.current === taskId && currentSessionRef.current === sessionId) {
         setCurrentTaskStatus(task.status);
         setQueuePosition(task.queue_position ?? null);
-        setApprovalCallId(null);
-        setApprovalSubmitting(false);
         setIsStreaming(!TERMINAL_TASK_STATUSES.has(task.status));
       }
     } catch (error) {
@@ -382,5 +469,5 @@ export function useChat() {
   const handleRegenerate = useCallback(() => showToast('当前版本暂不支持重新生成'), [showToast]);
   const handleEditMessage = useCallback((_index: number, _content: string) => showToast('当前版本暂不支持编辑历史消息'), [showToast]);
 
-  return { messages, isStreaming, streamingContent, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, attachments, uploadFiles, removeAttachment, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleDeleteSession };
+  return { messages, isStreaming, streamingContent, currentActivity, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, attachments, uploadFiles, removeAttachment, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleRefreshSession, handleDeleteSession };
 }

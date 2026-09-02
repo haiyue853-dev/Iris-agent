@@ -13,8 +13,19 @@ def test_default_knowledge_settings_enable_local_rag_paths(tmp_path):
     assert knowledge.files_directory == Path("data/knowledge/files")
     assert knowledge.chunk_target_chars == 800
     assert knowledge.chunk_overlap_chars == 120
+    assert knowledge.chunk_strategy == "parent_child"
+    assert knowledge.parent_chunk_target_chars == 1800
+    assert knowledge.child_chunk_target_chars == 450
+    assert knowledge.child_chunk_overlap_chars == 80
     assert knowledge.embedding_model == "bge-m3"
-    assert knowledge.allowed_upload_extensions == (".pdf", ".docx", ".xlsx", ".xls", ".md", ".txt")
+    assert knowledge.allowed_upload_extensions == (
+        ".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".html", ".mhtml",
+        ".md", ".txt", ".png", ".jpg", ".jpeg", ".webp",
+    )
+    assert knowledge.reranker_provider == "fastembed"
+    assert knowledge.reranker_model == "onnx-community/bge-reranker-v2-m3-ONNX"
+    assert knowledge.image_parsing_enabled is False
+    assert knowledge.image_parsing_model == "qwen2.5vl:7b"
 
 
 def test_knowledge_upload_extensions_are_normalized_to_a_nonempty_tuple(tmp_path):
@@ -72,6 +83,28 @@ def test_knowledge_settings_reject_overlap_at_or_above_target(tmp_path):
         load_settings(path)
 
 
+def test_parent_child_chunk_settings_reject_invalid_relationships(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "knowledge:\n"
+        "  chunk_strategy: parent_child\n"
+        "  parent_chunk_target_chars: 400\n"
+        "  child_chunk_target_chars: 500\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="child_chunk_target_chars"):
+        load_settings(path)
+
+
+def test_chunk_strategy_must_be_supported(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("knowledge:\n  chunk_strategy: random\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="chunk_strategy"):
+        load_settings(path)
+
+
 @pytest.mark.parametrize("field", ["max_content_chars", "max_hit_chars", "default_limit"])
 @pytest.mark.parametrize("value", ["true", "800.5", "'1.5'"])
 def test_legacy_knowledge_integer_settings_reject_non_integers(tmp_path, field, value):
@@ -88,6 +121,35 @@ def test_knowledge_retriever_must_be_supported(tmp_path, retriever):
     path.write_text(f"knowledge:\n  retriever: {retriever}\n", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="retriever"):
+        load_settings(path)
+
+
+def test_knowledge_reranker_and_image_parser_settings_are_configurable(tmp_path, monkeypatch):
+    monkeypatch.setenv("RERANK_API_KEY", "secret")
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "knowledge:\n"
+        "  reranker_provider: api\n"
+        "  reranker_model: BAAI/bge-reranker-v2-m3\n"
+        "  reranker_base_url: https://api.example.test/v1\n"
+        "  image_parsing_enabled: true\n"
+        "  image_parsing_model: qwen-vl\n",
+        encoding="utf-8",
+    )
+
+    knowledge = load_settings(path).knowledge
+
+    assert knowledge.reranker_provider == "api"
+    assert knowledge.reranker_api_key == "secret"
+    assert knowledge.image_parsing_enabled is True
+    assert knowledge.image_parsing_model == "qwen-vl"
+
+
+def test_knowledge_reranker_provider_must_be_supported(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text("knowledge:\n  reranker_provider: mystery\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="reranker_provider"):
         load_settings(path)
 
 

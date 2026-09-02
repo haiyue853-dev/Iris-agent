@@ -5,7 +5,22 @@ import multiprocessing
 
 import pytest
 
-from iris_agent.knowledge.chunker import chunk_text
+from iris_agent.knowledge.chunker import ChunkGroup, chunk_text, parent_child_chunks
+
+
+def test_parent_child_chunks_build_small_retrieval_chunks_under_parent_context():
+    groups = parent_child_chunks(
+        "第一段包含父级背景信息。第二段包含需要检索的具体事实。第三段继续补充说明。",
+        location="第 1 页",
+        parent_target_chars=24,
+        child_target_chars=10,
+        child_overlap_chars=2,
+    )
+
+    assert groups
+    assert all(isinstance(group, ChunkGroup) for group in groups)
+    assert any(group.children for group in groups)
+    assert all(child.location == "第 1 页" for group in groups for child in group.children)
 from iris_agent.knowledge.documents import KnowledgeChunk, KnowledgeDocument
 
 

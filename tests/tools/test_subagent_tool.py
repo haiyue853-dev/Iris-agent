@@ -1,5 +1,5 @@
 from iris_agent.subagent.models import SubagentRequest, SubagentResult
-from iris_agent.tools.builtin.subagent_tool import build_delegate_task_tool, build_delegate_tasks_tool
+from iris_agent.tools.builtin.subagent_tool import build_delegate_task_tool, build_delegate_tasks_tool, build_request_subagent_collaboration_tool
 from iris_agent.tools.registry import ToolRegistry
 
 
@@ -116,3 +116,31 @@ def test_delegate_tasks_tool_requires_tasks():
 
     assert not result.ok
     assert result.error_code == "invalid_tool_arguments"
+
+
+def test_delegate_tool_passes_role():
+    runner = FakeRunner(SubagentResult(ok=True, result="ok", rounds=1))
+    tool = build_delegate_task_tool(runner)
+
+    tool.invoke({"goal": "research", "role": "researcher"})
+
+    assert runner.last_request.role == "researcher"
+
+
+def test_delegate_tasks_tool_passes_each_role():
+    runner = FakeRunner(SubagentResult(ok=True, result="ok", rounds=1))
+    tool = build_delegate_tasks_tool(runner)
+
+    tool.invoke({"tasks": [{"goal": "write", "role": "report_writer"}]})
+
+    assert runner.parallel_requests[0].role == "report_writer"
+
+
+def test_request_subagent_collaboration_requires_user_approval():
+    tool = build_request_subagent_collaboration_tool()
+
+    result = tool.invoke({"reason": "需要分别检索和整理多份资料"})
+
+    assert result.ok
+    assert result.value["requested"] is True
+    assert tool.requires_approval is True

@@ -28,6 +28,24 @@ def test_save_and_load_user_skill(tmp_path):
     assert service.load_skill(skill.id).body == "正文内容"
 
 
+def test_load_user_skill_returns_editable_body(tmp_path):
+    service = _build_service(tmp_path)
+    created = service.save_user_skill("我的技能", "描述", "第一版")
+
+    loaded = service.load_user_skill(created.id)
+
+    assert loaded.id == created.id
+    assert loaded.source == "user"
+    assert loaded.body == "第一版"
+
+
+def test_load_user_skill_rejects_bundled_skill(tmp_path):
+    service = _build_service(tmp_path)
+
+    with pytest.raises(ValueError, match="不能编辑内置 Skill"):
+        service.load_user_skill("daily-report")
+
+
 def test_save_updates_existing_skill_and_bumps_version(tmp_path):
     service = _build_service(tmp_path)
 
@@ -37,6 +55,15 @@ def test_save_updates_existing_skill_and_bumps_version(tmp_path):
     assert first.id == second.id
     assert second.version == first.version + 1
     assert service.load_skill(second.id).body == "第二版"
+
+
+def test_save_user_skill_persists_selected_toolsets(tmp_path):
+    service = _build_service(tmp_path)
+
+    saved = service.save_user_skill("联网整理", "整理搜索结果", "先搜索再整理", ("safe", "research"))
+
+    assert saved.allowed_toolsets == ("safe", "research")
+    assert service.get_skill(saved.id).allowed_toolsets == ("safe", "research")
 
 
 def test_list_merges_bundled_and_user(tmp_path):

@@ -3,6 +3,7 @@ from typing import Protocol
 from typing import ContextManager
 
 from iris_agent.core.models import Message
+from iris_agent.core.runtime import SessionRuntimeSnapshot
 
 
 @dataclass(slots=True)
@@ -12,6 +13,8 @@ class Session:
     created_at: float
     updated_at: float
     messages: list[Message] = field(default_factory=list)
+    runtime_snapshot: SessionRuntimeSnapshot | None = None
+    model_profile_id: str | None = None
 
 
 class SessionRepository(Protocol):

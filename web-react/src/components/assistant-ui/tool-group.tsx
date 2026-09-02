@@ -2,8 +2,11 @@ import { useId, useState } from "react";
 import { CheckIcon, ChevronDownIcon, LoaderCircleIcon, XCircleIcon } from "lucide-react";
 import type { IrisToolGroupItem } from "@/lib/irisRuntime";
 import { Terminal } from "@/components/tool-ui/terminal";
+import { useIrisChat } from "./iris-chat-context";
+import { KnowledgeDraftCard } from "./knowledge-draft-card";
+import type { IrisKnowledgeDraftResult } from "@/lib/irisRuntime";
 
-const TERMINAL_TOOLS = new Set(["terminal", "shell", "bash", "cmd", "command", "exec", "sh", "powershell"]);
+const TERMINAL_TOOLS = new Set(["terminal", "shell", "bash", "cmd", "command", "exec", "sh", "powershell", "run_command"]);
 
 function isTerminalResult(item: IrisToolGroupItem): item is IrisToolGroupItem & { result: Record<string, unknown> } {
   return TERMINAL_TOOLS.has(item.name.toLowerCase()) && Boolean(item.result && typeof item.result === "object" && ("stdout" in item.result || "stderr" in item.result || "command" in item.result));
@@ -31,16 +34,28 @@ function progressLabel(items: IrisToolGroupItem[], running: number, failed: numb
   if (searches.length === 1 && Array.isArray(searches[0].result)) {
     return `找到 ${searches[0].result.length} 个结果`;
   }
+
+  // Only web/fetch tools need the LLM to "think" after they finish. For
+  // everything else, the existing "已执行 N 个工具" wording is more accurate
+  // and keeps the existing tests stable.
+  const needsAnalysis = items.some((item) => item.name === "fetch_page" || item.name === "web_search");
+  if (items.length > 0 && items.every((item) => item.state === "completed") && needsAnalysis) {
+    return `已读取 ${items.length} 个工具结果，正在分析…`;
+  }
   return `已执行 ${items.length} 个工具`;
 }
 
 export function ToolGroup({ items }: { items: IrisToolGroupItem[] }) {
+  const { knowledgeCollectionId } = useIrisChat();
   const [open, setOpen] = useState(false);
   const regionId = useId();
   const running = items.filter((item) => item.state === "running").length;
   const failed = items.filter((item) => item.state === "failed").length;
   const cancelled = items.filter((item) => item.state === "cancelled").length;
   const label = progressLabel(items, running, failed, cancelled);
+  const drafts = items
+    .map((item) => item.result)
+    .filter((result): result is IrisKnowledgeDraftResult => Boolean(result && typeof result === "object" && (result as IrisKnowledgeDraftResult).__irisKind === "knowledge-draft"));
 
   return (
     <div className="iris-tool-group">
@@ -62,6 +77,7 @@ export function ToolGroup({ items }: { items: IrisToolGroupItem[] }) {
         <span>{label}</span>
         <ChevronDownIcon className={`ml-auto size-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
+      {drafts.map((draft, index) => <KnowledgeDraftCard key={`${draft.title}-${index}`} draft={draft} collectionId={knowledgeCollectionId} />)}
       {open && (
         <div id={regionId} className="iris-tool-group-content">
           {items.map((item) => (

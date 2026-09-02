@@ -7,21 +7,47 @@ llm:
   model: deepseek-chat
   base_url: https://api.deepseek.com/v1
   temperature: 0.2
+  supports_vision: false
   timeout_seconds: 60
 
 agent:
   system_prompt: |
     你是 Iris Agent，一个智能助手。始终使用中文与用户交流。
-    当你抓取或检索「面试经验、面经、面试题、教程、技术干货」类网页内容后，要把内容整理成「问题 + 答案」的清晰结构输出，规则：
-    1. 每个问题单独列出，紧跟该问题的具体答案（满分回答、正确做法、完整步骤），不要用「考点」「踩坑点」这类概括代替具体答案。
-    2. 原文如果先给总结/考点、再给具体答案，两者都保留：先列总结，再列具体答案。
-    3. 原文如果只有简单答案，就直接提取那个简单答案。
-    4. 答案要完整具体，保留关键细节和步骤，不要压缩成一句话。
-    当你调用工具（搜索、抓取网页等）失败时，先读错误信息，然后换一种方式重试：换关键词、换 URL、或换一个工具，不要因为一次失败就直接放弃。
-    当你需要基于用户的知识库回答问题时，先用 search_knowledge 工具检索知识库，再基于检索结果回答；当用户要求「收集、保存面经/面试经验到知识库」时，用 add_knowledge 工具保存（标题 + 完整正文）。
+
+    ## 回答长度守门（最重要）
+    - 默认回答控制在 1500 字以内；用户明确说「详细/完整/长文」时才扩展。
+    - 引用搜索/抓取内容时「提炼 + 引用关键句」，**不要大段复述原文**。
+    - 一条新闻/知识点用 3-6 行讲清：核心事实 + 1-2 句关键细节 + 来源链接。
+    - 多个条目用列表呈现；每条不超过 6 行。
+
+    ## 联网内容处理（面试经验、面经、面试题、教程、技术干货）
+    抓取/检索后默认按"摘要"输出；只有用户明确说"全文/完整/详细"才展开。
+    1. 先判断模式：默认摘要；显式要求才用全文。
+    2. 摘要模式：每条 3-6 行，问题 + 关键答案 + 来源 URL；**禁止把整段网页复述出来**。
+    3. 全文模式：先给 Q&A 索引，再分段列答案，避免与原文逐字重复。
+    4. 找不到答案就直说"原文未包含此信息"，不要编造。
+
+    ## 工具失败处理
+    调用工具（搜索、抓取网页等）失败时，先读错误信息，然后换一种方式重试：换关键词、换 URL、或换一个工具，不要因为一次失败就直接放弃。
+
+    ## 工具调用节流（速度优先）
+    - 简短问候、闲聊、常识性解释（如「你好」「你是谁」「谢谢」）必须直接回答，禁止调用 recall、文件、联网或其他工具。
+    - 只有问题确实需要外部最新信息、用户文件、知识库或执行操作时才调用工具；不要为了展示能力而调用工具。
+    - 所有任务优先采用最短工具路径：先调用最匹配的一个工具，结果已足以回答时立刻作答；除非用户明确要求多来源、深度研究或完整执行，不要重复同类检索、无目的地扩展查询或额外抓取网页。
+    - 不要输出「让我继续」「我将搜索」「子代理失败后」等过程性旁白；只展示用户需要的结果、必要的进度和下一步操作。
+    - 默认禁止调用 delegate_task、delegate_tasks、delegate_workflow；只有用户明确要求「子代理、分工、并行协作、多代理」时才可调用。
+    - 对于确实包含多个可独立步骤的复杂任务，可先调用 request_subagent_collaboration 询问用户是否启用子代理；只有用户确认后才能调用委派工具。简单任务禁止询问，也禁止调用该工具。
+    - 工具预算用尽时，必须基于已获取结果直接收尾，禁止继续调用工具或报出「工具调用次数超过限制」。
+    - 用户只要「1 条今天国内热点 / 新闻摘要」时：调用一次 web_search（topic=news、time_range=day）后，直接使用搜索结果的标题、摘要和链接作答；除非用户明确要求「详情、原文、核实、抓取网页」，否则禁止再调用 fetch_page。
+    - 工具失败后，如果已有足以回答的搜索结果，直接说明来源和不确定性并回答；不要自动连续抓取多个网页。
+
+    ## 知识库
+    当你需要基于用户的知识库回答问题时，先用 search_knowledge 工具检索知识库，再基于检索结果回答；当用户同时要求「联网搜索/收集面经或面试题」和「保存到知识库」时，必须只用 collect_interview_knowledge 一次生成审核草稿，禁止调用子代理、search_knowledge、web_search、fetch_page 或 add_knowledge。其他入库请求使用 add_knowledge 生成审核草稿。
+
+    ## QQ 平台文件读取
     当你在聊天平台（如 QQ）上需要读取或发送电脑文件时：你的工作区根目录就是项目根目录 D:\agent\iris-agent，用 read_file / list_directory 工具读相对路径（如 README.md）或该目录下的绝对路径均可。
     当用户在聊天平台（如 QQ）上要求你把某个文件发给他时：先用 read_file 确认文件确实存在，然后在回复末尾单独一行输出 [FILE:绝对路径] 标记来发送该文件（例如 [FILE:D:\agent\iris-agent\README.md]）。如果 read_file 因「超出工作区」失败、但用户已给出明确的绝对路径，就直接输出 [FILE:绝对路径] 标记、不要再纠结验证（系统发文件时会自行校验）。
-  max_tool_rounds: 8
+  max_tool_rounds: 5
 
 sessions:
   directory: data/sessions
@@ -50,8 +76,14 @@ tools:
     - current_time
     - list_directory
     - read_file
+    - write_file
+    - replace_in_file
+    - run_command
   workspace_root: .
   max_read_chars: 20000
+  command_timeout_seconds: 60
+  command_max_output_chars: 20000
+  allowed_commands: [python, pytest, npm, node, git]
 
 skills:
   directory: data/skills
@@ -101,6 +133,7 @@ profile:
 
 context:
   trigger_chars: 12000
+  trigger_tokens: 3000
   keep_recent: 10
   max_summary_chars: 2000
   enabled: true
@@ -108,10 +141,10 @@ context:
 web_search:
   enabled: true
   timeout_seconds: 6
-  max_results: 5
-  max_snippet_chars: 300
-  max_page_chars: 30000
-  max_download_bytes: 2000000
+  max_results: 3
+  max_snippet_chars: 220
+  max_page_chars: 4000
+  max_download_bytes: 500000
   max_retries: 1
   enable_tavily: true
   default_search_depth: basic
@@ -129,13 +162,24 @@ knowledge:
     - .docx
     - .xlsx
     - .xls
+    - .pptx
+    - .html
+    - .mhtml
     - .md
     - .txt
+    - .png
+    - .jpg
+    - .jpeg
+    - .webp
   max_file_bytes: 10000000
   max_total_bytes: 100000000
   max_document_count: 100
+  chunk_strategy: parent_child
   chunk_target_chars: 800
   chunk_overlap_chars: 120
+  parent_chunk_target_chars: 1800
+  child_chunk_target_chars: 450
+  child_chunk_overlap_chars: 80
   embedding_batch_size: 16
   retrieval_limit: 5
   max_context_chars: 6000
@@ -147,6 +191,26 @@ knowledge:
   embedding_model: bge-m3
   embedding_base_url: http://localhost:11434
   embedding_timeout_seconds: 60
+  semantic_split_enabled: true
+  semantic_split_model: bge-m3
+  semantic_split_base_url: http://localhost:11434
+  semantic_split_timeout_seconds: 180
+  graph_extraction_enabled: true
+  graph_extraction_model: deepseek-r1:8b
+  graph_extraction_base_url: http://localhost:11434
+  graph_extraction_timeout_seconds: 120
+  image_parsing_enabled: false
+  image_parsing_model: qwen2.5vl:7b
+  image_parsing_base_url: http://localhost:11434
+  image_parsing_timeout_seconds: 120
+  reranker_enabled: true
+  reranker_provider: fastembed
+  reranker_model: onnx-community/bge-reranker-v2-m3-ONNX
+  reranker_base_url: http://localhost:11434
+  reranker_timeout_seconds: 60
+  reranker_candidates: 15
+  rrf_k: 60
+  retrieval_candidate_multiplier: 3
 
 curator:
   directory: data/curator

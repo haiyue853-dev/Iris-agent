@@ -44,7 +44,7 @@ class HotRadarService:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = root / "radar.json"
-        self.sources = sources or self._default_sources()
+        self.sources = self._default_sources() if sources is None else sources
 
     @staticmethod
     def _default_sources() -> dict[str, Source]:

@@ -23,6 +23,8 @@ describe('UmlFlowPage Draw.io workspace', () => {
 
   it('shows only the Draw.io professional canvas', () => {
     render(<UmlFlowPage />);
+
+    expect(document.querySelector('.uml-page')).toHaveClass('uml-page');
     expect(screen.getByTestId('drawio-editor')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '经典画布' })).not.toBeInTheDocument();
   });

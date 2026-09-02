@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupSourceParts, groupToolParts, toThreadMessages } from "./irisRuntime";
+import { groupSourceParts, groupToolParts, toThreadMessages, type IrisToolGroupResult } from "./irisRuntime";
 
 describe("toThreadMessages rich parts", () => {
   it("preserves reasoning and URL sources as typed assistant parts", () => {
@@ -29,6 +29,33 @@ describe("toThreadMessages rich parts", () => {
     const [message] = toThreadMessages([{ role: "user", content: "你好" }]);
     expect(message.content).toEqual([{ type: "text", text: "你好" }]);
   });
+
+  it("renders persisted knowledge drafts as editable tool parts", () => {
+    const messages = toThreadMessages([
+      { role: "tool", name: "add_knowledge", tool_call_id: "call-1", content: JSON.stringify({ __irisKind: "knowledge-draft", title: "面试题", content: "答案", category: "面经" }) } as unknown as import("../types").Message,
+    ]);
+
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "tool-call", toolName: "add_knowledge", result: { __irisKind: "knowledge-draft", title: "面试题" } }],
+    });
+  });
+
+  it("renders persisted knowledge citations as a citation panel", () => {
+    const [message] = toThreadMessages([{
+      role: "assistant",
+      content: "答案 [1]",
+      citations: [{ index: 1, document_id: "doc-1", chunk_id: "chunk-1", title: "启动", content: "npm run dev" }],
+    }]);
+
+    expect(message.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "tool-call",
+        toolName: "iris_knowledge_citations",
+        result: { __irisKind: "knowledge-citations", items: [{ index: 1, document_id: "doc-1", chunk_id: "chunk-1", title: "启动", content: "npm run dev" }] },
+      }),
+    ]));
+  });
 });
 
 describe("tool part grouping", () => {
@@ -45,6 +72,21 @@ describe("tool part grouping", () => {
       { callId: "c2", name: "read_file", state: "running" },
     ] } });
     expect(grouped[1]).toMatchObject({ toolCallId: "c3", toolName: "write_file" });
+  });
+
+  it("updates the already-rendered tool group when pending tools are cancelled", () => {
+    const parts = [
+      { type: "tool-call" as const, toolCallId: "c1", toolName: "delegate_tasks", args: {}, argsText: "{}" },
+    ];
+    const firstGroup = groupToolParts(parts);
+    const priorResult = firstGroup[0].result as IrisToolGroupResult;
+
+    const cancelledGroup = groupToolParts(parts, true, priorResult);
+
+    expect(cancelledGroup[0].result).toBe(priorResult);
+    expect(cancelledGroup[0]).toMatchObject({
+      result: { items: [{ callId: "c1", state: "cancelled" }] },
+    });
   });
 });
 

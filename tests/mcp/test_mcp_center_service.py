@@ -3,6 +3,8 @@ import io
 import json
 import subprocess
 
+import httpx
+
 from iris_agent.mcp_center.service import McpCenterService
 
 
@@ -20,6 +22,26 @@ def test_mcp_server_rejects_an_unsafe_command(tmp_path: Path) -> None:
         assert "command" in str(exc)
     else:
         raise AssertionError("unsafe command was accepted")
+
+
+def test_http_mcp_discovers_tools_and_reuses_server_session(tmp_path: Path, monkeypatch) -> None:
+    requests = []
+    def handler(request):
+        requests.append(request)
+        payload = json.loads(request.content)
+        if payload["method"] == "initialize":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": {}}, headers={"mcp-session-id": "session-1"})
+        return httpx.Response(200, content=f'data: {{"jsonrpc":"2.0","id":{payload["id"]},"result":{{"tools":[]}}}}\n\n', headers={"content-type": "text/event-stream"})
+
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Remote", transport="http", url="https://mcp.example.test/mcp")
+    service.set_enabled(server.id, True)
+    client_factory = httpx.Client
+    monkeypatch.setattr("iris_agent.mcp_center.service.httpx.Client", lambda **kwargs: client_factory(transport=httpx.MockTransport(handler), **kwargs))
+
+    assert service.discover_tools(server.id) == ()
+    assert [json.loads(item.content)["method"] for item in requests] == ["initialize", "tools/list"]
+    assert requests[1].headers["mcp-session-id"] == "session-1"
 
 
 def test_mcp_server_updates_its_tool_allowlist(tmp_path: Path) -> None:

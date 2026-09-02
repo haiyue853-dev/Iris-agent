@@ -7,6 +7,13 @@ from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.notifications.service import NotificationService
 
 
+def test_explicit_empty_sources_disable_default_network_sources(tmp_path):
+    radar = HotRadarService(tmp_path / "radar", sources={})
+
+    assert radar.sources == {}
+    assert radar.scan().new_count == 0
+
+
 def test_task_and_execution_ledger_survive_restart(tmp_path):
     radar = HotRadarService(tmp_path / "radar", sources={"tech": lambda: [{"title": "AI 更新", "url": "https://example.test/ai", "source": "Tech", "summary": "摘要"}]})
     radar.create_subscription("AI")

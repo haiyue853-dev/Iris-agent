@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fetchSkills, setSkillEnabled } from '../api/skills';
+import {
+  deleteUserSkill,
+  fetchSkills,
+  fetchUserSkillContent,
+  saveUserSkill,
+  setSkillEnabled,
+  type UserSkillContent,
+  type UserSkillDraft,
+} from '../api/skills';
 import type { SkillInfo } from '../types';
 
 const TOGGLE_PROCESSING_DELAY_MS = 250;
@@ -111,5 +119,54 @@ export function useSkills() {
     }
   }, [finishToggle]);
 
-  return { skills, loading, error, reload, toggleEnabled, togglingIds, processingIds };
+  const saveUserSkillDraft = useCallback(async (draft: UserSkillDraft) => {
+    setError('');
+    try {
+      const saved = await saveUserSkill(draft);
+      if (mountedRef.current) {
+        setSkills((current) => {
+          const index = current.findIndex((skill) => skill.id === saved.id);
+          if (index === -1) return [...current, saved];
+          return current.map((skill) => (skill.id === saved.id ? saved : skill));
+        });
+      }
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : '保存失败');
+      throw err;
+    }
+  }, []);
+
+  const loadUserSkillContent = useCallback(async (id: string): Promise<UserSkillContent> => {
+    setError('');
+    try {
+      return await fetchUserSkillContent(id);
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : '加载失败');
+      throw err;
+    }
+  }, []);
+
+  const removeUserSkill = useCallback(async (id: string) => {
+    setError('');
+    try {
+      await deleteUserSkill(id);
+      if (mountedRef.current) setSkills((current) => current.filter((skill) => skill.id !== id));
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : '删除失败');
+      throw err;
+    }
+  }, []);
+
+  return {
+    skills,
+    loading,
+    error,
+    reload,
+    toggleEnabled,
+    saveUserSkill: saveUserSkillDraft,
+    loadUserSkillContent,
+    removeUserSkill,
+    togglingIds,
+    processingIds,
+  };
 }

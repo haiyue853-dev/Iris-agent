@@ -9,7 +9,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
-import { type FC, memo, useState } from "react";
+import { type ComponentPropsWithoutRef, type FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
 
 import {
@@ -21,7 +21,7 @@ import { cn } from "@/lib/ui/cn";
 const MarkdownTextImpl = () => {
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkCitationLinks]}
       className="aui-md"
       components={defaultComponents}
     />
@@ -29,6 +29,43 @@ const MarkdownTextImpl = () => {
 };
 
 export const MarkdownText = memo(MarkdownTextImpl);
+
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: MarkdownNode[];
+};
+
+const citationMarker = /\[([1-9]\d*)\]/g;
+
+export function remarkCitationLinks() {
+  return (tree: MarkdownNode) => {
+    const replaceMarkers = (nodes: MarkdownNode[]) => {
+      for (let index = 0; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        if (node.type === "text" && node.value) {
+          citationMarker.lastIndex = 0;
+          const fragments: MarkdownNode[] = [];
+          let cursor = 0;
+          for (let match = citationMarker.exec(node.value); match; match = citationMarker.exec(node.value)) {
+            if (match.index > cursor) fragments.push({ type: "text", value: node.value.slice(cursor, match.index) });
+            fragments.push({ type: "link", url: `#iris-citation-${match[1]}`, children: [{ type: "text", value: match[0] }] });
+            cursor = match.index + match[0].length;
+          }
+          if (fragments.length) {
+            if (cursor < node.value.length) fragments.push({ type: "text", value: node.value.slice(cursor) });
+            nodes.splice(index, 1, ...fragments);
+            index += fragments.length - 1;
+          }
+        } else if (node.type !== "link" && node.children) {
+          replaceMarkers(node.children);
+        }
+      }
+    };
+    if (tree.children) replaceMarkers(tree.children);
+  };
+}
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
@@ -153,15 +190,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary font-medium underline underline-offset-4",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  a: MarkdownLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn("aui-md-blockquote border-l-2 pl-6 italic", className)}
@@ -249,3 +278,38 @@ const defaultComponents = memoizeMarkdownComponents({
   },
   CodeHeader,
 });
+
+export function MarkdownLink({
+  className,
+  href,
+  target,
+  rel,
+  ...props
+}: ComponentPropsWithoutRef<"a">) {
+  const citation = /^(?:iris-citation:|#iris-citation-)([1-9]\d*)$/.exec(href ?? "");
+  if (citation) {
+    return (
+      <button
+        type="button"
+        className={cn("iris-inline-citation text-primary font-medium", className)}
+        aria-label={`查看引用 [${citation[1]}]`}
+        onClick={(event) => { const messageRoot = event.currentTarget.closest(".aui-assistant-message-root"); window.dispatchEvent(new CustomEvent("iris:open-knowledge-citation", { detail: { index: Number(citation[1]), ...(messageRoot ? { messageRoot } : {}) } })); }}
+      >
+        {props.children}
+      </button>
+    );
+  }
+  const external = /^https?:\/\//i.test(href ?? "");
+  return (
+    <a
+      className={cn(
+        "aui-md-a text-primary font-medium underline underline-offset-4",
+        className,
+      )}
+      href={href}
+      target={external ? "_blank" : target}
+      rel={external ? "noopener noreferrer" : rel}
+      {...props}
+    />
+  );
+}

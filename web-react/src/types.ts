@@ -1,5 +1,5 @@
 export type ChatAttachment = {
-  id: string;
+  id?: string;
   original_name: string;
   media_type: string;
   size_bytes: number;
@@ -30,12 +30,31 @@ export type PendingAttachment = Omit<ChatAttachment, 'id' | 'media_type' | 'size
 };
 
 export type Message = {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
+  tool_call_id?: string;
+  name?: string;
   reasoning?: string;
   sources?: ChatSource[];
   attachment_ids?: string[];
   attachments?: ChatAttachment[];
+  citations?: Array<{
+    index: number;
+    document_id: string;
+    chunk_id: string;
+    title: string;
+    content: string;
+    location?: string | null;
+    score?: number;
+    keyword_score?: number;
+    vector_score?: number;
+    reranker_score?: number | null;
+    graph_score?: number;
+    routes?: string[];
+    collection_id?: string | null;
+    collection_name?: string | null;
+  }>;
 };
 
 export type ChatSource = {
@@ -43,7 +62,7 @@ export type ChatSource = {
   url: string;
   title?: string;
 };
-export type Session = { id: string; name: string; created_at: number; updated_at: number };
+export type Session = { id: string; name: string; created_at: number; updated_at: number; model_profile_id?: string | null };
 
 // ---------- AI HOT 每日资讯日报 ----------
 export type AihotDailyItem = {
@@ -214,6 +233,23 @@ export type ReportSummary = {
   updated_at: number;
 };
 
+export type DelegationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
+
+export type DelegationSummary = {
+  id: string;
+  parent_task_id: string | null;
+  session_id?: string | null;
+  status: DelegationStatus;
+  goal: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type DelegationDetail = DelegationSummary & {
+  result: string;
+  error: string | null;
+};
+
 export type GenerateReportInput = {
   date: string;
   notes: string;
@@ -225,11 +261,13 @@ export type GenerateReportInput = {
 
 export type AgentEvent =
   | { type: 'task_started'; data: { task_id: string } }
+  | { type: 'pipeline_stage'; data: { stage: 'planning' | 'retrieval' | 'rerank' | 'generation'; status: 'running' | 'completed' | 'failed'; detail?: { mode?: string; citations?: number; routes?: string[] } } }
   | { type: 'text_delta'; data: { content: string } }
   | { type: 'tool_started'; data: { call_id: string; name: string; arguments: Record<string, unknown> } }
+  | { type: 'tool_progress'; data: { call_id: string; name: string; output?: string } }
   | { type: 'tool_approval_requested'; data: { call_id: string; name: string; arguments: Record<string, unknown>; context?: { server_name?: string; tool_name?: string } | null } }
   | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string } }
-  | { type: 'message_completed'; data: { content?: string; message_id?: string } }
+  | { type: 'message_completed'; data: { content?: string; message_id?: string; metrics?: { first_token_ms: number | null; duration_ms: number; model?: string | null }; citations?: Array<{ index: number; document_id: string; chunk_id: string; title: string; content: string; location?: string | null; score: number; keyword_score?: number; vector_score?: number; reranker_score?: number | null }>; follow_up_suggestions?: string[] } }
   | { type: 'paused'; data: { reason?: string; call_id?: string } }
   | { type: 'error'; data: { code: string; message: string } };
 
@@ -308,6 +346,8 @@ export type SkillInfo = {
   entry_view: string;
   version: number;
   enabled: boolean;
+  source?: 'bundled' | 'user';
+  allowed_toolsets?: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation'>;
 };
 
 // ---------- 记忆系统 ----------
@@ -333,18 +373,29 @@ export type KnowledgeEntry = {
   source_type: KnowledgeSourceType;
   created_at: number;
   updated_at: number;
+  status?: 'queued' | 'indexing' | 'ready' | 'failed';
+  error_message?: string | null;
+  media_type?: string | null;
+  original_name?: string | null;
+  size_bytes?: number;
 };
 
 export type KnowledgeDetail = KnowledgeEntry & {
   content: string;
+  chunks?: { id: string; content: string; location?: string | null }[];
+  index_stats?: { chunk_count: number; embedding_count: number; graph_node_count: number; graph_edge_count: number };
 };
 
 export type KnowledgeSearchHit = {
-  entry_id: string;
+  entry_id?: string;
+  document_id?: string;
+  chunk_id?: string;
   title: string;
   content: string;
   source_url: string | null;
   score: number;
+  location?: string | null;
+  routes?: string[];
 };
 
 // ---------- Curator 后台审查 ----------

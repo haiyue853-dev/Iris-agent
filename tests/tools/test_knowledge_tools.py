@@ -17,20 +17,22 @@ def service(tmp_path):
     return KnowledgeService(repository, retriever)
 
 
-def test_add_knowledge_tool_saves_entry(service):
+def test_add_knowledge_tool_creates_review_draft_without_saving(service):
     tool = build_add_knowledge_tool(service)
     result = tool.invoke({"title": "多模态面试", "content": "多模态大模型结构"})
     assert result.ok
+    assert result.value["__irisKind"] == "knowledge-draft"
     assert result.value["title"] == "多模态面试"
-    assert result.value["source_type"] == "manual"
-    assert len(service.list()) == 1
+    assert result.value["category"] == "面经"
+    assert result.value["source_url"] is None
+    assert service.list() == []
 
 
-def test_add_knowledge_tool_infers_scrape(service):
+def test_add_knowledge_tool_keeps_source_url_in_review_draft(service):
     tool = build_add_knowledge_tool(service)
     result = tool.invoke({"title": "面试", "content": "内容", "source_url": "https://x.com"})
     assert result.ok
-    assert result.value["source_type"] == "scrape"
+    assert result.value["source_url"] == "https://x.com"
 
 
 def test_add_knowledge_tool_requires_title(service):

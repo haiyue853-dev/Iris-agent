@@ -28,3 +28,37 @@ export async function setSkillEnabled(id: string, enabled: boolean): Promise<Ski
   );
   return (await response.json()) as SkillInfo;
 }
+
+export type UserSkillDraft = {
+  name: string;
+  description: string;
+  content: string;
+  allowed_toolsets: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation'>;
+};
+
+export type UserSkillContent = SkillInfo & {
+  source: 'user';
+  content: string;
+};
+
+export async function saveUserSkill(draft: UserSkillDraft): Promise<SkillInfo> {
+  const response = await checked(
+    await fetch(`${API_BASE}/api/skills/user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    })
+  );
+  return (await response.json()) as SkillInfo;
+}
+
+export async function fetchUserSkillContent(id: string): Promise<UserSkillContent> {
+  const response = await checked(await fetch(`${API_BASE}/api/skills/${encodeURIComponent(id)}/content`));
+  return (await response.json()) as UserSkillContent;
+}
+
+export async function deleteUserSkill(id: string): Promise<void> {
+  await checked(
+    await fetch(`${API_BASE}/api/skills/user/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  );
+}

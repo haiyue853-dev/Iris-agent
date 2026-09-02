@@ -32,6 +32,11 @@ class QQOneBotAdapter:
 
     # ---- connection tracking (for active push) --------------------------
 
+    @property
+    def connected(self) -> bool:
+        with self._lock:
+            return self._ws is not None and self._loop is not None and not self._loop.is_closed()
+
     def attach(self, websocket, loop) -> None:
         with self._lock:
             self._ws = websocket

@@ -11,7 +11,7 @@ import yaml
 
 from iris_agent.skill_center.catalog import SkillCatalog
 from iris_agent.skill_center.errors import SkillNotFoundError
-from iris_agent.skill_center.models import SkillDefinition, SkillInfo
+from iris_agent.skill_center.models import SUPPORTED_SKILL_TOOLSETS, SkillDefinition, SkillInfo
 from iris_agent.skill_center.repository import SkillStateRepository, now_iso
 
 
@@ -68,6 +68,13 @@ class SkillCenterService:
     def load_skill(self, skill_id: str) -> SkillDefinition:
         return self._lookup(skill_id)
 
+    def load_user_skill(self, skill_id: str) -> SkillDefinition:
+        """返回可编辑的用户 Skill 正文，拒绝内置 Skill。"""
+        definition = self._lookup(skill_id)
+        if definition.source != "user":
+            raise ValueError("不能编辑内置 Skill")
+        return definition
+
     def find_skill(self, id_or_name: str) -> SkillDefinition | None:
         """按 id 或名称查找技能，找不到返回 None。"""
         if not id_or_name or not id_or_name.strip():
@@ -85,13 +92,15 @@ class SkillCenterService:
         self._repository.save(states)
         return self._to_info(definition, states)
 
-    def save_user_skill(self, name: str, description: str, content: str) -> SkillDefinition:
+    def save_user_skill(self, name: str, description: str, content: str, allowed_toolsets: tuple[str, ...] = ()) -> SkillDefinition:
         if self.user_directory is None:
             raise ValueError("未配置用户技能目录")
         name = name.strip()
         if not name or not description.strip() or not content.strip():
             raise ValueError("技能名称、描述与内容不能为空")
         content = content[: self.max_body_chars]
+        if any(item not in SUPPORTED_SKILL_TOOLSETS for item in allowed_toolsets) or len(set(allowed_toolsets)) != len(allowed_toolsets):
+            raise ValueError("Skill 工具集不合法")
 
         existing = None
         for skill in self._user_catalog.list() if self._user_catalog else []:
@@ -105,16 +114,14 @@ class SkillCenterService:
             skill_id = self._generate_id(name)
             version = 1
 
-        self._write_skill(skill_id, name, description, version, content)
+        self._write_skill(skill_id, name, description, version, content, allowed_toolsets)
         return self._lookup(skill_id)
 
     def delete_user_skill(self, skill_id: str) -> bool:
         """删除一个用户技能（仅限 user 目录），返回是否删除成功。"""
         if self.user_directory is None:
             return False
-        definition = self._lookup(skill_id)
-        if definition.source != "user":
-            raise ValueError("不能删除内置 Skill")
+        definition = self.load_user_skill(skill_id)
         directory = self.user_directory / skill_id
         if not directory.is_dir():
             return False
@@ -136,7 +143,7 @@ class SkillCenterService:
             slug = "skill"
         return f"{slug}-{uuid.uuid4().hex[:6]}"
 
-    def _write_skill(self, skill_id: str, name: str, description: str, version: int, content: str) -> None:
+    def _write_skill(self, skill_id: str, name: str, description: str, version: int, content: str, allowed_toolsets: tuple[str, ...]) -> None:
         directory = self.user_directory / skill_id
         directory.mkdir(parents=True, exist_ok=True)
         front = {
@@ -147,6 +154,7 @@ class SkillCenterService:
             "category": "custom",
             "entry_view": "chat",
             "version": version,
+            "allowed_toolsets": list(allowed_toolsets),
         }
         front_text = yaml.safe_dump(front, allow_unicode=True, sort_keys=False).strip()
         text = f"---\n{front_text}\n---\n{content}\n"
@@ -178,4 +186,6 @@ class SkillCenterService:
             entry_view=definition.entry_view,
             version=definition.version,
             enabled=bool(state.get("enabled", True)),
+            source=definition.source,
+            allowed_toolsets=definition.allowed_toolsets,
         )

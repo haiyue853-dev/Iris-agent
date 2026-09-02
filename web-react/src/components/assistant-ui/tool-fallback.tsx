@@ -7,9 +7,13 @@ import { cn } from "@/lib/ui/cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon, LoaderCircleIcon, XCircleIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { IrisApprovalResult, IrisSourcesGroupResult, IrisToolGroupResult } from "@/lib/irisRuntime";
+import type { IrisApprovalResult, IrisFollowUpSuggestionsResult, IrisKnowledgeCitationsResult, IrisKnowledgeDraftResult, IrisRagPipelineResult, IrisSourcesGroupResult, IrisToolGroupResult } from "@/lib/irisRuntime";
 import { ToolGroup } from "./tool-group";
 import { SourcesGroup } from "./sources-group";
+import { KnowledgeCitations } from "./knowledge-citations";
+import { KnowledgeDraftCard } from "./knowledge-draft-card";
+import { RagPipelineProgress } from "./rag-pipeline-progress";
+import { FollowUpSuggestions } from "./follow-up-suggestions";
 
 const TERMINAL_TOOLS = new Set([
   "terminal",
@@ -20,6 +24,7 @@ const TERMINAL_TOOLS = new Set([
   "exec",
   "sh",
   "powershell",
+  "run_command",
 ]);
 
 /** Renders the appropriate tool card for an assistant-ui tool-call part. */
@@ -35,6 +40,18 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
   if (result && typeof result === "object" && (result as IrisSourcesGroupResult).__irisKind === "sources-group") {
     return <SourcesGroup items={(result as IrisSourcesGroupResult).items} />;
   }
+  if (result && typeof result === "object" && (result as IrisKnowledgeCitationsResult).__irisKind === "knowledge-citations") {
+    return <KnowledgeCitations items={(result as IrisKnowledgeCitationsResult).items} />;
+  }
+  if (result && typeof result === "object" && (result as IrisFollowUpSuggestionsResult).__irisKind === "follow-up-suggestions") {
+    return <FollowUpSuggestions items={(result as IrisFollowUpSuggestionsResult).items} />;
+  }
+  if (result && typeof result === "object" && (result as IrisRagPipelineResult).__irisKind === "rag-pipeline") {
+    return <RagPipelineProgress stages={(result as IrisRagPipelineResult).stages} />;
+  }
+  if (result && typeof result === "object" && (result as { __irisKind?: string }).__irisKind === "knowledge-draft") {
+    return <KnowledgeDraftCard draft={result as IrisKnowledgeDraftResult} />;
+  }
 
   return <ToolFallbackWithContext toolName={toolName} argsText={argsText} result={result} status={status} />;
 };
@@ -45,6 +62,10 @@ const ToolFallbackWithContext: React.FC<DefaultProps> = ({ toolName, argsText, r
   // 1) Pending / resolved approval rendered as an approval card inside the message.
   if (result && typeof result === "object" && (result as IrisApprovalResult).__irisKind === "approval") {
     const approval = result as IrisApprovalResult;
+    if (approval.realResult && typeof approval.realResult === "object" && TERMINAL_TOOLS.has((toolName || "").toLowerCase())) {
+      const live = approval.realResult as Record<string, unknown>;
+      return <Terminal id={approval.call_id} command={typeof live.command === "string" ? live.command : ""} stdout={typeof live.stdout === "string" ? live.stdout : undefined} exitCode={typeof live.exitCode === "number" ? live.exitCode : 0} durationMs={typeof live.durationMs === "number" ? live.durationMs : undefined} cwd={typeof live.cwd === "string" ? live.cwd : undefined} />;
+    }
     const decided = approval.choice === "approved" || approval.choice === "denied";
     return (
       <ApprovalCard

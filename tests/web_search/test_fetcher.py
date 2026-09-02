@@ -57,6 +57,29 @@ def test_fetch_truncates_text():
     assert len(text) <= 10
 
 
+def test_fetch_can_bypass_summary_for_full_content_collection():
+    class Summarizer:
+        def summarize(self, url, raw_text, query_hint=None):
+            return "compressed summary"
+
+    fetcher = _fetcher(PAGE_HTML, summarizer=Summarizer())
+
+    text = fetcher.fetch("https://example.com/page", summarize=False)
+
+    assert "正文第一段内容" in text
+    assert "compressed summary" not in text
+
+
+def test_full_content_collection_is_not_cut_by_summary_page_limit():
+    html = "<article><p>" + ("完整问答" * 100) + "</p></article>"
+    fetcher = _fetcher(html, max_page_chars=20)
+
+    text = fetcher.fetch("https://example.com/interview", summarize=False)
+
+    assert len(text) > 20
+    assert text.endswith("完整问答")
+
+
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)"])
 def test_fetch_rejects_non_http_scheme(url):
     fetcher = _fetcher(PAGE_HTML)
@@ -139,6 +162,12 @@ def test_fetch_switches_user_agent_on_retry():
 
     assert len(seen_agents) == 2
     assert seen_agents[0] != seen_agents[1]
+
+
+def test_fetch_requests_an_identity_response_from_incompatible_sites():
+    headers = PageFetcher._headers_for(0, "https://notes.kamacoder.com/interview/llm/agent_interview.html")
+
+    assert headers["Accept-Encoding"] == "identity"
 
 
 def test_fetch_raises_after_retries_exhausted():

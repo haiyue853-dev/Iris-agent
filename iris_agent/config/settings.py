@@ -18,6 +18,7 @@ class LLMSettings:
     base_url: str = "https://api.deepseek.com/v1"
     api_key: str = ""
     temperature: float = 0.2
+    supports_vision: bool = False
     timeout_seconds: float = 60.0
 
 
@@ -57,9 +58,12 @@ class AttachmentSettings:
 
 @dataclass(slots=True)
 class ToolSettings:
-    enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file"])
+    enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file", "write_file", "replace_in_file", "run_command"])
     workspace_root: Path = Path("workspace")
     max_read_chars: int = 20_000
+    command_timeout_seconds: int = 60
+    command_max_output_chars: int = 20_000
+    allowed_commands: tuple[str, ...] = ("python", "pytest", "npm", "node", "git")
 
 
 @dataclass(slots=True)
@@ -136,6 +140,7 @@ class ProfileSettings:
 @dataclass(slots=True)
 class ContextSettings:
     trigger_chars: int = 12000
+    trigger_tokens: int | None = 3000
     keep_recent: int = 10
     max_summary_chars: int = 2000
     enabled: bool = True
@@ -164,12 +169,19 @@ class KnowledgeSettings:
     directory: Path = Path("data/knowledge")
     database_file: Path = Path("data/knowledge/knowledge.db")
     files_directory: Path = Path("data/knowledge/files")
-    allowed_upload_extensions: tuple[str, ...] = (".pdf", ".docx", ".xlsx", ".xls", ".md", ".txt")
+    allowed_upload_extensions: tuple[str, ...] = (
+        ".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".html", ".mhtml",
+        ".md", ".txt", ".png", ".jpg", ".jpeg", ".webp",
+    )
     max_file_bytes: int = 10_000_000
     max_total_bytes: int = 100_000_000
     max_document_count: int = 100
+    chunk_strategy: str = "parent_child"
     chunk_target_chars: int = 800
     chunk_overlap_chars: int = 120
+    parent_chunk_target_chars: int = 1800
+    child_chunk_target_chars: int = 450
+    child_chunk_overlap_chars: int = 80
     embedding_batch_size: int = 16
     retrieval_limit: int = 5
     max_context_chars: int = 6_000
@@ -181,6 +193,27 @@ class KnowledgeSettings:
     embedding_model: str = "bge-m3"
     embedding_base_url: str = "http://localhost:11434"
     embedding_timeout_seconds: float = 60
+    semantic_split_enabled: bool = True
+    semantic_split_model: str = "bge-m3"
+    semantic_split_base_url: str = "http://localhost:11434"
+    semantic_split_timeout_seconds: float = 180
+    graph_extraction_enabled: bool = True
+    graph_extraction_model: str = "deepseek-r1:8b"
+    graph_extraction_base_url: str = "http://localhost:11434"
+    graph_extraction_timeout_seconds: float = 120
+    image_parsing_enabled: bool = False
+    image_parsing_model: str = "qwen2.5vl:7b"
+    image_parsing_base_url: str = "http://localhost:11434"
+    image_parsing_timeout_seconds: float = 120
+    reranker_enabled: bool = True
+    reranker_provider: str = "fastembed"
+    reranker_model: str = "onnx-community/bge-reranker-v2-m3-ONNX"
+    reranker_base_url: str = "http://localhost:11434"
+    reranker_api_key: str = field(default="", repr=False)
+    reranker_timeout_seconds: float = 60
+    reranker_candidates: int = 15
+    rrf_k: int = 60
+    retrieval_candidate_multiplier: int = 3
 
 
 @dataclass(slots=True)
@@ -423,7 +456,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         llm=LLMSettings(
             provider=str(llm.get("provider", "openai_compatible")), model=str(model),
             base_url=str(base_url), api_key=str(api_key),
-            temperature=float(llm.get("temperature", 0.2)), timeout_seconds=float(llm.get("timeout_seconds", 60)),
+            temperature=float(llm.get("temperature", 0.2)), supports_vision=bool(llm.get("supports_vision", False)), timeout_seconds=float(llm.get("timeout_seconds", 60)),
         ),
         agent=AgentSettings(system_prompt=str(agent.get("system_prompt", raw.get("system_prompt", AgentSettings().system_prompt))), max_tool_rounds=int(agent.get("max_tool_rounds", 8))),
         sessions=SessionSettings(directory=Path(sessions.get("directory", raw.get("session_path", "data/sessions")))),
@@ -446,7 +479,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_text_chars=int(attachments.get("max_text_chars", 50_000)),
             temporary_ttl_seconds=int(attachments.get("temporary_ttl_seconds", 86_400)),
         ),
-        tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000))),
+        tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000)), command_timeout_seconds=int(tools.get("command_timeout_seconds", 60)), command_max_output_chars=int(tools.get("command_max_output_chars", 20_000)), allowed_commands=tuple(tools.get("allowed_commands", ("python", "pytest", "npm", "node", "git")))),
         skills=SkillSettings(
             directory=Path(skills.get("directory", "data/skills")),
             settings_file=Path(skills.get("settings_file", str(Path(str(skills.get("directory", "data/skills"))) / "settings.json"))),
@@ -494,6 +527,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         context=ContextSettings(
             trigger_chars=int(context.get("trigger_chars", 12000)),
+            trigger_tokens=int(context["trigger_tokens"]) if context.get("trigger_tokens") is not None else None,
             keep_recent=int(context.get("keep_recent", 10)),
             max_summary_chars=int(context.get("max_summary_chars", 2000)),
             enabled=bool(context.get("enabled", True)),
@@ -524,8 +558,12 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_file_bytes=_knowledge_int(knowledge, "max_file_bytes", 10_000_000),
             max_total_bytes=_knowledge_int(knowledge, "max_total_bytes", 100_000_000),
             max_document_count=_knowledge_int(knowledge, "max_document_count", 100),
+            chunk_strategy=_knowledge_nonblank_string(knowledge, "chunk_strategy", "parent_child").lower(),
             chunk_target_chars=_knowledge_int(knowledge, "chunk_target_chars", 800),
             chunk_overlap_chars=_knowledge_int(knowledge, "chunk_overlap_chars", 120),
+            parent_chunk_target_chars=_knowledge_int(knowledge, "parent_chunk_target_chars", 1800),
+            child_chunk_target_chars=_knowledge_int(knowledge, "child_chunk_target_chars", 450),
+            child_chunk_overlap_chars=_knowledge_int(knowledge, "child_chunk_overlap_chars", 80),
             embedding_batch_size=_knowledge_int(knowledge, "embedding_batch_size", 16),
             retrieval_limit=_knowledge_int(knowledge, "retrieval_limit", 5),
             max_context_chars=_knowledge_int(knowledge, "max_context_chars", 6_000),
@@ -537,6 +575,27 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             embedding_model=_knowledge_nonblank_string(knowledge, "embedding_model", "bge-m3"),
             embedding_base_url=_knowledge_http_url(knowledge, "embedding_base_url", "http://localhost:11434"),
             embedding_timeout_seconds=_knowledge_float(knowledge, "embedding_timeout_seconds", 60),
+            semantic_split_enabled=bool(knowledge.get("semantic_split_enabled", True)),
+            semantic_split_model=_knowledge_nonblank_string(knowledge, "semantic_split_model", "bge-m3"),
+            semantic_split_base_url=_knowledge_http_url(knowledge, "semantic_split_base_url", "http://localhost:11434"),
+            semantic_split_timeout_seconds=_knowledge_float(knowledge, "semantic_split_timeout_seconds", 180),
+            graph_extraction_enabled=bool(knowledge.get("graph_extraction_enabled", True)),
+            graph_extraction_model=_knowledge_nonblank_string(knowledge, "graph_extraction_model", "deepseek-r1:8b"),
+            graph_extraction_base_url=_knowledge_http_url(knowledge, "graph_extraction_base_url", "http://localhost:11434"),
+            graph_extraction_timeout_seconds=_knowledge_float(knowledge, "graph_extraction_timeout_seconds", 120),
+            image_parsing_enabled=bool(knowledge.get("image_parsing_enabled", False)),
+            image_parsing_model=_knowledge_nonblank_string(knowledge, "image_parsing_model", "qwen2.5vl:7b"),
+            image_parsing_base_url=_knowledge_http_url(knowledge, "image_parsing_base_url", "http://localhost:11434"),
+            image_parsing_timeout_seconds=_knowledge_float(knowledge, "image_parsing_timeout_seconds", 120),
+            reranker_enabled=bool(knowledge.get("reranker_enabled", True)),
+            reranker_provider=_knowledge_nonblank_string(knowledge, "reranker_provider", "fastembed").lower(),
+            reranker_model=_knowledge_nonblank_string(knowledge, "reranker_model", "onnx-community/bge-reranker-v2-m3-ONNX"),
+            reranker_base_url=_knowledge_http_url(knowledge, "reranker_base_url", "http://localhost:11434"),
+            reranker_api_key=os.getenv("RERANK_API_KEY", ""),
+            reranker_timeout_seconds=_knowledge_float(knowledge, "reranker_timeout_seconds", 60),
+            reranker_candidates=_knowledge_int(knowledge, "reranker_candidates", 15),
+            rrf_k=_knowledge_int(knowledge, "rrf_k", 60),
+            retrieval_candidate_multiplier=_knowledge_int(knowledge, "retrieval_candidate_multiplier", 3),
         ),
         curator=CuratorSettings(
             directory=Path(curator.get("directory", "data/curator")),
@@ -616,16 +675,33 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     for field_name in (
         "max_file_bytes", "max_total_bytes", "max_document_count", "chunk_target_chars",
         "embedding_batch_size", "retrieval_limit", "max_context_chars", "max_content_chars",
-        "max_hit_chars", "default_limit",
+        "max_hit_chars", "default_limit", "reranker_candidates", "rrf_k", "retrieval_candidate_multiplier",
+        "parent_chunk_target_chars", "child_chunk_target_chars",
     ):
         if getattr(settings.knowledge, field_name) < 1:
             raise ConfigurationError(f"knowledge.{field_name} 必须大于 0")
     if not 0 <= settings.knowledge.chunk_overlap_chars < settings.knowledge.chunk_target_chars:
         raise ConfigurationError("knowledge.chunk_overlap_chars 必须大于或等于 0 且小于 chunk_target_chars")
+    if settings.knowledge.chunk_strategy not in {"flat", "parent_child"}:
+        raise ConfigurationError("knowledge.chunk_strategy 必须是 flat 或 parent_child")
+    if settings.knowledge.child_chunk_target_chars > settings.knowledge.parent_chunk_target_chars:
+        raise ConfigurationError("knowledge.child_chunk_target_chars 不能大于 parent_chunk_target_chars")
+    if not 0 <= settings.knowledge.child_chunk_overlap_chars < settings.knowledge.child_chunk_target_chars:
+        raise ConfigurationError("knowledge.child_chunk_overlap_chars 必须小于 child_chunk_target_chars")
     if not 0 <= settings.knowledge.minimum_relevance_score <= 1:
         raise ConfigurationError("knowledge.minimum_relevance_score 必须在 0 到 1 之间")
     if settings.knowledge.retriever not in {"keyword", "embedding", "hybrid"}:
         raise ConfigurationError("knowledge.retriever 必须是 keyword、embedding 或 hybrid")
     if settings.knowledge.embedding_timeout_seconds <= 0:
         raise ConfigurationError("knowledge.embedding_timeout_seconds 必须是大于 0 的有限数字")
+    if settings.knowledge.reranker_timeout_seconds <= 0:
+        raise ConfigurationError("knowledge.reranker_timeout_seconds 必须是大于 0 的有限数字")
+    if settings.knowledge.image_parsing_timeout_seconds <= 0:
+        raise ConfigurationError("knowledge.image_parsing_timeout_seconds 必须是大于 0 的有限数字")
+    if settings.knowledge.reranker_provider not in {"ollama", "api", "fastembed", "none"}:
+        raise ConfigurationError("knowledge.reranker_provider 必须是 ollama、api、fastembed 或 none")
+    if settings.knowledge.rrf_k < 1:
+        raise ConfigurationError("knowledge.rrf_k 必须大于 0")
+    if settings.knowledge.retrieval_candidate_multiplier < 1:
+        raise ConfigurationError("knowledge.retrieval_candidate_multiplier 必须大于 0")
     return settings

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import Any
 
 from .base import Tool, ToolExecutionResult
@@ -14,6 +16,13 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._tools)
+
+    def schema_hash(self) -> str:
+        payload = json.dumps(self.schemas(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def replace_prefix(self, prefix: str, tools: list[Tool]) -> None:
         for name in tuple(self._tools):

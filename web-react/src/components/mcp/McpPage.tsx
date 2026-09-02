@@ -9,6 +9,7 @@ import {
   setMcpAllowedTools,
   setMcpEnabled,
   setMcpEnvironment,
+  setMcpHeaders,
   setMcpTimeout,
   type McpEvent,
   type McpServer,
@@ -20,6 +21,8 @@ export default function McpPage() {
   const [name, setName] = useState('Browser MCP');
   const [command, setCommand] = useState('node');
   const [args, setArgs] = useState('D:/agent/browser-mcp/browser-mcp-server-v2.js');
+  const [transport, setTransport] = useState<'stdio' | 'http'>('stdio');
+  const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [tools, setTools] = useState<Record<string, McpTool[]>>({});
   const [selectedTools, setSelectedTools] = useState<Record<string, string[]>>({});
@@ -49,7 +52,7 @@ export default function McpPage() {
 
   const add = async () => {
     try {
-      await createMcpServer({ name, command, args: args.split('\n').map((value) => value.trim()).filter(Boolean), allowed_tools: [] });
+      await createMcpServer({ name, transport, command, url, args: args.split('\n').map((value) => value.trim()).filter(Boolean), allowed_tools: [] });
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '保存失败');
@@ -121,12 +124,12 @@ export default function McpPage() {
         )}
       </section>
 
-      <section id="mcp-add-service" className="mcp-add-service" aria-label="添加本地 stdio 服务">
-        <div className="mcp-section-heading"><div><h2>添加本地服务</h2><span>通过 stdio 启动命令接入 MCP 服务</span></div></div>
+      <section id="mcp-add-service" className="mcp-add-service" aria-label="添加 MCP 服务">
+        <div className="mcp-section-heading"><div><h2>添加 MCP 服务</h2><span>支持本地 stdio 与远程 Streamable HTTP / SSE 响应</span></div></div>
         <div className="mcp-form-grid">
           <label>服务名称<input aria-label="服务名称" value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label>启动命令<input aria-label="启动命令" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
-          <label className="mcp-form-wide">命令参数 <small>每行一个参数</small><textarea aria-label="命令参数" value={args} onChange={(event) => setArgs(event.target.value)} /></label>
+          <label>连接方式<select aria-label="连接方式" value={transport} onChange={(event) => setTransport(event.target.value as 'stdio' | 'http')}><option value="stdio">本地 stdio</option><option value="http">远程 HTTP</option></select></label>
+          {transport === 'stdio' ? <><label>启动命令<input aria-label="启动命令" value={command} onChange={(event) => setCommand(event.target.value)} /></label><label className="mcp-form-wide">命令参数 <small>每行一个参数</small><textarea aria-label="命令参数" value={args} onChange={(event) => setArgs(event.target.value)} /></label></> : <label className="mcp-form-wide">服务地址<input aria-label="MCP 服务地址" placeholder="https://example.com/mcp" value={url} onChange={(event) => setUrl(event.target.value)} /></label>}
         </div>
         <div className="mcp-form-foot"><span>保存后请启用服务，并执行一次连接检测。</span><button className="mcp-primary-button" onClick={() => void add()}>保存服务配置</button></div>
       </section>
@@ -150,8 +153,10 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
   const isConnected = server.status === 'connected';
   const latestFailure = events.find((event) => !event.ok);
   const [editingEnvironment, setEditingEnvironment] = useState(false);
+  const [editingHeaders, setEditingHeaders] = useState(false);
   const [editingTimeout, setEditingTimeout] = useState(false);
   const [environmentText, setEnvironmentText] = useState('');
+  const [headersText, setHeadersText] = useState('');
   const [environmentError, setEnvironmentError] = useState('');
   const [timeoutText, setTimeoutText] = useState(String(server.timeout_seconds));
 
@@ -191,13 +196,27 @@ function ServerPanel({ server, tools, selected, events, onToggleEnabled, onDisco
     }
   };
 
+  const saveHeaders = async () => {
+    const headers: Record<string, string> = {};
+    for (const line of headersText.split('\n').map((item) => item.trim()).filter(Boolean)) {
+      const separator = line.indexOf('=');
+      if (separator <= 0) { setEnvironmentError('每行请使用 KEY=VALUE 格式'); return; }
+      headers[line.slice(0, separator).trim()] = line.slice(separator + 1);
+    }
+    try {
+      onUpdateServer(await setMcpHeaders(server.id, headers));
+      setHeadersText(''); setEditingHeaders(false); setEnvironmentError('');
+    } catch (reason) { setEnvironmentError(reason instanceof Error ? reason.message : '请求头保存失败'); }
+  };
+
   return <article className="mcp-server-panel">
     <div className="mcp-server-topline">
       <div className={`mcp-server-icon ${server.enabled ? 'is-online' : ''}`}>⌘</div>
-      <div className="mcp-server-identity"><div><h3>{server.name}</h3><span data-testid="mcp-session-state" data-status={server.status} className={`mcp-server-state ${server.enabled ? 'is-online' : ''}`}>{isConnected ? '已连接' : server.enabled ? '已启用' : '未启用'}</span></div><code>{server.command} {server.args.join(' ')}</code>{connectedToolCount > 0 && <span className="mcp-conversation-ready">已接入主对话 · {connectedToolCount} 个工具</span>}{server.env_keys.length > 0 && <span className="mcp-environment-summary">变量：{server.env_keys.join(' · ')}</span>}</div>
-      <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={() => setEditingEnvironment((current) => !current)}>环境变量</button><button className="mcp-secondary-button" onClick={() => setEditingTimeout((current) => !current)}>超时 {server.timeout_seconds} 秒</button><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>{latestFailure ? '重新检测连接' : '检测连接'}</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
+      <div className="mcp-server-identity"><div><h3>{server.name}</h3><span data-testid="mcp-session-state" data-status={server.status} className={`mcp-server-state ${server.enabled ? 'is-online' : ''}`}>{isConnected ? '已连接' : server.enabled ? '已启用' : '未启用'}</span></div><code>{server.transport === 'http' ? server.url : `${server.command} ${server.args.join(' ')}`}</code>{connectedToolCount > 0 && <span className="mcp-conversation-ready">已接入主对话 · {connectedToolCount} 个工具</span>}{server.env_keys.length > 0 && <span className="mcp-environment-summary">变量：{server.env_keys.join(' · ')}</span>}</div>
+      <div className="mcp-server-actions"><button className="mcp-secondary-button" onClick={() => setEditingEnvironment((current) => !current)}>环境变量</button>{server.transport === 'http' && <button className="mcp-secondary-button" onClick={() => setEditingHeaders((current) => !current)}>请求头</button>}<button className="mcp-secondary-button" onClick={() => setEditingTimeout((current) => !current)}>超时 {server.timeout_seconds} 秒</button><button className="mcp-secondary-button" onClick={onToggleEnabled}>{server.enabled ? '停用' : '启用'}</button><button className="mcp-primary-button" disabled={!server.enabled} onClick={onDiscover}>{latestFailure ? '重新检测连接' : '检测连接'}</button><button className="mcp-icon-button" aria-label={`删除配置 ${server.name}`} onClick={onRemove}>×</button></div>
     </div>
     {editingEnvironment && <section className="mcp-environment-editor"><div><h4>环境变量</h4><span>仅此处输入值；保存后只显示变量名，并会重新建立连接。</span></div><textarea aria-label={`环境变量 ${server.name}`} value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} placeholder="SEARCH_API_KEY=...\nREGION=cn" />{server.env_keys.length > 0 && <div className="mcp-environment-keys">{server.env_keys.map((key) => <span key={key}>{key}</span>)}</div>}{environmentError && <p role="alert">{environmentError}</p>}<button className="mcp-primary-button" onClick={() => void saveEnvironment()}>保存环境变量</button></section>}
+    {editingHeaders && <section className="mcp-environment-editor"><div><h4>认证请求头</h4><span>每行 KEY=VALUE；保存后仅显示键名，并会重新建立连接。</span></div><textarea aria-label={`请求头 ${server.name}`} value={headersText} onChange={(event) => setHeadersText(event.target.value)} placeholder="Authorization=Bearer ...\nX-API-Key=..." />{server.header_keys.length > 0 && <div className="mcp-environment-keys">{server.header_keys.map((key) => <span key={key}>{key}</span>)}</div>}{environmentError && <p role="alert">{environmentError}</p>}<button className="mcp-primary-button" onClick={() => void saveHeaders()}>保存请求头</button></section>}
     {editingTimeout && <section className="mcp-timeout-editor"><label>响应超时<input aria-label={`响应超时 ${server.name}`} type="number" min="1" max="120" value={timeoutText} onChange={(event) => setTimeoutText(event.target.value)} /> 秒</label><span>超时后会关闭当前连接；下次调用会自动重连。</span><button className="mcp-primary-button" onClick={() => void saveTimeout()}>保存超时</button></section>}
     <div className="mcp-server-body">
       <section className="mcp-permissions"><div className="mcp-panel-heading"><div><h4>工具权限</h4><span>{tools.length ? `已发现 ${tools.length} 个工具` : '请先检测连接以发现工具'}</span></div>{tools.length > 0 && <div className="mcp-permission-actions"><button className="mcp-text-button" disabled={!server.enabled || automaticTools.length === 0} onClick={() => onSelectAutomaticTools(server.id, automaticTools)}>选择全部可自动执行工具</button><button className="mcp-text-button" disabled={!server.enabled} onClick={onSaveTools}>保存授权</button></div>}</div>

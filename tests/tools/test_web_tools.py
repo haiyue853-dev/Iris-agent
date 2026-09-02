@@ -1,4 +1,4 @@
-from iris_agent.tools.builtin.web_tools import build_fetch_page_tool, build_web_search_tool
+from iris_agent.tools.builtin.web_tools import build_collect_interview_knowledge_tool, build_fetch_page_tool, build_web_search_tool
 from iris_agent.tools.registry import ToolRegistry
 from iris_agent.web_search.models import SearchResult
 
@@ -40,12 +40,12 @@ class FakeFetcher:
     def __init__(self, text: str):
         self.text = text
 
-    def fetch(self, url):
+    def fetch(self, url, query_hint=None):
         return self.text
 
 
 class RaisingFetcher:
-    def fetch(self, url):
+    def fetch(self, url, query_hint=None):
         raise ValueError("禁止访问内网地址")
 
 
@@ -279,6 +279,31 @@ def test_fetch_page_tool_returns_text():
     assert result.value["text"] == "正文内容"
 
 
+def test_fetch_page_tool_can_return_full_content_without_summarizing():
+    class FullContentFetcher:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, query_hint=None, summarize=True):
+            self.calls.append((url, query_hint, summarize))
+            return "完整问题与答案"
+
+    fetcher = FullContentFetcher()
+    tool = build_fetch_page_tool(fetcher)
+
+    result = tool.invoke({
+        "url": "https://example.com/interview",
+        "query_hint": "抓取面试问题加答案",
+        "content_mode": "full",
+    })
+
+    assert result.ok
+    assert result.value["text"] == "完整问题与答案"
+    assert fetcher.calls == [
+        ("https://example.com/interview", "抓取面试问题加答案", False)
+    ]
+
+
 def test_fetch_page_tool_requires_url():
     registry = ToolRegistry()
     registry.register(build_fetch_page_tool(FakeFetcher("正文")))
@@ -296,3 +321,112 @@ def test_fetch_page_tool_reports_error():
 
     assert not result.ok
     assert "内网" in result.error_message
+
+
+def test_collect_interview_knowledge_searches_once_fetches_two_pages_and_returns_a_draft():
+    class SearchClient:
+        last_error = None
+
+        def __init__(self):
+            self.calls = []
+
+        def search(self, query, limit=None):
+            self.calls.append((query, limit))
+            return [
+                SearchResult(title="题目一", url="https://example.com/1", snippet="摘要一"),
+                SearchResult(title="题目二", url="https://example.com/2", snippet="摘要二"),
+                SearchResult(title="题目三", url="https://example.com/3", snippet="摘要三"),
+            ]
+
+    class Fetcher:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, query_hint=None):
+            self.calls.append((url, query_hint))
+            return f"{url} 的正文"
+
+    client = SearchClient()
+    fetcher = Fetcher()
+
+    result = build_collect_interview_knowledge_tool(client, fetcher).invoke({"query": "LLM 面试题"})
+
+    assert result.ok
+    assert client.calls == [("LLM 面试题", 3)]
+    assert set(fetcher.calls) == {
+        ("https://example.com/1", "LLM 面试题"),
+        ("https://example.com/2", "LLM 面试题"),
+    }
+    assert result.value["__irisKind"] == "knowledge-draft"
+    assert result.value["source_url"] == "https://example.com/1"
+    assert "题目一" in result.value["content"]
+    assert "题目二" in result.value["content"]
+    assert "题目三" not in result.value["content"]
+
+
+def test_collect_interview_knowledge_prioritizes_direct_url_and_keeps_full_qa_content():
+    class SearchClient:
+        last_error = None
+
+        def __init__(self):
+            self.calls = []
+
+        def search(self, query, limit=None):
+            self.calls.append((query, limit))
+            return []
+
+    class Fetcher:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, query_hint=None, summarize=True):
+            self.calls.append((url, query_hint, summarize))
+            return "1. 什么是 Agentic RAG？\n答案：它会动态规划并按需重新检索。"
+
+    client = SearchClient()
+    fetcher = Fetcher()
+    query = "抓取问题加答案 https://notes.example.com/rag.html#agent"
+
+    result = build_collect_interview_knowledge_tool(client, fetcher).invoke({"query": query})
+
+    assert result.ok
+    assert client.calls == []
+    assert fetcher.calls == [("https://notes.example.com/rag.html", query, False)]
+    assert "什么是 Agentic RAG" in result.value["content"]
+    assert "动态规划并按需重新检索" in result.value["content"]
+    assert result.value["source_url"] == "https://notes.example.com/rag.html"
+
+
+def test_collect_interview_knowledge_normalizes_markdown_url_and_fetches_it_once():
+    class SearchClient:
+        last_error = None
+
+        def search(self, query, limit=None):
+            raise AssertionError("直链不应触发搜索")
+
+    class Fetcher:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, query_hint=None, summarize=True):
+            self.calls.append((url, query_hint, summarize))
+            return "问题：RAG 的幻觉怎么处理？\n答案：提升召回质量并约束生成。"
+
+    query = (
+        r"1[https://notes.kamacoder.com/interview/llm/rag\_interview.html#\_9-rag-"
+        r"%E7%9A%84%E5%B9%BB%E8%A7%89%E6%80%8E%E4%B9%88%E5%A4%84%E7%90%86"
+        r"抓取这个页面的面试经验](https://notes.kamacoder.com/interview/llm/rag_interview.html#_9-rag-"
+        r"%E7%9A%84%E5%B9%BB%E8%A7%89%E6%80%8E%E4%B9%88%E5%A4%84%E7%90%86"
+        r"抓取这个页面的面试经验)"
+    )
+    fetcher = Fetcher()
+
+    result = build_collect_interview_knowledge_tool(SearchClient(), fetcher).invoke(
+        {"query": query}
+    )
+
+    canonical_url = "https://notes.kamacoder.com/interview/llm/rag_interview.html"
+    assert result.ok
+    assert fetcher.calls == [(canonical_url, query, False)]
+    assert result.value["source_url"] == canonical_url
+    assert "RAG 的幻觉怎么处理" in result.value["content"]

@@ -34,6 +34,10 @@ class Message:
     tool_call_id: str | None = None
     name: str | None = None
     attachment_ids: list[str] = field(default_factory=list)
+    image_urls: list[str] = field(default_factory=list)
+    prompt_content: str | None = None
+    runtime_epoch: int | None = None
+    citations: list[dict[str, Any]] = field(default_factory=list)
     id: str = field(default_factory=lambda: f"message_{uuid.uuid4().hex}")
 
     def __post_init__(self) -> None:
@@ -41,6 +45,18 @@ class Message:
             raise ValueError(f"Unsupported message role: {self.role}")
         if not isinstance(self.attachment_ids, list) or any(not isinstance(item, str) or not item for item in self.attachment_ids):
             raise ValueError("attachment_ids must be a list of non-empty strings")
+        if not isinstance(self.image_urls, list) or any(not isinstance(item, str) or not item.startswith("data:image/") for item in self.image_urls):
+            raise ValueError("image_urls must contain image data URLs")
+        if self.prompt_content is not None and not isinstance(self.prompt_content, str):
+            raise ValueError("prompt_content must be a string or None")
+        if self.runtime_epoch is not None and (not isinstance(self.runtime_epoch, int) or self.runtime_epoch < 1):
+            raise ValueError("runtime_epoch must be a positive integer or None")
+        if not isinstance(self.citations, list) or any(not isinstance(item, dict) for item in self.citations):
+            raise ValueError("citations must be a list of objects")
+
+    @property
+    def model_content(self) -> str:
+        return self.content if self.prompt_content is None else self.prompt_content
 
 
 @dataclass(slots=True)

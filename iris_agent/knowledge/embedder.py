@@ -20,10 +20,12 @@ class OllamaEmbedder:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._client = http_client or httpx.Client(timeout=timeout)
+        self._client = http_client or httpx.Client(timeout=timeout, trust_env=False)
 
     def embed(self, texts: str | list[str]) -> list[list[float]]:
         inputs = [texts] if isinstance(texts, str) else list(texts)
+        if not inputs:
+            return []
         try:
             response = self._client.post(
                 f"{self.base_url}/api/embed",
@@ -31,11 +33,26 @@ class OllamaEmbedder:
             )
             response.raise_for_status()
             data = response.json()
-        except EmbeddingError:
-            raise
-        except Exception as exc:
-            raise EmbeddingError(f"embedding 调用失败: {exc}") from exc
-        embeddings = data.get("embeddings") if isinstance(data, dict) else None
-        if not isinstance(embeddings, list) or len(embeddings) != len(inputs):
-            raise EmbeddingError("embedding 返回格式异常")
-        return embeddings
+            embeddings = data.get("embeddings") if isinstance(data, dict) else None
+            if not isinstance(embeddings, list) or len(embeddings) != len(inputs):
+                raise EmbeddingError("embedding 返回格式异常")
+            return embeddings
+        except Exception as batch_error:
+            try:
+                embeddings = []
+                for text in inputs:
+                    response = self._client.post(
+                        f"{self.base_url}/api/embeddings",
+                        json={"model": self.model, "prompt": text},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    vector = data.get("embedding") if isinstance(data, dict) else None
+                    if not isinstance(vector, list) or not vector:
+                        raise EmbeddingError("兼容 embedding 返回格式异常")
+                    embeddings.append(vector)
+                return embeddings
+            except Exception as legacy_error:
+                raise EmbeddingError(
+                    f"embedding 调用失败: {batch_error}; 兼容接口也失败: {legacy_error}"
+                ) from legacy_error

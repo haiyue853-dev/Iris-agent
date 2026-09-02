@@ -18,7 +18,7 @@ _DOCUMENT_FIELDS = frozenset({
     "id", "title", "source_type", "media_type", "size_bytes", "original_name", "status",
     "error_message", "created_at", "updated_at",
 })
-_CHUNK_FIELDS = frozenset({"id", "document_id", "ordinal", "content", "location", "content_hash"})
+_CHUNK_FIELDS = frozenset({"id", "document_id", "ordinal", "content", "location", "content_hash", "parent_id"})
 
 
 def _is_timestamp(value: object) -> bool:
@@ -95,6 +95,7 @@ class KnowledgeChunk:
     content: str
     location: str | None
     content_hash: str
+    parent_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not _CHUNK_ID.fullmatch(self.id):
@@ -109,17 +110,19 @@ class KnowledgeChunk:
             raise ValueError("invalid knowledge chunk location")
         if not isinstance(self.content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", self.content_hash):
             raise ValueError("invalid knowledge chunk content hash")
+        if self.parent_id is not None and (not isinstance(self.parent_id, str) or not _CHUNK_ID.fullmatch(self.parent_id)):
+            raise ValueError("invalid knowledge chunk parent id")
         expected_hash = hashlib.sha256(self.content.encode("utf-8")).hexdigest()
         if self.content_hash != expected_hash:
             raise ValueError("knowledge chunk content hash does not match content")
 
     @classmethod
     def new(
-        cls, document_id: str, ordinal: int, content: str, *, location: str | None = None
+        cls, document_id: str, ordinal: int, content: str, *, location: str | None = None, parent_id: str | None = None
     ) -> "KnowledgeChunk":
         return cls(
             id=f"chunk-{uuid4().hex}", document_id=document_id, ordinal=ordinal, content=content,
-            location=location, content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            location=location, content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(), parent_id=parent_id,
         )
 
     def to_dict(self) -> dict[str, Any]:

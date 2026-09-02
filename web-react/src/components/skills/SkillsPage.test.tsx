@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +9,11 @@ const SKILLS = [
   { id: 'uml', name: 'UML 流程图', description: '生成流程图', icon: 'diagram', category: 'development', entry_view: 'uml', version: 1, enabled: true },
   { id: 'hot-radar', name: '热点雷达', description: '热点订阅', icon: 'radar', category: 'news', entry_view: 'radar', version: 1, enabled: false },
 ];
+
+const USER_SKILL = {
+  id: 'meeting-notes-a1b2c3', name: '我的 Skill', description: '整理会议记录', icon: 'sparkles',
+  category: 'custom', entry_view: 'chat', version: 1, enabled: true, source: 'user',
+};
 
 function stubSkillsFetch(body: unknown) {
   vi.stubGlobal(
@@ -81,5 +86,38 @@ describe('SkillsPage', () => {
     expect(await screen.findByText(/boom/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试加载 Skills' })).toBeInTheDocument();
     vi.unstubAllGlobals();
+  });
+
+  it('saves a new custom Skill from the inline editor', async () => {
+    const fetchMock = vi.fn().mockImplementation((_input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify(USER_SKILL), { status: 201 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ skills: SKILLS }), { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<SkillsPage onNavigate={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: '新建 Skill' }));
+    const dialog = await screen.findByRole('dialog', { name: '新建 Skill' });
+    await user.type(within(dialog).getByLabelText('Skill 名称'), '会议整理');
+    await user.type(within(dialog).getByLabelText('用途说明'), '整理会议记录');
+    await user.type(within(dialog).getByLabelText('Skill 正文'), '输出行动项');
+    await user.click(within(dialog).getByRole('button', { name: '保存 Skill' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/skills/user',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: '会议整理', description: '整理会议记录', content: '输出行动项', allowed_toolsets: [] }) }),
+    ));
+  });
+
+  it('only shows edit and delete actions for a user Skill', async () => {
+    stubSkillsFetch({ skills: [...SKILLS, USER_SKILL] });
+    render(<SkillsPage onNavigate={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: '编辑 我的 Skill' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '删除 我的 Skill' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '编辑 AI 日报' })).toBeNull();
   });
 });

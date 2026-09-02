@@ -3,6 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 import atexit
 import logging
+import os
 from typing import Callable
 
 from openai import OpenAI
@@ -14,10 +15,16 @@ from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
 from iris_agent.notifications.service import NotificationService
 from iris_agent.knowledge.embedder import OllamaEmbedder
+from iris_agent.knowledge.extractor import OllamaGraphExtractor
+from iris_agent.knowledge.semantic_splitter import LocalSemanticSplitter
+from iris_agent.knowledge.parsing import OllamaImageDescriber
+from iris_agent.knowledge.reranking import build_reranker
+from iris_agent.knowledge.runtime_config import load_runtime_config
 from iris_agent.knowledge.repository import KnowledgeRepository
 from iris_agent.knowledge.retriever import EmbeddingRetriever, HybridRetriever, KeywordRetriever
 from iris_agent.knowledge.service import KnowledgeService
 from iris_agent.knowledge.rag_service import RagKnowledgeService
+from iris_agent.knowledge.orchestrator import KnowledgeOrchestrator
 from iris_agent.knowledge.sqlite_repository import SqliteKnowledgeRepository
 from iris_agent.curator.referee import ConflictReferee
 from iris_agent.curator.repository import CuratorRepository
@@ -25,6 +32,7 @@ from iris_agent.curator.service import CuratorService
 from iris_agent.curator.similarity import SimilarityEngine
 from iris_agent.gateway.service import GatewayService
 from iris_agent.gateway.qq import QQOneBotAdapter
+from iris_agent.gateway.napcat import NapCatLauncher
 from iris_agent.gateway.wecom import WeComAdapter
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
@@ -48,17 +56,42 @@ from iris_agent.sessions.base import SessionRepository
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.subagent.runner import SubagentRunner
+from iris_agent.subagent.delegation import DelegationRepository, DelegationService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_delegate_tasks_tool, build_web_search_tool, build_fetch_page_tool, build_add_knowledge_tool, build_search_knowledge_tool
+from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_replace_in_file_tool, build_run_command_tool, build_write_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_delegate_tasks_tool, build_delegate_workflow_tool, build_request_subagent_collaboration_tool, build_web_search_tool, build_fetch_page_tool, build_collect_interview_knowledge_tool, build_add_knowledge_tool, build_search_knowledge_tool
 from iris_agent.web_search.browser_fetcher import BrowserFetcher
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
 from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSource, TavilySearchSource
+from iris_agent.web_search.summarizer import PageSummarizer
 from iris_agent.tools.registry import ToolRegistry
+from iris_agent.tools.capabilities import CapabilityResolver
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _rag_runtime_defaults(settings: Settings) -> dict[str, object]:
+    return {
+        "embedding_enabled": True,
+        "embedding_model": settings.knowledge.embedding_model,
+        "embedding_base_url": settings.knowledge.embedding_base_url,
+        "semantic_split_enabled": settings.knowledge.semantic_split_enabled,
+        "semantic_split_model": settings.knowledge.semantic_split_model,
+        "semantic_split_base_url": settings.knowledge.semantic_split_base_url,
+        "graph_enabled": settings.knowledge.graph_extraction_enabled,
+        "graph_model": settings.knowledge.graph_extraction_model,
+        "graph_base_url": settings.knowledge.graph_extraction_base_url,
+        "image_enabled": settings.knowledge.image_parsing_enabled,
+        "image_model": settings.knowledge.image_parsing_model,
+        "image_base_url": settings.knowledge.image_parsing_base_url,
+        "reranker_enabled": settings.knowledge.reranker_enabled,
+        "reranker_provider": settings.knowledge.reranker_provider,
+        "reranker_model": settings.knowledge.reranker_model,
+        "reranker_base_url": settings.knowledge.reranker_base_url,
+        "mmr_relevance_weight": 0.7,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +116,7 @@ class ApplicationServices:
     mcp_tools: McpToolRefresher
     gateway: GatewayService
     qq_adapter: QQOneBotAdapter | None
+    napcat: NapCatLauncher
     wecom_adapter: WeComAdapter | None
     settings: Settings
     settings_profiles: SettingsProfileService
@@ -149,6 +183,9 @@ def _build_application(
         "current_time": lambda: build_current_time_tool(),
         "list_directory": lambda: build_list_directory_tool(settings.tools.workspace_root),
         "read_file": lambda: build_read_file_tool(settings.tools.workspace_root, settings.tools.max_read_chars),
+        "write_file": lambda: build_write_file_tool(settings.tools.workspace_root),
+        "replace_in_file": lambda: build_replace_in_file_tool(settings.tools.workspace_root),
+        "run_command": lambda: build_run_command_tool(settings.tools.workspace_root, timeout_seconds=settings.tools.command_timeout_seconds, max_output_chars=settings.tools.command_max_output_chars, allowed_commands=settings.tools.allowed_commands),
     }
     settings.tools.workspace_root.mkdir(parents=True, exist_ok=True)
     for name in settings.tools.enabled:
@@ -184,13 +221,22 @@ def _build_application(
     compressor = ContextCompressor(
         provider,
         trigger_chars=settings.context.trigger_chars,
+        trigger_tokens=settings.context.trigger_tokens,
         keep_recent=settings.context.keep_recent,
         max_summary_chars=settings.context.max_summary_chars,
         enabled=settings.context.enabled,
     )
     loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
     settings_profiles = SettingsProfileService(profile_store, make_provider, provider_handle.replace, provider_handle.current)
-    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor, knowledge=None)
+    def resolve_model_profile(profile_id: str):
+        try:
+            collection = profile_store.load()
+        except ProfileStoreError:
+            return None
+        selected = next((item for item in collection.profiles if item.id == profile_id), None)
+        return None if selected is None else make_provider(selected)
+
+    agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor, knowledge=None, vision_enabled=settings.llm.supports_vision, model_profile_resolver=resolve_model_profile)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -239,8 +285,14 @@ def _build_application(
         default_allowed_tools=settings.subagent.allowed_tools,
         max_parallel_tasks=settings.subagent.max_parallel_tasks,
     )
-    registry.register(build_delegate_task_tool(subagent))
-    registry.register(build_delegate_tasks_tool(subagent))
+    delegation = DelegationService(subagent, DelegationRepository(settings.sessions.directory.parent / "subagent" / "delegation.sqlite3"), settings.subagent.max_parallel_tasks, sessions=sessions)
+    subagent.delegation = delegation
+    agent.delegation_service = delegation
+    resource_closers.append(delegation.close)
+    registry.register(build_delegate_task_tool(delegation))
+    registry.register(build_delegate_tasks_tool(delegation))
+    registry.register(build_delegate_workflow_tool(delegation))
+    registry.register(build_request_subagent_collaboration_tool())
     search_sources = []
     if settings.web_search.enable_tavily and settings.web_search.tavily_api_key:
         tavily_source = TavilySearchSource(
@@ -284,6 +336,7 @@ def _build_application(
         max_page_chars=settings.web_search.max_page_chars,
         max_download_bytes=settings.web_search.max_download_bytes,
         enabled=settings.web_search.enabled,
+        summarizer=PageSummarizer(provider, max_summary_chars=800, input_truncate_chars=6000),
         max_retries=settings.web_search.max_retries,
         min_text_chars=settings.web_search.min_text_chars,
         browser_fetcher=browser_fetcher,
@@ -294,9 +347,38 @@ def _build_application(
         default_search_depth=settings.web_search.default_search_depth,
     ))
     registry.register(build_fetch_page_tool(page_fetcher))
-    rag_embedder = OllamaEmbedder(model=settings.knowledge.embedding_model,
-                                  base_url=settings.knowledge.embedding_base_url,
-                                  timeout=settings.knowledge.embedding_timeout_seconds)
+    registry.register(build_collect_interview_knowledge_tool(web_search_client, page_fetcher))
+    runtime_config_path = settings.knowledge.files_directory.parent / "runtime.json"
+    runtime_defaults = _rag_runtime_defaults(settings)
+    runtime_models = load_runtime_config(runtime_config_path, runtime_defaults)
+    rag_embedder = OllamaEmbedder(
+        model=str(runtime_models["embedding_model"]),
+        base_url=str(runtime_models["embedding_base_url"]),
+        timeout=settings.knowledge.embedding_timeout_seconds,
+    ) if runtime_models["embedding_enabled"] else None
+    graph_extractor = OllamaGraphExtractor(
+        model=runtime_models["graph_model"],
+        base_url=runtime_models["graph_base_url"],
+        timeout=settings.knowledge.graph_extraction_timeout_seconds,
+    ) if runtime_models["graph_enabled"] else None
+    semantic_splitter = LocalSemanticSplitter(OllamaEmbedder(
+        model=runtime_models["semantic_split_model"],
+        base_url=runtime_models["semantic_split_base_url"],
+        timeout=settings.knowledge.semantic_split_timeout_seconds,
+    ), owns_embedder=True
+    ) if runtime_models["semantic_split_enabled"] else None
+    image_parser = OllamaImageDescriber(
+        model=runtime_models["image_model"],
+        base_url=runtime_models["image_base_url"],
+        timeout=settings.knowledge.image_parsing_timeout_seconds,
+    ) if runtime_models["image_enabled"] else None
+    reranker = build_reranker(
+        runtime_models["reranker_provider"] if runtime_models["reranker_enabled"] else "none",
+        model=runtime_models["reranker_model"],
+        base_url=runtime_models["reranker_base_url"],
+        api_key=settings.knowledge.reranker_api_key,
+        timeout=settings.knowledge.reranker_timeout_seconds,
+    )
     knowledge = RagKnowledgeService(
         SqliteKnowledgeRepository(settings.knowledge.database_file), embedder=rag_embedder,
         files_directory=settings.knowledge.files_directory, chunk_target_chars=settings.knowledge.chunk_target_chars,
@@ -305,8 +387,42 @@ def _build_application(
         minimum_relevance_score=settings.knowledge.minimum_relevance_score, max_file_bytes=settings.knowledge.max_file_bytes,
         max_total_bytes=settings.knowledge.max_total_bytes, max_document_count=settings.knowledge.max_document_count,
         allowed_extensions=settings.knowledge.allowed_upload_extensions,
+        graph_extractor=graph_extractor,
+        semantic_splitter=semantic_splitter,
+        image_parser=image_parser,
+        reranker=reranker, reranker_candidates=settings.knowledge.reranker_candidates,
+        rrf_k=settings.knowledge.rrf_k,
+        retrieval_candidate_multiplier=settings.knowledge.retrieval_candidate_multiplier,
+        parent_chunk_target_chars=(settings.knowledge.parent_chunk_target_chars if settings.knowledge.chunk_strategy == "parent_child" else None),
+        child_chunk_target_chars=(settings.knowledge.child_chunk_target_chars if settings.knowledge.chunk_strategy == "parent_child" else None),
+        child_chunk_overlap_chars=(settings.knowledge.child_chunk_overlap_chars if settings.knowledge.chunk_strategy == "parent_child" else None),
+        model_config=runtime_models, runtime_config_path=runtime_config_path,
+        reranker_api_key=settings.knowledge.reranker_api_key,
+        embedding_timeout_seconds=settings.knowledge.embedding_timeout_seconds,
+        graph_timeout_seconds=settings.knowledge.graph_extraction_timeout_seconds,
+        semantic_split_timeout_seconds=settings.knowledge.semantic_split_timeout_seconds,
+        image_timeout_seconds=settings.knowledge.image_parsing_timeout_seconds,
+        reranker_timeout_seconds=settings.knowledge.reranker_timeout_seconds,
     )
+    resource_closers.append(knowledge.close)
+    registry.register(build_add_knowledge_tool(knowledge))
+    knowledge_orchestrator = KnowledgeOrchestrator(
+        rag=knowledge,
+        memory=memory,
+        session_search=session_search,
+        sessions=sessions,
+        max_context_chars=settings.knowledge.max_context_chars,
+    )
+    agent.capability_resolver = CapabilityResolver(registry, {
+        "safe": ("current_time", "list_directory", "read_file", "recall", "read_attachment", "request_subagent_collaboration"),
+        "research": ("web_search", "fetch_page", "collect_interview_knowledge"),
+        "coding": ("write_file", "replace_in_file", "run_command"),
+        "knowledge": ("search_knowledge", "add_knowledge"),
+        "skills": ("use_skill", "save_skill", "remember"),
+        "delegation": ("delegate_task", "delegate_tasks", "delegate_workflow"),
+    })
     agent.knowledge = knowledge
+    agent.knowledge_orchestrator = knowledge_orchestrator
     curator_embedder = OllamaEmbedder(
         model=settings.knowledge.embedding_model,
         base_url=settings.knowledge.embedding_base_url,
@@ -351,6 +467,7 @@ def _build_application(
         if settings.gateway.qq.enabled
         else None
     )
+    napcat = NapCatLauncher(settings.gateway.directory / "napcat.json")
     wecom_adapter = None
     if settings.gateway.wecom.enabled:
         wecom_adapter = WeComAdapter(
@@ -368,4 +485,4 @@ def _build_application(
             qq_adapter.push_text(qq_target, text)
 
         automation.push = _push
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, wecom_adapter, settings, settings_profiles, chat_attachments, tuple(resource_closers))
+    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, napcat, wecom_adapter, settings, settings_profiles, chat_attachments, tuple(resource_closers))

@@ -74,3 +74,17 @@ def test_provider_preserves_malformed_tool_arguments_as_error():
 def test_tool_message_uses_strict_openai_shape():
     payload = OpenAICompatibleProvider._encode_message(Message(role="tool", content="ok", tool_call_id="c1", name="clock"))
     assert payload == {"role": "tool", "content": "ok", "tool_call_id": "c1"}
+
+
+def test_user_message_encodes_images_as_openai_vision_content():
+    payload = OpenAICompatibleProvider._encode_message(
+        Message(role="user", content="请看这张图", image_urls=["data:image/png;base64,aW1hZ2U="])
+    )
+
+    assert payload == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "请看这张图"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1hZ2U="}},
+        ],
+    }

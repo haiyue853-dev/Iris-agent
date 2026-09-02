@@ -21,6 +21,8 @@ def _registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(Tool("read_file", "读文件", {"type": "object", "properties": {}}, lambda: "ok"))
     registry.register(Tool("remember", "写记忆", {"type": "object", "properties": {}}, lambda: None))
+    registry.register(Tool("web_search", "联网搜索", {"type": "object", "properties": {}}, lambda: []))
+    registry.register(Tool("fetch_page", "抓取网页", {"type": "object", "properties": {}}, lambda: ""))
     return registry
 
 
@@ -121,3 +123,37 @@ def test_truncates_result():
     result = runner.run(SubagentRequest("目标"))
 
     assert result.result == "x" * 10
+
+
+def test_researcher_role_adds_role_prompt_and_default_tools():
+    provider = FakeProvider([ProviderResponse(content="ok", tool_calls=[])])
+    runner = _runner(provider)
+
+    runner.run(SubagentRequest("检索资料", role="researcher"))
+
+    system_contents = [m.content for m in provider.seen_messages[0] if m.role == "system"]
+    assert any("资料检索" in content and "来源" in content for content in system_contents)
+    tool_names = {schema["function"]["name"] for schema in provider.seen_tools[0]}
+    assert tool_names == {"read_file", "web_search", "fetch_page"}
+
+
+def test_request_options_override_role_defaults():
+    provider = FakeProvider([ProviderResponse(content="ok", tool_calls=[])])
+    runner = _runner(provider)
+
+    runner.run(SubagentRequest("检索资料", role="researcher", allowed_tools=["remember"], max_rounds=2))
+
+    tool_names = {schema["function"]["name"] for schema in provider.seen_tools[0]}
+    assert tool_names == {"remember"}
+
+
+def test_unknown_role_is_rejected():
+    provider = FakeProvider([ProviderResponse(content="ok", tool_calls=[])])
+    runner = _runner(provider)
+
+    try:
+        runner.run(SubagentRequest("任务", role="unknown"))
+    except ValueError as exc:
+        assert "unknown" in str(exc)
+    else:
+        raise AssertionError("unknown role should be rejected")

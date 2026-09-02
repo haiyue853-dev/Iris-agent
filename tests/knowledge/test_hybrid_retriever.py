@@ -51,3 +51,12 @@ def test_hybrid_retriever_respects_limit():
     hybrid = HybridRetriever(keyword, embedding)
     hits = hybrid.search("query", 1)
     assert len(hits) == 1
+
+
+def test_hybrid_retriever_accepts_configured_rrf_k():
+    keyword = FakeRetriever([_hit("kb-000000000001", "A")])
+    embedding = FakeRetriever([_hit("kb-000000000002", "B")])
+
+    hybrid = HybridRetriever(keyword, embedding, rrf_k=12)
+
+    assert hybrid._k == 12

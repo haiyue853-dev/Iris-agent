@@ -57,6 +57,18 @@ if ($Check) {
 $backendCommand = "`$Host.UI.RawUI.WindowTitle='Iris Agent Backend'; Set-Location -LiteralPath '$($projectRoot.Replace("'", "''"))'; & '$($pythonExe.Replace("'", "''"))' server.py"
 $frontendCommand = "`$Host.UI.RawUI.WindowTitle='Iris Agent Frontend'; Set-Location -LiteralPath '$($frontendRoot.Replace("'", "''"))'; & '$($npmCommand.Replace("'", "''"))' run dev"
 
+$backendListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($backendListener) {
+    Write-Host "Stopping the process using port 8000 (PID $($backendListener.OwningProcess))..." -ForegroundColor Yellow
+    Stop-Process -Id $backendListener.OwningProcess -Force
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        if (-not (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue)) { break }
+    }
+    if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
+        throw 'Port 8000 is still in use and could not be released.'
+    }
+}
 Start-Process powershell.exe -ArgumentList '-NoExit', '-EncodedCommand', (ConvertTo-EncodedCommand $backendCommand) -WindowStyle Normal
 Start-Sleep -Milliseconds 800
 Start-Process powershell.exe -ArgumentList '-NoExit', '-EncodedCommand', (ConvertTo-EncodedCommand $frontendCommand) -WindowStyle Normal

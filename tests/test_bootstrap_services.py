@@ -131,6 +131,8 @@ def test_build_application_exposes_subagent_runner_and_delegate_tool(tmp_path, m
     application = build_application(config)
 
     assert application.subagent is not None
+    assert application.subagent.delegation.repository.path.name == "delegation.sqlite3"
+    assert application.subagent.delegation.repository.path.exists()
     tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
     assert "delegate_task" in tool_names
     assert "delegate_tasks" in tool_names
@@ -162,6 +164,7 @@ def test_build_application_wires_compressor_into_agent(tmp_path, monkeypatch):
 
     assert application.agent.compressor is not None
     assert application.agent.compressor.trigger_chars == 12000
+    assert application.agent.compressor.trigger_tokens == 3000
     assert application.agent.compressor.keep_recent == 10
 
 
@@ -187,6 +190,16 @@ def test_build_application_exposes_knowledge_service_and_tools(tmp_path, monkeyp
     tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
     assert "add_knowledge" in tool_names
     assert "search_knowledge" in tool_names
+
+
+def test_build_application_registers_knowledge_draft_tool(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    tool_names = {schema["function"]["name"] for schema in application.agent.loop.tools.schemas()}
+    assert "add_knowledge" in tool_names
 
 
 def test_build_application_knowledge_defaults_to_keyword(tmp_path, monkeypatch):

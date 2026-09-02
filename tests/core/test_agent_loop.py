@@ -21,6 +21,16 @@ class FakeProvider:
         return self.responses.pop(0)
 
 
+class SchemaCapturingProvider(FakeProvider):
+    def __init__(self, *responses):
+        super().__init__(*responses)
+        self.tool_schemas = []
+
+    def complete(self, messages, tools):
+        self.tool_schemas.append([item["function"]["name"] for item in tools])
+        return super().complete(messages, tools)
+
+
 class StreamingProvider:
     def stream(self, messages, tools):
         yield ProviderResponse(content="第一段")
@@ -38,6 +48,22 @@ def test_loop_executes_tool_then_returns_final_text():
     assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
 
 
+def test_loop_hides_one_shot_lookup_tools_after_the_first_use():
+    provider = SchemaCapturingProvider(
+        ProviderResponse(tool_calls=[ToolCall("search-1", "web_search", {"query": "热点"})]),
+        ProviderResponse(content="done"),
+    )
+    registry = ToolRegistry()
+    registry.register(Tool("web_search", "search", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}, lambda query: {"query": query}))
+
+    events = list(AgentLoop(provider, registry).run([Message(role="user", content="查热点")]))
+
+    assert events[-1].data["content"] == "done"
+    assert provider.tool_schemas == [["web_search"], []]
+
+
+
+
 def test_loop_forwards_provider_text_chunks_as_separate_deltas():
     events = list(AgentLoop(StreamingProvider(), ToolRegistry()).run([Message(role="user", content="go")]))
     deltas = [event.data["content"] for event in events if event.type == "text_delta"]
@@ -45,11 +71,17 @@ def test_loop_forwards_provider_text_chunks_as_separate_deltas():
     assert events[-1].data["content"] == "第一段第二段"
 
 
-def test_loop_emits_error_at_tool_round_limit():
+def test_loop_forces_a_final_answer_when_tool_budget_is_exhausted():
     response = ProviderResponse(tool_calls=[ToolCall("c", "missing", {})])
-    events = list(AgentLoop(FakeProvider(response, response), ToolRegistry(), max_tool_rounds=1).run([]))
-    assert events[-1].type == "error"
-    assert events[-1].data["code"] == "tool_round_limit"
+    provider = SchemaCapturingProvider(response, response, ProviderResponse(content="基于已有结果的结论"))
+    registry = ToolRegistry()
+    registry.register(Tool("missing", "missing", {"type": "object", "properties": {}}, lambda: "result"))
+
+    events = list(AgentLoop(provider, registry, max_tool_rounds=1).run([]))
+
+    assert events[-1].type == "message_completed"
+    assert events[-1].data["content"] == "基于已有结果的结论"
+    assert provider.tool_schemas == [["missing"], [], []]
 
 
 def test_loop_allows_final_text_after_using_last_tool_round():

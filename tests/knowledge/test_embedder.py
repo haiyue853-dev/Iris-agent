@@ -66,3 +66,25 @@ def test_embed_raises_on_malformed_response():
     embedder = OllamaEmbedder(http_client=client)
     with pytest.raises(EmbeddingError):
         embedder.embed(["a", "b"])
+
+
+def test_embed_falls_back_to_legacy_endpoint_when_batch_endpoint_fails():
+    class CompatibleClient:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, url, json=None):
+            self.calls.append((url, json))
+            if url.endswith("/api/embed"):
+                return FakeResponse(status_error=RuntimeError("502 Bad Gateway"))
+            return FakeResponse({"embedding": [float(len(json["prompt"]))]})
+
+    client = CompatibleClient()
+    embedder = OllamaEmbedder(model="bge-m3", base_url="http://localhost:11434", http_client=client)
+
+    assert embedder.embed(["one", "three"]) == [[3.0], [5.0]]
+    assert client.calls == [
+        ("http://localhost:11434/api/embed", {"model": "bge-m3", "input": ["one", "three"]}),
+        ("http://localhost:11434/api/embeddings", {"model": "bge-m3", "prompt": "one"}),
+        ("http://localhost:11434/api/embeddings", {"model": "bge-m3", "prompt": "three"}),
+    ]

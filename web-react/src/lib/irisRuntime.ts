@@ -8,6 +8,7 @@ import type {
 } from "@assistant-ui/react";
 import type { AgentEvent, Message } from "../types";
 import { streamChat, streamToolApproval } from "../api/chat";
+import type { Toolset } from "./capability-mode";
 import { cancelTask } from "../api/tasks";
 
 function waitForNextPaint(): Promise<void> {
@@ -96,9 +97,38 @@ export type IrisToolGroupResult = {
   items: IrisToolGroupItem[];
 };
 
+export type IrisKnowledgeDraftResult = {
+  __irisKind: "knowledge-draft";
+  title: string;
+  content: string;
+  category: string;
+  source_url?: string | null;
+};
+
 export type IrisSourcesGroupResult = {
   __irisKind: "sources-group";
   items: Array<{ id: string; url: string; title?: string }>;
+};
+
+export type IrisKnowledgeCitationsResult = {
+  __irisKind: "knowledge-citations";
+  items: Array<{ index: number; document_id: string; chunk_id: string; title: string; content: string; location?: string | null; score: number; keyword_score?: number; vector_score?: number; reranker_score?: number | null; collection_id?: string | null; collection_name?: string | null }>;
+};
+
+export type IrisFollowUpSuggestionsResult = {
+  __irisKind: "follow-up-suggestions";
+  items: string[];
+};
+
+export type IrisRagPipelineStage = {
+  stage: "planning" | "retrieval" | "rerank" | "generation";
+  status: "running" | "completed" | "failed";
+  detail: { mode?: string; citations?: number; routes?: string[] };
+};
+
+export type IrisRagPipelineResult = {
+  __irisKind: "rag-pipeline";
+  stages: IrisRagPipelineStage[];
 };
 
 export function groupSourceParts(parts: ThreadAssistantMessagePart[]): ThreadAssistantMessagePart[] {
@@ -125,22 +155,21 @@ function isApprovalResult(result: unknown): result is IrisApprovalResult {
 }
 
 /** Combines ordinary tool calls into one compact message part; approvals stay independent. */
-export function groupToolParts(parts: ToolCallMessagePart[], cancelled = false): ToolCallMessagePart[] {
+export function groupToolParts(parts: ToolCallMessagePart[], cancelled = false, previousResult?: IrisToolGroupResult): ToolCallMessagePart[] {
   const approvals = parts.filter((part) => isApprovalResult(part.result));
   const ordinary = parts.filter((part) => !isApprovalResult(part.result));
   if (ordinary.length === 0) return approvals;
 
-  const result: IrisToolGroupResult = {
-    __irisKind: "tool-group",
-    items: ordinary.map((part) => ({
+  const items = ordinary.map((part) => ({
       callId: part.toolCallId,
       name: part.toolName,
       args: part.args,
       argsText: part.argsText ?? JSON.stringify(part.args ?? {}, null, 2),
       result: part.result,
       state: part.isError ? "failed" : part.result === undefined ? (cancelled ? "cancelled" : "running") : "completed",
-    })),
-  };
+    }));
+  const result = previousResult ?? { __irisKind: "tool-group" as const, items };
+  result.items = items;
 
   return [{
     type: "tool-call",
@@ -158,12 +187,22 @@ export type IrisAdapterController = {
 
 export type IrisAdapterDeps = {
   getSessionId: () => string;
+  getKnowledgeCollectionId?: () => string;
+  getKnowledgeQueryMode?: () => string;
+  getUseKnowledge?: () => boolean;
+  getResponseMode?: () => "fast" | "thinking";
+  getToolsets?: () => Toolset[];
+  getSkillId?: () => string | undefined;
+  onSkillUsed?: () => void;
+  onDelegationQueued?: (delegationId: string) => void;
   ensureSession: (text: string) => Promise<string>;
   enqueue: (event: AgentEvent) => void;
   queue: IrisEventQueue;
   registerController: (controller: IrisAdapterController) => void;
   onSessionCreated?: (sessionId: string) => void;
   onEvent?: (event: AgentEvent) => void;
+  getModelProfileId?: () => string | null;
+  onRunningChange?: (running: boolean) => void;
 };
 
 function extractText(messages: readonly { role: string; content: unknown }[]): string {
@@ -178,6 +217,11 @@ function extractText(messages: readonly { role: string; content: unknown }[]): s
       .join("");
   }
   return "";
+}
+
+function regenerationMessageId(messages: readonly { id?: string; role: string }[], runConfig: unknown): string | undefined {
+  if (!(runConfig as { custom?: { irisRegenerate?: boolean } } | undefined)?.custom?.irisRegenerate) return undefined;
+  return [...messages].reverse().find((message) => message.role === "user")?.id;
 }
 
 function describeArgs(args: Record<string, unknown>): string {
@@ -214,16 +258,26 @@ function guessIcon(name: string): string | undefined {
  */
 export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
   return {
-    async *run({ messages, abortSignal }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
+    async *run({ messages, abortSignal, runConfig }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
       const text = extractText(messages as unknown as { role: string; content: unknown }[]);
       if (!text.trim()) return;
+      const regenerateFromMessageId = regenerationMessageId(messages, runConfig);
 
       const sessionId = await deps.ensureSession(text);
+      deps.onRunningChange?.(true);
+      const toolsets = deps.getToolsets?.();
+      const skillId = deps.getSkillId?.();
 
       const toolParts = new Map<string, ToolCallMessagePart>();
+      let renderedToolGroup: IrisToolGroupResult | undefined;
+      let knowledgeCitations: IrisKnowledgeCitationsResult["items"] = [];
+      let followUpSuggestions: string[] = [];
+      let ragStages: IrisRagPipelineStage[] = [];
       let textAccum = "";
       let errored = false;
-      let hasResponseEvent = false;
+      let errorMessage = "";
+      let awaitingFirstResponse = true;
+      let modelMetrics: { first_token_ms: number | null; duration_ms: number } | undefined;
       let taskId: string | undefined;
       let cancelRequested = false;
       let cancelPromise: Promise<void> | undefined;
@@ -232,6 +286,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
 
       const requestCancellation = () => {
         cancelRequested = true;
+        if (renderedToolGroup) groupToolParts([...toolParts.values()], true, renderedToolGroup);
         if (!taskId || cancelPromise) return cancelPromise;
         cancelPromise = cancelTask(taskId)
           .then(() => undefined)
@@ -250,29 +305,51 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
         deps.enqueue(event);
       };
 
-      const buildContent = (cancelPendingTools = false): ThreadAssistantMessagePart[] => {
+      const buildContent = (cancelPendingTools = false, terminalNotice = ""): ThreadAssistantMessagePart[] => {
         const parts: ThreadAssistantMessagePart[] = [];
-        if (!hasResponseEvent) parts.push({ type: "reasoning", text: "正在思考…" });
-        if (textAccum) parts.push({ type: "text", text: textAccum });
-        for (const p of groupToolParts([...toolParts.values()], cancelPendingTools)) {
+        if (ragStages.length) {
+          parts.push({ type: "tool-call", toolCallId: "iris-rag-pipeline", toolName: "iris_rag_pipeline", args: {}, argsText: "{}", result: { __irisKind: "rag-pipeline", stages: ragStages } } as unknown as ThreadAssistantMessagePart);
+        }
+        // Put tool state first. A failed call is actionable context and must
+        // not be pushed below a long assistant reply.
+        const groupedTools = groupToolParts([...toolParts.values()], cancelPendingTools, renderedToolGroup);
+        const toolGroup = groupedTools.find((part) => part.toolName === "iris_tool_group");
+        if (toolGroup?.result && typeof toolGroup.result === "object") renderedToolGroup = toolGroup.result as IrisToolGroupResult;
+        for (const p of groupedTools) {
           parts.push(p as unknown as ThreadAssistantMessagePart);
         }
+        if (textAccum) parts.push({ type: "text", text: textAccum });
+        if (!textAccum && terminalNotice) parts.push({ type: "text", text: terminalNotice });
+        if (knowledgeCitations.length) {
+          parts.push({ type: "tool-call", toolCallId: "iris-knowledge-citations", toolName: "iris_knowledge_citations", args: {}, argsText: "{}", result: { __irisKind: "knowledge-citations", items: knowledgeCitations } } as unknown as ThreadAssistantMessagePart);
+        }
+        if (followUpSuggestions.length) {
+          parts.push({ type: "tool-call", toolCallId: "iris-follow-up-suggestions", toolName: "iris_follow_up_suggestions", args: {}, argsText: "{}", result: { __irisKind: "follow-up-suggestions", items: followUpSuggestions } } as unknown as ThreadAssistantMessagePart);
+        }
+        if (parts.length === 0 && awaitingFirstResponse) parts.push({ type: "reasoning", text: "正在思考…" });
         return parts;
       };
 
       const applyEvent = (event: AgentEvent) => {
-        if (event.type !== "task_started" && event.type !== "paused") {
-          hasResponseEvent = true;
-        }
         switch (event.type) {
           case "task_started":
             taskId = event.data.task_id;
             if (cancelRequested) void requestCancellation();
             break;
+          case "pipeline_stage": {
+            awaitingFirstResponse = false;
+            const next = { ...event.data, detail: event.data.detail || {} } as IrisRagPipelineStage;
+            const order = ["planning", "retrieval", "rerank", "generation"];
+            ragStages = [...ragStages.filter((item) => item.stage !== next.stage), next]
+              .sort((left, right) => order.indexOf(left.stage) - order.indexOf(right.stage));
+            break;
+          }
           case "text_delta":
+            awaitingFirstResponse = false;
             textAccum += event.data.content;
             break;
           case "tool_started":
+            awaitingFirstResponse = false;
             toolParts.set(event.data.call_id, {
               type: "tool-call",
               toolCallId: event.data.call_id,
@@ -282,11 +359,15 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
             });
             break;
           case "tool_approval_requested": {
+            awaitingFirstResponse = false;
+            const isCollaborationRequest = event.data.name === "request_subagent_collaboration";
             const payload: IrisApprovalResult = {
               __irisKind: "approval",
               call_id: event.data.call_id,
-              title: event.data.name,
-              description: describeArgs(event.data.arguments as Record<string, unknown>),
+              title: isCollaborationRequest ? "此任务较复杂，是否启用子代理协作？" : event.data.name,
+              description: isCollaborationRequest
+                ? `将拆分并并行处理任务。${describeArgs(event.data.arguments as Record<string, unknown>)}`
+                : describeArgs(event.data.arguments as Record<string, unknown>),
               metadata: metadataFromArgs(event.data.arguments as Record<string, unknown>),
               icon: guessIcon(event.data.name),
               raw: event.data,
@@ -306,7 +387,22 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
             }
             break;
           }
+          case "tool_progress": {
+            const existing = toolParts.get(event.data.call_id);
+            if (!existing) break;
+            const previous = existing.result as IrisApprovalResult | undefined;
+            const live = previous && previous.__irisKind === "approval" && previous.realResult && typeof previous.realResult === "object" ? previous.realResult as Record<string, unknown> : {};
+            const output = `${typeof live.stdout === "string" ? live.stdout : ""}${event.data.output || ""}`;
+            const terminal = { ...live, command: typeof live.command === "string" ? live.command : (existing.args as Record<string, unknown>).command, stdout: output, output, cwd: typeof live.cwd === "string" ? live.cwd : (existing.args as Record<string, unknown>).cwd };
+            toolParts.set(event.data.call_id, { ...existing, result: previous && previous.__irisKind === "approval" ? { ...previous, choice: "approved", realResult: terminal } : terminal });
+            break;
+          }
           case "tool_finished": {
+            awaitingFirstResponse = false;
+            const delegation = event.data.result as { delegation_id?: unknown; status?: unknown } | undefined;
+            if (event.data.name === "delegate_task" && delegation?.status === "queued" && typeof delegation.delegation_id === "string") {
+              deps.onDelegationQueued?.(delegation.delegation_id);
+            }
             const existing = toolParts.get(event.data.call_id);
             if (existing) {
               const res = existing.result as IrisApprovalResult | undefined;
@@ -323,9 +419,19 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           }
           case "message_completed":
             if (event.data.content && event.data.content.trim()) textAccum = event.data.content;
+            awaitingFirstResponse = false;
+            knowledgeCitations = Array.isArray(event.data.citations) ? event.data.citations as IrisKnowledgeCitationsResult["items"] : [];
+            followUpSuggestions = Array.isArray(event.data.follow_up_suggestions)
+              ? event.data.follow_up_suggestions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+              : [];
+            modelMetrics = event.data.metrics;
+            ragStages = ragStages.map((item) => item.stage === "generation" ? { ...item, status: "completed" } : item);
+            if (skillId) deps.onSkillUsed?.();
             break;
           case "error":
+            awaitingFirstResponse = false;
             errored = true;
+            errorMessage = event.data.message || "生成失败，请稍后重试。";
             break;
           default:
             break;
@@ -341,7 +447,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       });
 
       // Original stream: yields up to `tool_approval_requested`, then ends.
-      const streamPromise = streamChat(sessionId, text, transportAbort.signal, enqueueEvent).catch((err) => {
+      const streamPromise = streamChat(sessionId, text, transportAbort.signal, enqueueEvent, [], deps.getKnowledgeCollectionId?.(), deps.getKnowledgeQueryMode?.() || "mix", deps.getUseKnowledge?.() || false, regenerateFromMessageId, deps.getResponseMode?.() || "fast", toolsets, skillId).catch((err) => {
         if ((err as Error)?.name !== "AbortError") {
           deps.enqueue({ type: "error", data: { code: "stream_error", message: String(err) } });
         }
@@ -358,7 +464,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           }
           applyEvent(ev);
           if (ev.type === "message_completed" || ev.type === "error") finished = true;
-          yield { content: buildContent(), status: { type: "running" } };
+          yield { content: buildContent(false, errored ? `生成失败：${errorMessage || "请稍后重试。"}` : ""), status: { type: "running" } };
           if (ev.type === "text_delta" && !finished) await waitForNextPaint();
         }
       } catch (err) {
@@ -366,8 +472,9 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           cancelled = true;
         } else {
           errored = true;
+          errorMessage = String(err);
           yield {
-            content: buildContent(),
+            content: buildContent(false, `生成失败：${errorMessage}`),
             status: { type: "incomplete", reason: "error", error: String(err) },
           };
           return;
@@ -376,21 +483,23 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
         await streamPromise;
         if (cancelPromise) await cancelPromise;
         abortSignal.removeEventListener("abort", onAbort);
+        deps.onRunningChange?.(false);
       }
 
       deps.onSessionCreated?.(sessionId);
       if (cancelled || cancelRequested) {
         yield {
-          content: buildContent(true),
+          content: buildContent(true, "已停止生成。"),
           status: { type: "incomplete", reason: "cancelled" },
         };
         return;
       }
       yield {
-        content: buildContent(),
+        content: buildContent(false, errored ? `生成失败：${errorMessage || "请稍后重试。"}` : ""),
         status: errored
-          ? { type: "incomplete", reason: "error" }
+          ? { type: "incomplete", reason: "error", error: errorMessage || "生成失败，请稍后重试。" }
           : { type: "complete", reason: "stop" },
+        metadata: { custom: modelMetrics ? { modelMetrics } : {} },
       };
     },
   };
@@ -398,9 +507,26 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
 
 /** Maps the persisted chat history into assistant-ui seed messages. */
 export function toThreadMessages(history: Message[]): ThreadMessageLike[] {
-  return history
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m, i) => {
+  const result: ThreadMessageLike[] = [];
+  history.forEach((m, i) => {
+      const role = (m as unknown as { role: string }).role;
+      if (role === "tool") {
+        let parsed: unknown;
+        try { parsed = JSON.parse(m.content); } catch { parsed = m.content; }
+        result.push({
+          role: "assistant",
+          content: [{
+            type: "tool-call",
+            toolCallId: m.tool_call_id || m.id || `tool-${i}`,
+            toolName: m.name || "tool",
+            args: {},
+            argsText: "{}",
+            result: parsed,
+          } as unknown as ThreadAssistantMessagePart],
+          id: m.id || `tool-${i}`,
+        } as ThreadMessageLike);
+        return;
+      }
       const content: ThreadAssistantMessagePart[] = [];
       if (m.role === "assistant" && m.reasoning) {
         content.push({ type: "reasoning", text: m.reasoning });
@@ -415,12 +541,23 @@ export function toThreadMessages(history: Message[]): ThreadMessageLike[] {
             title: source.title,
           });
         }
+        if (m.citations?.length) {
+          content.push({
+            type: "tool-call",
+            toolCallId: `iris-knowledge-citations-${m.id || i}`,
+            toolName: "iris_knowledge_citations",
+            args: {},
+            argsText: "{}",
+            result: { __irisKind: "knowledge-citations", items: m.citations },
+          } as unknown as ThreadAssistantMessagePart);
+        }
       }
       content.push({ type: "text", text: m.content });
-      return {
-        role: m.role,
+      result.push({
+        role: role as "user" | "assistant",
         content: m.role === "assistant" ? groupSourceParts(content) : content,
-        id: `${m.role}-${i}`,
-      };
-    }) as ThreadMessageLike[];
+        id: m.id || `${m.role}-${i}`,
+      } as ThreadMessageLike);
+  });
+  return result;
 }

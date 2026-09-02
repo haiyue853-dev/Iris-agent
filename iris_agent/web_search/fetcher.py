@@ -17,7 +17,7 @@ _HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "identity",
 }
 
 _MOBILE_UA = (
@@ -31,6 +31,7 @@ _REMOVED_TAGS = ("script", "style", "nav", "header", "footer", "aside", "noscrip
 _BODY_SELECTORS = ("article", "#article_content", "#content_views", "main", ".article-content", ".post-content", ".markdown-body")
 _REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
 _MAX_REDIRECTS = 5
+_FULL_CONTENT_MAX_CHARS = 50_000
 
 
 class UnsafeUrlError(ValueError):
@@ -119,6 +120,7 @@ class PageFetcher:
         http_client: httpx.Client | None = None,
         resolver=socket.getaddrinfo,
         max_download_bytes: int = 2_000_000,
+        summarizer=None,
     ):
         # Client injection is a test seam only. Production requests must use the
         # owned pinned transport; MockTransport performs no network I/O.
@@ -134,6 +136,7 @@ class PageFetcher:
         self.browser_fetcher = browser_fetcher
         self.resolver = resolver
         self.max_download_bytes = max_download_bytes
+        self.summarizer = summarizer
         self._owns_client = http_client is None
         self._pins: dict[str, str] = {}
         self._client = http_client or httpx.Client(
@@ -142,22 +145,27 @@ class PageFetcher:
             transport=PinnedHTTPTransport(self._pins),
         )
 
-    def fetch(self, url: str) -> str:
+    def fetch(self, url: str, query_hint: str | None = None, *, summarize: bool = True) -> str:
         if not self.enabled:
             raise ValueError("联网抓取已禁用")
+        text_limit = self.max_page_chars if summarize else max(self.max_page_chars, _FULL_CONTENT_MAX_CHARS)
         try:
-            text = self._try_http_fetch(url)
+            text = self._try_http_fetch(url, max_chars=text_limit)
         except (UnsafeUrlError, PageTooLargeError):
             raise
         except ValueError as exc:
             if self.browser_fetcher is not None:
-                return self.browser_fetcher.fetch(url)
-            raise exc
+                text = self.browser_fetcher.fetch(url)
+            else:
+                raise exc
         if len(text) < self.min_text_chars and self.browser_fetcher is not None:
-            return self.browser_fetcher.fetch(url)
+            text = self.browser_fetcher.fetch(url)
+        text = text[:text_limit]
+        if summarize and self.summarizer is not None:
+            return self.summarizer.summarize(url, text, query_hint=query_hint)
         return text
 
-    def _try_http_fetch(self, url: str) -> str:
+    def _try_http_fetch(self, url: str, *, max_chars: int | None = None) -> str:
         last_detail: object | None = None
         for attempt in range(self.max_retries + 1):
             headers = self._headers_for(attempt, url)
@@ -175,7 +183,7 @@ class PageFetcher:
                 continue
             if response.status_code >= 400:
                 raise ValueError(f"网页抓取失败: HTTP {response.status_code}")
-            return self._extract_text(response.text)[: self.max_page_chars]
+            return self._extract_text(response.text)[: max_chars or self.max_page_chars]
         raise ValueError(f"网页抓取失败: {last_detail}")
 
     def _get_following_safe_redirects(self, url: str, headers: dict[str, str]) -> httpx.Response:

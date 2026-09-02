@@ -4,9 +4,12 @@ from pydantic import BaseModel, Field, StrictBool
 
 class McpCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    command: str = Field(min_length=1, max_length=300)
+    transport: str = Field(default="stdio", pattern="^(stdio|http)$")
+    command: str = Field(default="", max_length=300)
+    url: str = Field(default="", max_length=2000)
     args: list[str] = Field(default_factory=list, max_length=30)
     allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=50)
 
 
 class McpEnabledRequest(BaseModel):
@@ -25,8 +28,12 @@ class McpTimeoutRequest(BaseModel):
     timeout_seconds: int = Field(ge=1, le=120)
 
 
+class McpHeadersRequest(BaseModel):
+    headers: dict[str, str] = Field(default_factory=dict, max_length=50)
+
+
 def _data(server, tools=(), *, connected=False):
-    return {"id": server.id, "name": server.name, "command": server.command, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "env_keys": [key for key, _ in server.environment], "timeout_seconds": server.timeout_seconds, "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
+    return {"id": server.id, "name": server.name, "transport": server.transport, "command": server.command, "url": server.url, "args": list(server.args), "allowed_tools": list(server.allowed_tools), "env_keys": [key for key, _ in server.environment], "header_keys": [key for key, _ in server.headers], "timeout_seconds": server.timeout_seconds, "enabled": server.enabled, "status": "connected" if connected else "configured", "discovered_tools": list(tools)}
 
 
 def register_mcp_routes(app, mcp, refresher=None) -> None:
@@ -48,7 +55,7 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
     @app.post("/api/mcp/servers", status_code=201)
     def create_server(request: McpCreateRequest):
         try:
-            server = mcp.create(name=request.name, command=request.command, args=tuple(request.args), allowed_tools=tuple(request.allowed_tools))
+            server = mcp.create(name=request.name, command=request.command, args=tuple(request.args), allowed_tools=tuple(request.allowed_tools), transport=request.transport, url=request.url, headers=request.headers)
             refresh()
             return _data(server)
         except ValueError as exc:
@@ -92,6 +99,15 @@ def register_mcp_routes(app, mcp, refresher=None) -> None:
             raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "超时时间无效"}) from exc
+
+    @app.put("/api/mcp/servers/{server_id}/headers")
+    def set_headers(server_id: str, request: McpHeadersRequest):
+        try:
+            return _data(mcp.set_headers(server_id, request.headers))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"code": "mcp_server_not_found", "message": "未找到 MCP 服务"}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "mcp_validation_error", "message": "请求头无效"}) from exc
 
     @app.delete("/api/mcp/servers/{server_id}", status_code=204)
     def delete_server(server_id: str):

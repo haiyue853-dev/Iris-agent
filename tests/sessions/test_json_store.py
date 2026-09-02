@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Thread
 
 import pytest
 
@@ -47,6 +48,60 @@ def test_concurrent_appends_do_not_lose_messages(tmp_path):
     assert len(repo.get(session.id).messages) == 20
 
 
+def test_list_does_not_wait_for_an_active_session_lock(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    blocked = repo.create("正在生成")
+    visible = repo.create("可见会话")
+    locked = Event()
+    release = Event()
+
+    def hold_lock():
+        with repo.session_lock(blocked.id):
+            locked.set()
+            release.wait()
+
+    holder = Thread(target=hold_lock)
+    holder.start()
+    assert locked.wait(timeout=1)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        listing = pool.submit(repo.list)
+        try:
+            sessions = listing.result(timeout=0.2)
+        finally:
+            release.set()
+            holder.join(timeout=1)
+
+    assert {session.id for session in sessions} == {blocked.id, visible.id}
+
+
+def test_reading_and_deleting_a_session_do_not_wait_for_active_generation_lock(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("正在生成")
+    locked = Event()
+    release = Event()
+
+    def hold_lock():
+        with repo.session_lock(session.id):
+            locked.set()
+            release.wait()
+
+    holder = Thread(target=hold_lock)
+    holder.start()
+    assert locked.wait(timeout=1)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reader = pool.submit(repo.get, session.id)
+        try:
+            assert reader.result(timeout=0.2).id == session.id
+            deleter = pool.submit(repo.delete, session.id)
+            deleter.result(timeout=0.2)
+        finally:
+            release.set()
+            holder.join(timeout=1)
+
+    with pytest.raises(SessionNotFoundError):
+        repo.get(session.id)
+
+
 def test_message_attachment_ids_survive_restart_and_old_records_default_to_empty(tmp_path):
     repo = JsonSessionRepository(tmp_path)
     session = repo.create("附件")
@@ -58,3 +113,14 @@ def test_message_attachment_ids_survive_restart_and_old_records_default_to_empty
     del payload["messages"][0]["attachment_ids"]
     (tmp_path / f"{session.id}.json").write_text(json.dumps(payload), encoding="utf-8")
     assert JsonSessionRepository(tmp_path).get(session.id).messages[0].attachment_ids == []
+
+
+def test_message_citations_survive_restart(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("引用")
+    citation = {"index": 1, "document_id": "doc-1", "chunk_id": "chunk-1", "title": "启动", "content": "npm run dev"}
+    repo.append(session.id, Message(role="assistant", content="答案 [1]", citations=[citation]))
+
+    restored = JsonSessionRepository(tmp_path).get(session.id)
+
+    assert restored.messages[0].citations == [citation]

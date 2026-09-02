@@ -1,25 +1,22 @@
 """Knowledge tools: add entries and search the knowledge base."""
 
 from iris_agent.knowledge.service import KnowledgeService
-from iris_agent.tools.base import Tool, ToolInvocationError
+from iris_agent.tools.base import Tool
 
 
 def build_add_knowledge_tool(service: KnowledgeService) -> Tool:
     def add_knowledge(title: str, content: str, category: str = "面经", source_url: str | None = None):
-        try:
-            entry = service.add(title, content, category=category, source_url=source_url)
-        except ValueError as exc:
-            raise ToolInvocationError("invalid_knowledge", str(exc)) from exc
         return {
-            "id": entry.id,
-            "title": entry.title,
-            "category": entry.category,
-            "source_type": entry.source_type,
+            "__irisKind": "knowledge-draft",
+            "title": title,
+            "content": content,
+            "category": category,
+            "source_url": source_url,
         }
 
     return Tool(
         "add_knowledge",
-        "保存一条知识到知识库（如面试经验、面经、教程）",
+        "提交一条待用户审核的知识库草稿（如面试经验、面经、教程）；不会直接写入知识库",
         {
             "type": "object",
             "properties": {
@@ -35,9 +32,13 @@ def build_add_knowledge_tool(service: KnowledgeService) -> Tool:
     )
 
 
-def build_search_knowledge_tool(service: KnowledgeService) -> Tool:
+def build_search_knowledge_tool(service: KnowledgeService, collection_id: str | None = None) -> Tool:
     def search_knowledge(query: str, limit: int | None = None):
-        hits = service.search(query, limit)
+        hits = (
+            service.search(query, limit, collection_id=collection_id)
+            if hasattr(service, "list_documents")
+            else service.search(query, limit)
+        )
         return {"hits": [hit.to_dict() for hit in hits]}
 
     return Tool(

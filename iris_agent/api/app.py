@@ -18,7 +18,7 @@ from iris_agent.api.report_schemas import (
     ReviseReportRequest,
     SaveReportRequest,
 )
-from iris_agent.api.schemas import ChatRequest, CreateSessionRequest, ToolApprovalRequest
+from iris_agent.api.schemas import ChatRequest, CreateSessionRequest, PromptOptimizationRequest, SessionModelProfileRequest, ToolApprovalRequest
 from iris_agent.api.attachment_api import register_attachment_routes
 from iris_agent.attachments.errors import AttachmentError, AttachmentNotFoundError, AttachmentStorageError
 from iris_agent.attachments.service import AttachmentService
@@ -32,7 +32,7 @@ from iris_agent.api.hot_radar_api import register_hot_radar_routes
 from iris_agent.api.uml_api import register_uml_routes
 from iris_agent.core.agent import AgentService
 from iris_agent.core.cancellation import ChatCancellationRegistry
-from iris_agent.core.errors import IrisError, SessionNotFoundError
+from iris_agent.core.errors import IrisError, SessionNotFoundError, ValidationError
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.hot_radar.service import HotRadarService
@@ -43,6 +43,8 @@ from iris_agent.notifications.service import NotificationService
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.service import TaskQueueService
 from iris_agent.api.tasks_api import register_task_routes
+from iris_agent.api.delegations_api import register_delegation_routes
+from iris_agent.subagent.delegation import DelegationService
 from iris_agent.memory.service import MemoryService
 from iris_agent.api.memory_api import register_memory_routes
 from iris_agent.session_search.service import SessionSearchService
@@ -56,7 +58,9 @@ from iris_agent.curator.service import CuratorService
 from iris_agent.api.curator_api import register_curator_routes
 from iris_agent.gateway.service import GatewayService
 from iris_agent.gateway.qq import QQOneBotAdapter
+from iris_agent.gateway.napcat import NapCatLauncher
 from iris_agent.gateway.wecom import WeComAdapter, WeComCryptError
+from iris_agent.api.gateway_api import register_gateway_routes
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -97,13 +101,23 @@ def _chat_attachment_data(attachment) -> dict:
 
 
 def _session_data(session: Session, include_messages: bool = True, chat_attachments: AttachmentService | None = None) -> dict:
-    data = {"id": session.id, "name": session.name, "created_at": session.created_at, "updated_at": session.updated_at}
+    data = {"id": session.id, "name": session.name, "created_at": session.created_at, "updated_at": session.updated_at, "model_profile_id": session.model_profile_id}
     if include_messages:
         messages = []
         for message in session.messages:
+            if message.role == "tool":
+                try:
+                    payload = json.loads(message.content)
+                except (TypeError, json.JSONDecodeError):
+                    payload = None
+                if not isinstance(payload, dict) or payload.get("__irisKind") != "knowledge-draft":
+                    continue
+                messages.append({"id": message.id, "role": "tool", "content": message.content,
+                                 "tool_call_id": message.tool_call_id, "name": message.name})
+                continue
             if message.role not in {"user", "assistant"}:
                 continue
-            item = {"role": message.role, "content": message.content, "attachment_ids": list(message.attachment_ids), "attachments": []}
+            item = {"id": message.id, "role": message.role, "content": message.content, "attachment_ids": list(message.attachment_ids), "attachments": [], "citations": list(message.citations)}
             if chat_attachments is not None:
                 for attachment_id in message.attachment_ids:
                     try:
@@ -205,6 +219,8 @@ def create_app(
     wecom_callback_path: str = "/gateway/wecom/callback",
     chat_attachments: AttachmentService | None = None,
     settings_profiles: SettingsProfileService | None = None,
+    delegation: DelegationService | None = None,
+    napcat: NapCatLauncher | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     chat_cancellations = ChatCancellationRegistry()
@@ -212,6 +228,8 @@ def create_app(
     def cancel_active_chat(task_id: str) -> bool:
         cancelled = chat_cancellations.cancel(task_id)
         if cancelled:
+            from iris_agent.tools.builtin.files import cancel_active_commands
+            cancel_active_commands()
             # The running generator retains the Event object; removing the
             # registry entry prevents stopped approval waits from leaking.
             chat_cancellations.unregister(task_id)
@@ -251,6 +269,8 @@ def create_app(
         register_notification_routes(app, notifications)
     if task_center is not None:
         register_task_routes(app, task_center, sessions, task_queue, cancel_active_chat)
+    if delegation is not None:
+        register_delegation_routes(app, delegation)
     if memory is not None:
         register_memory_routes(app, memory)
     if search is not None:
@@ -263,6 +283,7 @@ def create_app(
         register_curator_routes(app, curator)
     if chat_attachments is not None:
         register_attachment_routes(app, chat_attachments)
+    register_gateway_routes(app, qq_adapter, qq_ws_path, napcat)
 
     if qq_adapter is not None:
         @app.websocket(qq_ws_path)
@@ -350,9 +371,36 @@ def create_app(
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/tools")
+    def list_tools():
+        tools = []
+        for schema in service.loop.tools.schemas():
+            function = schema["function"]
+            tools.append(
+                {
+                    "name": function["name"],
+                    "description": function["description"],
+                    "requires_approval": service.loop.tools.requires_approval(function["name"]),
+                }
+            )
+        return {"tools": tools}
+
+    @app.post("/api/prompt/optimize")
+    def optimize_prompt(request: PromptOptimizationRequest):
+        if skills is None:
+            raise ValidationError("提示词优化功能不可用")
+        instruction = skills.load_skill("prompt-optimizer").body
+        return {"prompt": service.optimize_prompt(request.prompt.strip(), instruction)}
+
     @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
     def create_session(request: CreateSessionRequest):
-        return _session_data(sessions.create(request.name), include_messages=False)
+        session = sessions.create(request.name)
+        if request.model_profile_id is not None:
+            if settings_profiles is None or request.model_profile_id not in {item["id"] for item in settings_profiles.list_state()["profiles"]}:
+                raise ValidationError("模型配置不存在")
+            session.model_profile_id = request.model_profile_id
+            sessions.save(session)
+        return _session_data(session, include_messages=False)
 
     @app.get("/api/sessions")
     def list_sessions():
@@ -361,6 +409,16 @@ def create_app(
     @app.get("/api/sessions/{session_id}")
     def get_session(session_id: str):
         return _session_data(sessions.get(session_id), chat_attachments=chat_attachments)
+
+    @app.put("/api/sessions/{session_id}/model-profile")
+    def set_session_model_profile(session_id: str, request: SessionModelProfileRequest):
+        session = sessions.get(session_id)
+        if request.model_profile_id is not None:
+            if settings_profiles is None or request.model_profile_id not in {item["id"] for item in settings_profiles.list_state()["profiles"]}:
+                raise ValidationError("模型配置不存在")
+        session.model_profile_id = request.model_profile_id
+        sessions.save(session)
+        return _session_data(session, include_messages=False)
 
     @app.delete("/api/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_session(session_id: str):
@@ -379,6 +437,12 @@ def create_app(
         if chat_attachments is not None:
             for attachment_id in request.attachment_ids:
                 chat_attachments.read(request.session_id, attachment_id)
+        skill_definition = skills.find_skill(request.skill_id) if skills is not None and request.skill_id else None
+        if request.skill_id and skill_definition is None:
+            raise ValidationError("所选 Skill 不存在或当前不可用")
+        if skill_definition is not None and not skills.get_skill(skill_definition.id).enabled:
+            raise ValidationError("所选 Skill 已停用")
+        effective_toolsets = list(skill_definition.allowed_toolsets) if skill_definition and skill_definition.allowed_toolsets else request.toolsets
 
         def generate():
             task_id: str | None = None
@@ -390,7 +454,8 @@ def create_app(
                     yield json.dumps({"type": "task_started", "data": {"task_id": task_id}}, ensure_ascii=False) + "\n"
                 else:
                     cancel_signal = None
-                for event in service.run(request.session_id, request.message, request.attachment_ids, is_cancelled=None if cancel_signal is None else cancel_signal.is_set):
+                stream = service.regenerate(request.session_id, request.regenerate_from_message_id, request.message, request.attachment_ids, request.knowledge_collection_id, request.knowledge_query_mode, request.use_knowledge, None if cancel_signal is None else cancel_signal.is_set, toolsets=effective_toolsets, skill_name=skill_definition.name if skill_definition else None, skill_instruction=skill_definition.body if skill_definition else None) if request.regenerate_from_message_id else service.run(request.session_id, request.message, request.attachment_ids, knowledge_collection_id=request.knowledge_collection_id, knowledge_query_mode=request.knowledge_query_mode, knowledge_enabled=request.use_knowledge, is_cancelled=None if cancel_signal is None else cancel_signal.is_set, response_mode=request.response_mode, toolsets=effective_toolsets, skill_name=skill_definition.name if skill_definition else None, skill_instruction=skill_definition.body if skill_definition else None)
+                for event in stream:
                     if task_id is not None:
                         if event.type == "tool_started":
                             task_center.tool_started(task_id, str(event.data["name"]))
@@ -408,7 +473,7 @@ def create_app(
                                 started_at = tool_started_at.pop((request.session_id, str(event.data["call_id"])), None)
                             duration_ms = None if started_at is None else int((monotonic() - started_at) * 1000)
                             task_center.tool_finished(task_id, str(event.data["name"]), duration_ms, succeeded=bool(event.data.get("ok")))
-                        elif event.type == "text_delta":
+                        elif event.type in {"text_delta", "tool_progress"}:
                             task_center.touch(task_id)
                         elif event.type == "message_completed":
                             task_center.complete(task_id)
@@ -481,7 +546,7 @@ def create_app(
                             task_center.tool_started(task_id, str(event.data["name"]))
                             with approval_lock:
                                 tool_started_at[(session_id, str(event.data["call_id"]))] = monotonic()
-                        elif event.type == "text_delta":
+                        elif event.type in {"text_delta", "tool_progress"}:
                             task_center.touch(task_id)
                         elif event.type == "tool_approval_requested":
                             next_call_id = str(event.data["call_id"])

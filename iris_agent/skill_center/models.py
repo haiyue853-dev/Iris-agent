@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+SUPPORTED_SKILL_TOOLSETS = ("safe", "research", "coding", "knowledge", "skills", "delegation")
+
 
 @dataclass(frozen=True, slots=True)
 class SkillDefinition:
@@ -16,6 +18,7 @@ class SkillDefinition:
     version: int
     body: str = ""
     source: str = "bundled"
+    allowed_toolsets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,3 +33,5 @@ class SkillInfo:
     entry_view: str
     version: int
     enabled: bool
+    source: str = "bundled"
+    allowed_toolsets: tuple[str, ...] = ()

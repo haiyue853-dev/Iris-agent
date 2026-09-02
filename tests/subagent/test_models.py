@@ -7,13 +7,15 @@ def test_subagent_request_defaults():
     assert req.context is None
     assert req.allowed_tools is None
     assert req.max_rounds is None
+    assert req.role is None
 
 
 def test_subagent_request_with_options():
-    req = SubagentRequest("分析代码", context="背景", allowed_tools=["read_file"], max_rounds=3)
+    req = SubagentRequest("分析代码", context="背景", allowed_tools=["read_file"], max_rounds=3, role="researcher")
     assert req.context == "背景"
     assert req.allowed_tools == ["read_file"]
     assert req.max_rounds == 3
+    assert req.role == "researcher"
 
 
 def test_subagent_result_fields():

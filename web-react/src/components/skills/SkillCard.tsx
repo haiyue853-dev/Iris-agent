@@ -6,6 +6,8 @@ interface SkillCardProps {
   processing: boolean;
   onToggle: (id: string, enabled: boolean) => void;
   onOpen: (skill: SkillInfo) => void;
+  onEdit?: (skill: SkillInfo) => void;
+  onDelete?: (skill: SkillInfo) => void;
 }
 
 function SkillIcon({ name }: { name: string }) {
@@ -66,9 +68,10 @@ const CATEGORY_NAMES: Record<string, string> = {
   productivity: '效率',
   development: '开发',
   news: '资讯',
+  custom: '自定义',
 };
 
-export default function SkillCard({ skill, toggling, processing, onToggle, onOpen }: SkillCardProps) {
+export default function SkillCard({ skill, toggling, processing, onToggle, onOpen, onEdit, onDelete }: SkillCardProps) {
   const disabled = !skill.enabled;
   const action = disabled ? '启用' : '停用';
   const actionInProgress = disabled ? '正在启用' : '正在停用';
@@ -108,6 +111,12 @@ export default function SkillCard({ skill, toggling, processing, onToggle, onOpe
             >
               {processing ? '处理中…' : action}
             </button>
+            {(onEdit || onDelete) && (
+              <span className="skill-card-manage">
+                {onEdit && <button type="button" className="skill-card-action" onClick={() => onEdit(skill)} aria-label={`编辑 ${skill.name}`}>编辑</button>}
+                {onDelete && <button type="button" className="skill-card-delete" onClick={() => onDelete(skill)} aria-label={`删除 ${skill.name}`}>删除</button>}
+              </span>
+            )}
           </div>
         </div>
       </div>
