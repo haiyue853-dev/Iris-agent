@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { cancelTask, createTask, getTask, resolveTaskApproval } from '../api/tasks';
-import { deleteSession, getSession, streamChat } from '../api/chat';
+import { deleteSession, getSession, listSessions, streamChat } from '../api/chat';
 import { useChat } from './useChat';
 
 vi.mock('../api/chat', () => ({
@@ -22,6 +22,28 @@ vi.mock('../api/tasks', () => ({
 }));
 
 describe('useChat background task support', () => {
+  it('registers a newly created session immediately for the sidebar', () => {
+    const session = { id: 'session-new', name: '新会话', created_at: 1, updated_at: 1 };
+    const { result } = renderHook(() => useChat());
+
+    act(() => { result.current.handleSessionAvailable(session); });
+
+    expect(result.current.currentSessionId).toBe('session-new');
+    expect(result.current.sessions).toEqual([session]);
+    expect(listSessions).toHaveBeenCalled();
+  });
+
+  it('keeps the first user message when reopening an empty session', async () => {
+    const session = { id: 'session-empty', name: '空回复', created_at: 1, updated_at: 1 };
+    vi.mocked(getSession).mockResolvedValue({ messages: [] });
+    const { result } = renderHook(() => useChat());
+
+    act(() => { result.current.handleSessionAvailable(session, '这个问题没有返回内容'); });
+    await act(async () => { await result.current.handleSwitchSession(session.id); });
+
+    expect(result.current.messages).toEqual([{ role: 'user', content: '这个问题没有返回内容' }]);
+  });
+
   it('keeps the submitted task id available for navigation', async () => {
     vi.mocked(createTask).mockResolvedValue({ id: 'task-1', request_summary: '后台任务', status: 'queued', session_id: 'session-1', created_at: '2026-08-13T12:00:00Z', updated_at: '2026-08-13T12:00:00Z' });
     const { result } = renderHook(() => useChat());

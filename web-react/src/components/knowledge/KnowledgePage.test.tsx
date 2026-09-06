@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -23,7 +23,7 @@ const hit = {
   score: 2,
 };
 
-function mockKnowledgeApi(entries: KnowledgeEntry[] = [], hits: KnowledgeSearchHit[] = [], collections: Array<{ id: string; name: string }> = [], chunks: Array<{ id: string; content: string; location?: string }> = [], evaluationHistory: Array<{ id: string; created_at: number; total: number; hit_count: number; judged_total: number; recall_at_1: number | null; recall_at_3: number | null; mrr: number | null; config: { top_k: number; candidate_multiplier: number; minimum_relevance_score: number; mmr_relevance_weight: number } }> = [], evaluation?: object, badCases: Array<{ id: string; question: string; collection_id: string; expected_title?: string; expected_answer?: string; reason?: string }> = []) {
+function mockKnowledgeApi(entries: KnowledgeEntry[] = [], hits: KnowledgeSearchHit[] = [], collections: Array<{ id: string; name: string }> = [], chunks: Array<{ id: string; content: string; location?: string }> = [], evaluationHistory: Array<{ id: string; created_at: number; total: number; hit_count: number; judged_total: number; recall_at_1: number | null; recall_at_3: number | null; mrr: number | null; config: { top_k: number; candidate_multiplier: number; minimum_relevance_score: number; mmr_relevance_weight: number } }> = [], evaluation?: object, badCases: Array<{ id: string; question: string; collection_id: string; expected_title?: string; expected_answer?: string; reason?: string }> = [], searchDecision = { status: hits.length ? 'answerable' : 'no_answer', confidence: hits.length ? 0.9 : 1, reason: '测试证据判断', top_score: hits[0]?.score || 0, score_gap: hits[0]?.score || 0, route_count: hits[0]?.routes?.length || 0 }) {
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     let body: unknown = { entries };
@@ -33,9 +33,9 @@ function mockKnowledgeApi(entries: KnowledgeEntry[] = [], hits: KnowledgeSearchH
     else if (url.includes('/api/knowledge/bad-cases')) body = init?.method === 'POST' ? { id: 'bad-created', question: '发布计划在哪里', collection_id: 'collection-general' } : { cases: badCases };
     else if (url.endsWith('/api/knowledge/evaluate')) body = evaluation || { total: 0, hit_count: 0, judged_total: 0, route_coverage: {}, recommendations: [], results: [] };
     else if (url.includes('/api/knowledge/search/debug')) body = { query: '混合召回', collection_id: 'collection-general', candidate_limit: 30, config: { top_k: 5, candidate_multiplier: 3, minimum_relevance_score: 0.2, mmr_relevance_weight: 0.7 }, stages: [], hits: [] };
-    else if (url.includes('/api/knowledge/search')) body = { hits };
+    else if (url.includes('/api/knowledge/search')) body = { hits, decision: searchDecision };
     else if (url.includes('/api/knowledge/runtime')) body = { config: { embedding_enabled: true, embedding_model: 'bge-m3', embedding_base_url: 'http://localhost:11434', semantic_split_enabled: true, semantic_split_model: 'bge-m3', semantic_split_base_url: 'http://localhost:11434', graph_enabled: true, graph_model: 'deepseek-r1:8b', graph_base_url: 'http://localhost:11434', image_enabled: false, image_model: 'qwen2.5vl:7b', image_base_url: 'http://localhost:11434', reranker_enabled: true, reranker_provider: 'ollama', reranker_model: 'deepseek-r1:8b', reranker_base_url: 'http://localhost:11434', mmr_relevance_weight: 0.7 }, components: [{ key: 'embedding', label: '向量模型', enabled: true, provider: 'ollama', model: 'bge-m3', base_url: 'http://localhost:11434', status: 'untested', message: '尚未测试', latency_ms: null }] };
-    else if (url.includes('/retrieval-config')) body = { config: { top_k: 5, candidate_multiplier: 3, minimum_relevance_score: 0.2, mmr_relevance_weight: 0.7 } };
+    else if (url.includes('/retrieval-config')) body = { config: { top_k: 5, candidate_multiplier: 3, minimum_relevance_score: 0.2, mmr_relevance_weight: 0.7, abstention_enabled: true, answer_threshold: 0.55, ambiguity_gap: 0.08, min_evidence_count: 1 } };
     else if (url.includes('/api/knowledge/index-progress')) body = { items: entries.map((item) => ({ document_id: item.id, stage: 'embedding', message: '正在生成向量索引', updated_at: 1000 })) };
     else if (url.includes('/mindmap')) body = { nodes: [] };
     else if (url.includes('/chunks/') && init?.method === 'PATCH') {
@@ -91,6 +91,43 @@ describe('KnowledgePage', () => {
     await user.type(screen.getByPlaceholderText('正文内容'), '多模态大模型结构');
     await user.click(screen.getByRole('button', { name: '保存资料' }));
     expect(await screen.findByText('多模态面试')).toBeInTheDocument();
+  });
+
+  it('uploads every file selected from the knowledge import picker', async () => {
+    const fetchMock = mockKnowledgeApi();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    const first = new File(['alpha'], 'alpha.md', { type: 'text/markdown' });
+    const second = new File(['beta'], 'beta.txt', { type: 'text/plain' });
+
+    render(<KnowledgePage />);
+    const picker = screen.getByLabelText('导入资料');
+    expect(picker).toHaveAttribute('multiple');
+    expect(picker).toHaveClass('visually-hidden');
+    await user.upload(picker, [first, second]);
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input, init]) =>
+      String(input).endsWith('/api/knowledge/upload') && init?.method === 'POST',
+    )).toHaveLength(2));
+    expect(await screen.findByText('已导入 2 份资料。')).toBeInTheDocument();
+  });
+
+  it('uploads multiple files dropped on the knowledge import zone', async () => {
+    const fetchMock = mockKnowledgeApi();
+    vi.stubGlobal('fetch', fetchMock);
+    const first = new File(['alpha'], 'alpha.md', { type: 'text/markdown' });
+    const second = new File(['beta'], 'beta.txt', { type: 'text/plain' });
+
+    render(<KnowledgePage />);
+    const dropzone = screen.getByTestId('knowledge-upload-dropzone');
+    fireEvent.dragEnter(dropzone, { dataTransfer: { files: [first, second], types: ['Files'] } });
+    expect(dropzone).toHaveClass('is-dragging');
+    fireEvent.drop(dropzone, { dataTransfer: { files: [first, second], types: ['Files'] } });
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input, init]) =>
+      String(input).endsWith('/api/knowledge/upload') && init?.method === 'POST',
+    )).toHaveLength(2));
+    expect(await screen.findByText('已导入 2 份资料。')).toBeInTheDocument();
   });
 
   it('offers delete action in the opened document detail', async () => {
@@ -266,6 +303,48 @@ describe('KnowledgePage', () => {
     expect(await screen.findByText('多模态大模型结构')).toBeInTheDocument();
   });
 
+  it('shows answerability metrics for labeled evaluation cases', async () => {
+    vi.stubGlobal('fetch', mockKnowledgeApi([], [], [], [], [], {
+      total: 3, hit_count: 3, judged_total: 0, recall_at_1: null, recall_at_3: null, mrr: null,
+      answer_score: null, grounded_rate: null, route_coverage: {}, recommendations: [], results: [],
+      answerability: { total: 3, expected_answerable: 2, expected_no_answer: 1, accuracy: 0.667, refusal_accuracy: 1, false_answer_rate: 0, false_refusal_rate: 0.5 },
+    }));
+    const user = userEvent.setup();
+
+    render(<KnowledgePage />);
+    await user.type(screen.getByPlaceholderText(/React 状态管理/), '公司利润是多少');
+    await user.click(screen.getByRole('button', { name: '运行评测' }));
+
+    expect(await screen.findByText('拒答准确率 100% · 错误回答率 0% · 错误拒答率 50%')).toBeInTheDocument();
+  });
+
+  it('sends explicit no-answer labels from the evaluation editor', async () => {
+    const fetchMock = mockKnowledgeApi();
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<KnowledgePage />);
+    await user.type(screen.getByPlaceholderText(/React 状态管理/), '公司利润是多少 || || || false');
+    await user.click(screen.getByRole('button', { name: '运行评测' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/knowledge/evaluate',
+      expect.objectContaining({ body: expect.stringContaining('"expected_answerable":false') }),
+    ));
+  });
+
+  it('shows an explicit no-answer message instead of weak retrieval hits', async () => {
+    vi.stubGlobal('fetch', mockKnowledgeApi([], [hit], [], [], [], undefined, [], {
+      status: 'no_answer', confidence: 0.92, reason: '最高结果未达到回答阈值', top_score: 0.31, score_gap: 0.02, route_count: 1,
+    }));
+    const user = userEvent.setup();
+
+    render(<KnowledgePage />);
+    await user.type(screen.getByPlaceholderText(/搜索资料/), '公司今年利润是多少');
+    await user.click(screen.getByRole('button', { name: '检索' }));
+
+    expect(await screen.findByText('知识库中没有足够依据回答这个问题')).toBeInTheDocument();
+    expect(screen.queryByText('多模态大模型结构')).not.toBeInTheDocument();
+  });
+
   it('opens and highlights the source chunk from a retrieval result', async () => {
     vi.stubGlobal('fetch', mockKnowledgeApi([entry], [{
       ...hit,
@@ -339,7 +418,7 @@ describe('KnowledgePage', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/knowledge/collections/collection-team/retrieval-config',
-      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ top_k: 3, candidate_multiplier: 3, minimum_relevance_score: 0.2, mmr_relevance_weight: 0.7 }) }),
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ top_k: 3, candidate_multiplier: 3, minimum_relevance_score: 0.2, mmr_relevance_weight: 0.7, abstention_enabled: true, answer_threshold: 0.55, ambiguity_gap: 0.08, min_evidence_count: 1 }) }),
     ));
   });
 

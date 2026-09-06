@@ -201,6 +201,21 @@ def test_approval_holds_the_worker_until_the_same_task_is_resolved(queue_service
     assert tasks.get_task(awaiting.id).status == "completed"
 
 
+def test_duplicate_approval_is_idempotent_after_worker_consumes_decision(queue_service) -> None:
+    service, agent, tasks, _ = queue_service
+    awaiting = service.submit("session-a", "approval")
+
+    service.start()
+    _wait_for(lambda: tasks.get_task(awaiting.id).status == "awaiting_approval")
+    first = service.resolve_approval(awaiting.id, "call-1", True)
+    _wait_for(lambda: tasks.get_task(awaiting.id).status == "completed")
+
+    second = service.resolve_approval(awaiting.id, "call-1", True)
+
+    assert first.id == second.id == awaiting.id
+    assert agent.resolved == [("session-a", "call-1", True)]
+
+
 def test_cancel_queued_job_removes_it_without_starting_agent(queue_service) -> None:
     service, agent, tasks, queue = queue_service
     queued = service.submit("session-a", "never-start")

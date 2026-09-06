@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterable
 
 from iris_agent.session_search.tokenizer import tokenize
@@ -25,6 +25,7 @@ class QueryPlan:
     low_level_keywords: tuple[str, ...]
     routes: tuple[str, ...]
     rag_mode: str
+    evidence_notice: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +81,13 @@ class KnowledgeOrchestrator:
         plan = self.plan(query, session_id, requested_mode)
         hits: list[UnifiedKnowledgeHit] = []
 
-        _, document_citations = self.rag.context_for(
+        document_context, document_citations = self.rag.context_for(
             plan.rewritten_query,
             collection_id,
             plan.rag_mode,
         )
+        if not document_citations and document_context.startswith("[知识库证据判断]"):
+            return replace(plan, evidence_notice=document_context), []
         for item in document_citations:
             hits.append(
                 UnifiedKnowledgeHit(
@@ -134,6 +137,8 @@ class KnowledgeOrchestrator:
         requested_mode: str = "mix",
     ) -> tuple[str, list[dict[str, Any]]]:
         plan, hits = self.retrieve(query, session_id, collection_id, requested_mode)
+        if plan.evidence_notice:
+            return plan.evidence_notice, []
         citations: list[dict[str, Any]] = []
         sections: list[str] = []
         used = 0

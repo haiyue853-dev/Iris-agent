@@ -238,8 +238,55 @@ def test_duplicate_concurrent_approval_does_not_change_completed_task(tmp_path):
     for worker in workers:
         worker.join()
 
+    response_events = [_stream_events(response) for response in responses]
+    assert all(
+        not any(event.get("data", {}).get("code") == "tool_approval_not_found" for event in events)
+        for events in response_events
+    )
+    repeated = _stream_events(client.post(f"/api/sessions/{session_id}/tool-approvals/write-1", json={"approved": True}))
+    assert not any(event.get("data", {}).get("code") == "tool_approval_not_found" for event in repeated)
     assert task_center.get_task(task_id).status == "completed"
     assert "execution_failed" not in [event.type for event in task_center.get_task(task_id).events]
+
+
+def test_duplicate_session_approval_without_task_center_is_ignored(tmp_path):
+    class Provider:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderResponse(tool_calls=[ToolCall("write-1", "write", {})])
+            return ProviderResponse(content="done")
+
+    sessions = JsonSessionRepository(tmp_path / "sessions")
+    tools = ToolRegistry()
+    invoked = []
+    tools.register(Tool("write", "write", {"type": "object", "properties": {}}, lambda: invoked.append(True), requires_approval=True))
+    agent = AgentService(AgentLoop(Provider(), tools), sessions, "system")
+    client = TestClient(create_app(agent, sessions))
+    session_id = client.post("/api/sessions", json={"name": "chat"}).json()["id"]
+    waiting = _stream_events(client.post("/api/chat/stream", json={"session_id": session_id, "message": "write"}))
+    assert waiting[-1]["type"] == "tool_approval_requested"
+
+    barrier = threading.Barrier(3)
+    responses = []
+
+    def approve():
+        barrier.wait()
+        responses.append(client.post(f"/api/sessions/{session_id}/tool-approvals/write-1", json={"approved": True}))
+
+    workers = [threading.Thread(target=approve) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    barrier.wait()
+    for worker in workers:
+        worker.join()
+
+    response_events = [_stream_events(response) for response in responses]
+    assert all(not any(event.get("type") == "error" for event in events) for events in response_events)
+    assert invoked == [True]
 
 
 def test_approval_failure_clears_association_before_a_retry(tmp_path):

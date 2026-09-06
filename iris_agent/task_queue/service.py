@@ -113,6 +113,14 @@ class TaskQueueService:
         with self._condition:
             waiting = self._waiting
             if waiting is None or waiting[:2] != (task_id, call_id) or task_id in self._cancel_requested:
+                state = self.task_center.approval_state(task_id, call_id)
+                if state is not None:
+                    state_name, _ = state
+                    same_decision = state_name == "completed" or (state_name == "approved" and approved) or (state_name == "rejected" and not approved)
+                    if same_decision:
+                        task = self.task_center.get_task(task_id)
+                        if task is not None:
+                            return task
                 raise ValueError("待确认的工具调用不存在或已处理")
             _, _, tool_name = waiting
             task = self.task_center.record_approval(task_id, call_id, tool_name, approved)

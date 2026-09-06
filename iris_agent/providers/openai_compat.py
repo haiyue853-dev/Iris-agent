@@ -2,7 +2,6 @@ import json
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from itertools import chain
 from typing import Any
 
 from iris_agent.core.errors import ProviderError
@@ -10,11 +9,12 @@ from iris_agent.core.models import Message, ProviderResponse, ToolCall
 
 
 class OpenAICompatibleProvider:
-    def __init__(self, client: Any, model: str, temperature: float = 0.2, first_token_timeout_seconds: float = 20):
+    def __init__(self, client: Any, model: str, temperature: float = 0.2, first_token_timeout_seconds: float = 20, stream_timeout_seconds: float = 120):
         self.client = client
         self.model = model
         self.temperature = temperature
         self.first_token_timeout_seconds = first_token_timeout_seconds
+        self.stream_timeout_seconds = stream_timeout_seconds
         self._closed = False
 
     def close(self) -> None:
@@ -67,19 +67,50 @@ class OpenAICompatibleProvider:
                     continue
                 raise ProviderError("模型服务调用失败") from exc
 
-    def _stream_once(self, kwargs: dict[str, Any], pending_calls: dict[int, dict[str, str]], yielded_content: list[bool]) -> Iterator[ProviderResponse]:
-        chunks = iter(self.client.chat.completions.create(**kwargs))
-        pool = ThreadPoolExecutor(max_workers=1)
-        first = pool.submit(next, chunks)
+    def _bounded_chunks(self, kwargs: dict[str, Any]):
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="iris-model-stream")
+        resources: list[Any] = []
+        deadline = time.monotonic() + self.stream_timeout_seconds
+        first_deadline = time.monotonic() + self.first_token_timeout_seconds
+        end = object()
+
+        def open_stream():
+            response = self.client.chat.completions.create(**kwargs)
+            resources.append(response)
+            return iter(response)
+
+        def close_stream():
+            for response in resources:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+
+        pending = pool.submit(open_stream)
+        first_chunk = True
         try:
-            first_chunk = first.result(timeout=self.first_token_timeout_seconds)
+            chunks = pending.result(timeout=max(0, min(first_deadline, deadline) - time.monotonic()))
+            while True:
+                chunk_deadline = first_deadline if first_chunk else time.monotonic() + self.first_token_timeout_seconds
+                pending = pool.submit(next, chunks, end)
+                chunk = pending.result(timeout=max(0, min(chunk_deadline, deadline) - time.monotonic()))
+                if chunk is end:
+                    return
+                first_chunk = False
+                yield chunk
         except TimeoutError as exc:
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise ProviderError("模型首个响应超时，请稍后重试") from exc
+            message = "模型首个响应超时，请稍后重试" if first_chunk else "模型流式响应超时，请稍后重试"
+            raise ProviderError(message) from exc
         finally:
-            if first.done():
-                pool.shutdown(wait=False)
-        for chunk in chain((first_chunk,), chunks):
+            # Serialize cleanup after the pending read; never close a generator
+            # while it is executing or block timeout delivery on executor exit.
+            pool.submit(close_stream)
+            pool.shutdown(wait=False)
+
+    def _stream_once(self, kwargs: dict[str, Any], pending_calls: dict[int, dict[str, str]], yielded_content: list[bool]) -> Iterator[ProviderResponse]:
+        for chunk in self._bounded_chunks(kwargs):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta

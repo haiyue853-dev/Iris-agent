@@ -50,7 +50,7 @@ export function ActionButtons({
             onClick={() => runAction(action.id)}
             disabled={action.isDisabled}
             className={cn(
-              "rounded-full px-4!",
+              "rounded-none px-4!",
               "justify-center",
               "min-h-11 w-full text-base",
               "@sm/actions:min-h-0 @sm/actions:w-auto @sm/actions:px-3 @sm/actions:py-2 @sm/actions:text-sm",

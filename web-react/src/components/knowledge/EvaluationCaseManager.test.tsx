@@ -11,6 +11,14 @@ const cases = [
 ];
 
 describe('EvaluationCaseManager', () => {
+  it('labels a no-answer case without demanding a relevant chunk', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<EvaluationCaseManager cases={[{ question: '库外问题', expected_answerable: false }]} validation={null} onChange={onChange} onLabel={vi.fn()} onLabelMany={vi.fn()} onValidate={vi.fn()} onRun={vi.fn()} />);
+    expect(screen.queryByText('空标注')).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('预期可回答性 1'), 'true');
+    expect(onChange).toHaveBeenLastCalledWith([{ question: '库外问题', expected_answerable: true }]);
+  });
   it('shows progress and validation problems for a knowledge evaluation suite', () => {
     render(<EvaluationCaseManager cases={cases} validation={{ summary: { total: 3, annotated: 2, duplicates: 2, empty_annotations: 1, invalid_chunks: 1 }, rows: [
       { index: 0, duplicate: true, empty_annotation: false, invalid_chunk_ids: ['chunk-1'] },

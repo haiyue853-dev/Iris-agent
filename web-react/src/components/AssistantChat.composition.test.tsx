@@ -5,7 +5,8 @@ import { createSession, streamChat } from '../api/chat';
 import { optimizePrompt } from '../api/prompt';
 import { fetchSkills } from '../api/skills';
 
-vi.mock('../api/chat', () => ({
+vi.mock('../api/chat', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../api/chat')>(),
   createSession: vi.fn(),
   streamChat: vi.fn(),
   streamToolApproval: vi.fn(),
@@ -21,6 +22,7 @@ if (typeof HTMLElement.prototype.scrollTo === 'undefined') {
 
 describe('AssistantChat composer', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
   });
 
@@ -99,15 +101,18 @@ describe('AssistantChat composer', () => {
     expect(localStorage.getItem('iris_chat_online_search')).toBe('false');
   });
 
-  it('fills the composer from a suggestion without submitting', () => {
+  it('keeps the composer free of preset example buttons', () => {
     render(<AssistantChat sessionId="" messages={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: '分析这个项目' }));
-    expect(screen.getByRole('textbox', { name: '消息输入框' })).toHaveValue('分析这个项目');
-    expect(vi.mocked(createSession)).not.toHaveBeenCalled();
+    for (const name of ['分析这个项目', '帮我定位问题', '运行项目测试']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('textbox', { name: '消息输入框' })).toHaveValue('');
   });
 
   it('resends an edited message even when its text is unchanged', async () => {
-    vi.mocked(streamChat).mockResolvedValueOnce();
+    vi.mocked(streamChat).mockImplementationOnce(async (_id, _text, _signal, onEvent) => {
+      onEvent({ type: 'message_completed', data: { content: '新回复' } });
+    });
     render(<AssistantChat sessionId="session-1" messages={[
       { id: 'message-1', role: 'user', content: '原始问题' },
     ]} />);
@@ -123,7 +128,9 @@ describe('AssistantChat composer', () => {
   });
 
   it('regenerates the backend turn and refreshes the session instead of adding a local branch', async () => {
-    vi.mocked(streamChat).mockResolvedValueOnce();
+    vi.mocked(streamChat).mockImplementationOnce(async (_id, _text, _signal, onEvent) => {
+      onEvent({ type: 'message_completed', data: { content: '新回复' } });
+    });
     const onSessionRefreshed = vi.fn().mockResolvedValue([
       { id: 'user-1', role: 'user', content: '原始问题' },
       { id: 'assistant-2', role: 'assistant', content: '新回复' },
@@ -142,6 +149,27 @@ describe('AssistantChat composer', () => {
     await waitFor(() => expect(streamChat).toHaveBeenCalled());
     expect(vi.mocked(streamChat).mock.calls[0]?.[8]).toBe('user-1');
     await waitFor(() => expect(onSessionRefreshed).toHaveBeenCalledWith('session-1'));
+  });
+
+  it('shows an actionable model error when regeneration fails', async () => {
+    vi.mocked(streamChat).mockImplementationOnce(async (_id, _text, _signal, onEvent) => {
+      onEvent({ type: 'error', data: { code: 'provider_error', message: '模型服务调用失败' } });
+    });
+    const onSessionRefreshed = vi.fn().mockResolvedValue([
+      { id: 'user-1', role: 'user', content: '原始问题' },
+    ]);
+    render(<AssistantChat
+      sessionId="session-1"
+      messages={[
+        { id: 'user-1', role: 'user', content: '原始问题' },
+        { id: 'assistant-1', role: 'assistant', content: '旧回复' },
+      ]}
+      onSessionRefreshed={onSessionRefreshed}
+    />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新生成' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('模型服务调用失败');
+    expect(screen.getByRole('alert')).toHaveTextContent('API');
+    expect(onSessionRefreshed).not.toHaveBeenCalled();
   });
 
   it('replaces the draft with the optimized prompt without sending it', async () => {

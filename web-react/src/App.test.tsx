@@ -6,6 +6,10 @@ import App from './App';
 import { useChat } from './hooks/useChat';
 
 const assistantChatProps = vi.hoisted(() => [] as Array<{ onSessionCreated?: (id: string) => void }>);
+const chatHandlers = vi.hoisted(() => ({
+  handleSwitchSession: vi.fn(),
+  handleRefreshSession: vi.fn(async () => null),
+}));
 
 vi.mock('./hooks/useChat', () => ({
   useChat: vi.fn(),
@@ -21,6 +25,8 @@ vi.mock('./components/AssistantChat', () => ({
 describe('App workspace navigation', () => {
   beforeEach(() => {
     assistantChatProps.length = 0;
+    chatHandlers.handleSwitchSession.mockReset();
+    chatHandlers.handleRefreshSession.mockReset().mockResolvedValue(null);
     localStorage.clear();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     vi.mocked(useChat).mockReturnValue({
@@ -47,8 +53,9 @@ describe('App workspace navigation', () => {
       handleNewChat: vi.fn(),
       handleCopy: vi.fn(),
       handleEditMessage: vi.fn(),
-      handleSwitchSession: vi.fn(),
-      handleRefreshSession: vi.fn(),
+      handleSwitchSession: chatHandlers.handleSwitchSession,
+      handleSessionAvailable: vi.fn(),
+      handleRefreshSession: chatHandlers.handleRefreshSession,
       handleDeleteSession: vi.fn(),
     });
   });
@@ -121,6 +128,28 @@ describe('App workspace navigation', () => {
 
     expect(firstCallback).toBeDefined();
     expect(assistantChatProps.at(-1)?.onSessionCreated).toBe(firstCallback);
+  });
+
+  it('refreshes a completed hidden session without switching away from the current chat', async () => {
+    render(<App />);
+    const callback = assistantChatProps.at(-1)?.onSessionCreated;
+
+    callback?.('session-background');
+    await Promise.resolve();
+
+    expect(chatHandlers.handleRefreshSession).toHaveBeenCalledWith('session-background', undefined);
+    expect(chatHandlers.handleSwitchSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the chat runtime mounted while opening another workspace', async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    expect(screen.getByTestId('assistant-chat')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'AI 日报' }));
+
+    expect(screen.getByTestId('assistant-chat')).toBeInTheDocument();
   });
 
 });

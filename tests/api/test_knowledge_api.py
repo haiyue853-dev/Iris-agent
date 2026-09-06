@@ -110,6 +110,18 @@ def test_search_knowledge_api_requires_query(tmp_path):
     assert response.status_code == 422
 
 
+def test_rag_search_api_returns_evidence_decision(tmp_path):
+    client, knowledge = _rag_client(tmp_path)
+    try:
+        response = client.get("/api/knowledge/search", params={"query": "不存在的问题", "collection_id": "collection-general"})
+
+        assert response.status_code == 200
+        assert response.json()["decision"]["status"] == "no_answer"
+        assert response.json()["decision"]["confidence"] == 1.0
+    finally:
+        knowledge.close()
+
+
 def test_debug_search_api_returns_pipeline_stages(tmp_path):
     client, knowledge = _rag_client(tmp_path)
     try:
@@ -160,6 +172,10 @@ def test_collection_retrieval_config_api_returns_saved_effective_values(tmp_path
             "candidate_multiplier": 4,
             "minimum_relevance_score": 0.4,
             "mmr_relevance_weight": 0.55,
+            "abstention_enabled": True,
+            "answer_threshold": 0.55,
+            "ambiguity_gap": 0.08,
+            "min_evidence_count": 1,
         }
         assert fetched.json() == updated.json()
     finally:

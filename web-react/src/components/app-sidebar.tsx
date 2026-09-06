@@ -31,7 +31,6 @@ import {
   DocumentIcon,
   DotsIcon,
   GridIcon,
-  HomeIcon,
   NewspaperIcon,
   PlusIcon,
   ServerIcon,
@@ -181,7 +180,7 @@ export function AppSidebar({
               title="首页"
               className="flex shrink-0 items-center justify-center gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-[var(--sidebar-accent)] hover:text-[var(--sidebar-accent-foreground)]"
             >
-              <HomeIcon className="sidebar-icon shrink-0" size={18} />
+              <img className="sidebar-icon sidebar-brand-icon shrink-0" src="/iris-logo.png" alt="" aria-hidden="true" width={18} height={18} />
               <span className="sidebar-label text-base font-semibold tracking-tight">Iris</span>
             </button>
           </div>

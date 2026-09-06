@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { applyKnowledgeEvaluationRecommendation, auditKnowledgeGraph, createKnowledge, createKnowledgeCollection, deleteKnowledge, deleteKnowledgeCollection, deleteKnowledgeGraphEntity, deleteKnowledgeGraphRelation, evaluateKnowledge, exportKnowledge, generateKnowledgeEvaluation, getKnowledge, getKnowledgeBadCases, getKnowledgeCollectionRetrievalConfig, getKnowledgeDuplicates, getKnowledgeEvaluationCases, getKnowledgeEvaluationGate, getKnowledgeEvaluationHistory, getKnowledgeIndexProgress, getKnowledgeRuntime, getKnowledgeStats, importKnowledgeBackup, knowledgeSourceUrl, listKnowledge, listKnowledgeCollections, mergeKnowledgeGraph, moveKnowledge, recordKnowledgeBadCase, reindexAllKnowledge, reindexKnowledge, renameKnowledgeCollection, renameKnowledgeGraphEntity, replayKnowledgeBadCase, restoreKnowledgeEvaluationConfig, saveKnowledgeEvaluationCases, searchKnowledge, testKnowledgeRuntime, updateKnowledge, updateKnowledgeCollectionRetrievalConfig, updateKnowledgeEvaluationGate, updateKnowledgeGraphRelation, updateKnowledgeRuntime, uploadKnowledge, getKnowledgeGraph, listKnowledgeTopics, summarizeKnowledgeGraph, validateKnowledgeEvaluationCases, type DuplicateSuggestion, type GraphAudit, type GraphSummary, type KnowledgeBadCase, type KnowledgeCollection, type KnowledgeCollectionRetrievalConfig, type KnowledgeEvaluation, type KnowledgeEvaluationCase, type KnowledgeEvaluationCaseValidation, type KnowledgeEvaluationGate, type KnowledgeEvaluationHistoryItem, type KnowledgeIndexProgress, type KnowledgeRuntime, type KnowledgeRuntimeConfig, type KnowledgeRuntimeComponent, type KnowledgeStats } from '../../api/knowledge';
+import { applyKnowledgeEvaluationRecommendation, auditKnowledgeGraph, createKnowledge, createKnowledgeCollection, deleteKnowledge, deleteKnowledgeCollection, deleteKnowledgeGraphEntity, deleteKnowledgeGraphRelation, evaluateKnowledge, exportKnowledge, generateKnowledgeEvaluation, getKnowledge, getKnowledgeBadCases, getKnowledgeCollectionRetrievalConfig, getKnowledgeDuplicates, getKnowledgeEvaluationCases, getKnowledgeEvaluationGate, getKnowledgeEvaluationHistory, getKnowledgeIndexProgress, getKnowledgeRuntime, getKnowledgeStats, importKnowledgeBackup, knowledgeSourceUrl, listKnowledge, listKnowledgeCollections, mergeKnowledgeGraph, moveKnowledge, recordKnowledgeBadCase, reindexAllKnowledge, reindexKnowledge, renameKnowledgeCollection, renameKnowledgeGraphEntity, replayKnowledgeBadCase, restoreKnowledgeEvaluationConfig, saveKnowledgeEvaluationCases, searchKnowledge, searchKnowledgeWithDecision, testKnowledgeRuntime, updateKnowledge, updateKnowledgeCollectionRetrievalConfig, updateKnowledgeEvaluationGate, updateKnowledgeGraphRelation, updateKnowledgeRuntime, uploadKnowledge, getKnowledgeGraph, listKnowledgeTopics, summarizeKnowledgeGraph, validateKnowledgeEvaluationCases, type DuplicateSuggestion, type GraphAudit, type GraphSummary, type KnowledgeBadCase, type KnowledgeCollection, type KnowledgeCollectionRetrievalConfig, type KnowledgeEvaluation, type KnowledgeEvaluationCase, type KnowledgeEvaluationCaseValidation, type KnowledgeEvaluationGate, type KnowledgeEvaluationHistoryItem, type KnowledgeIndexProgress, type KnowledgeRuntime, type KnowledgeRuntimeConfig, type KnowledgeRuntimeComponent, type KnowledgeSearchDecision, type KnowledgeStats } from '../../api/knowledge';
 import type { KnowledgeDetail, KnowledgeEntry, KnowledgeSearchHit } from '../../types';
 import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 import DocumentMindMap from './DocumentMindMap';
@@ -17,14 +17,16 @@ function formatTime(ts: number): string {
 
 function parseEvaluationCases(source: string): KnowledgeEvaluationCase[] {
   return source.split('\n').map((item) => item.trim()).filter(Boolean).map((line) => {
-    const [question = '', expectedTitle = '', chunkList = ''] = line.split('||').map((item) => item.trim());
+    const [question = '', expectedTitle = '', chunkList = '', answerable = ''] = line.split('||').map((item) => item.trim());
     const relevantChunkIds = chunkList.split(',').map((item) => item.trim()).filter(Boolean);
     return { question, ...(expectedTitle ? { expected_title: expectedTitle } : {}),
-      ...(relevantChunkIds.length ? { relevant_chunk_ids: relevantChunkIds } : {}) };
+      ...(relevantChunkIds.length ? { relevant_chunk_ids: relevantChunkIds } : {}),
+      ...(answerable.toLowerCase() === 'true' ? { expected_answerable: true } : answerable.toLowerCase() === 'false' ? { expected_answerable: false } : {}) };
   }).filter((item) => item.question);
 }
 
 function formatEvaluationCase(item: KnowledgeEvaluationCase | KnowledgeBadCase): string {
+  if ('expected_answerable' in item && typeof item.expected_answerable === 'boolean') return `${item.question} || ${item.expected_title || ''} || ${(item.relevant_chunk_ids || []).join(',')} || ${item.expected_answerable}`;
   if (item.relevant_chunk_ids?.length) return `${item.question} || ${item.expected_title || ''} || ${item.relevant_chunk_ids.join(',')}`;
   return `${item.question}${item.expected_title ? ` || ${item.expected_title}` : ''}`;
 }
@@ -60,8 +62,11 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
   const [sourceUrl, setSourceUrl] = useState('');
   const [question, setQuestion] = useState('');
   const [hits, setHits] = useState<KnowledgeSearchHit[] | null>(null);
+  const [searchDecision, setSearchDecision] = useState<KnowledgeSearchDecision | null>(null);
   const [searching, setSearching] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [uploadDragging, setUploadDragging] = useState(false);
   const [topics, setTopics] = useState<string[]>([]);
   const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
   const [collectionId, setCollectionId] = useState('collection-general');
@@ -552,7 +557,9 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
     if (!q) return;
     setSearching(true);
     try {
-      setHits(await searchKnowledge(q, undefined, collectionId || undefined));
+      const result = await searchKnowledgeWithDecision(q, undefined, collectionId || undefined);
+      setSearchDecision(result.decision);
+      setHits(result.decision.status === 'answerable' ? result.hits : []);
       setError(false);
     } catch {
       setError(true);
@@ -560,11 +567,32 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
       setSearching(false);
     }
   };
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
+  const upload = async (source: FileList | File[] | undefined) => {
+    const files = Array.from(source || []);
+    if (!files.length || uploading || !collectionId) return;
     setUploading(true);
-    try { const document = await uploadKnowledge(file, '', collectionId || 'collection-general'); setEntries((prev) => [document, ...prev]); setError(false); }
-    catch { setError(true); } finally { setUploading(false); }
+    setUploadProgress({ completed: 0, total: files.length });
+    setNotice('');
+    const imported: KnowledgeEntry[] = [];
+    const failed: string[] = [];
+    for (const [index, file] of files.entries()) {
+      try { imported.push(await uploadKnowledge(file, '', collectionId)); }
+      catch { failed.push(file.name); }
+      setUploadProgress({ completed: index + 1, total: files.length });
+    }
+    if (imported.length) {
+      setEntries((previous) => [...imported.reverse(), ...previous]);
+      setNotice(`已导入 ${imported.length} 份资料。`);
+    }
+    if (failed.length) {
+      setError(true);
+      setErrorMessage(`${failed.length} 份资料导入失败：${failed.join('、')}`);
+    } else {
+      setError(false);
+      setErrorMessage('');
+    }
+    setUploading(false);
+    setUploadProgress(null);
   };
   const selectCollection = (id: string) => {
     setCollectionId(id);
@@ -694,6 +722,8 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
       <details className="knowledge-evaluation-labeler"><summary>评测集切片标注</summary><p>输入真实问题，检索后勾选所有能够支持正确答案的切片。</p><div className="knowledge-evaluation-labeler-search"><input aria-label="待标注问题" value={evaluationLabelQuestion} onChange={(event) => setEvaluationLabelQuestion(event.target.value)} placeholder="输入一条真实用户问题" /><button onClick={() => void searchEvaluationCandidates()} disabled={searchingEvaluationCandidates || !evaluationLabelQuestion.trim()}>{searchingEvaluationCandidates ? '检索中…' : '检索候选切片'}</button></div>{evaluationLabelCandidates.length > 0 && <div className="knowledge-evaluation-candidates">{evaluationLabelCandidates.map((candidate) => <label key={candidate.chunk_id}><input type="checkbox" aria-label={`标记切片 ${candidate.chunk_id} 为相关`} checked={Boolean(candidate.chunk_id && selectedEvaluationChunkIds.includes(candidate.chunk_id))} onChange={(event) => { const id = candidate.chunk_id; if (!id) return; setSelectedEvaluationChunkIds((items) => event.target.checked ? [...items, id] : items.filter((item) => item !== id)); }} /><span><b>《{candidate.title}》</b> · {candidate.location || '未标注位置'} · {candidate.score.toFixed(3)}<small>{candidate.content}</small></span></label>)}</div>}<button onClick={addLabeledEvaluationCase} disabled={!selectedEvaluationChunkIds.length}>加入评测集</button></details>
       <details className="knowledge-evaluation"><summary>知识库质量评测{savedEvaluationCount ? ` · 已保存 ${savedEvaluationCount} 题` : ''}</summary><p>每行一个用例；可写“问题 || 预期资料标题”统计 Hit@1/3 与 MRR。通过 API 提供相关文档或切片 ID 时，还会计算标准 Recall、Precision 与 NDCG。</p><textarea value={evaluationQuestions} onChange={(event) => setEvaluationQuestions(event.target.value)} placeholder={'例如：\nReact 状态管理应该如何选择？ || React 状态管理\n缓存穿透有哪些解决方案？ || Redis 缓存'} rows={4} /><div className="knowledge-evaluation-actions"><button onClick={() => void runEvaluation()} disabled={evaluating || !evaluationQuestions.trim()}>{evaluating ? '评测中…' : '运行评测'}</button><button onClick={() => void saveEvaluationSuite()}>保存为回归问题</button></div>{evaluationHistory.length > 0 && <div className="knowledge-evaluation-history"><strong>最近评测趋势</strong>{evaluationHistory.map((item, index) => <div key={item.id}><span>{index === 0 ? '最新' : `第 ${index + 1} 次`} · {formatTime(item.created_at)} · H1 {Math.round((item.recall_at_1 || 0) * 100)}% · H3 {Math.round((item.recall_at_3 || 0) * 100)}% · MRR {item.mrr || 0} · 候选 {item.config.candidate_multiplier} · MMR {item.config.mmr_relevance_weight}</span><button onClick={() => void restoreEvaluationConfig(item)} disabled={applyingEvaluationRecommendation || evaluating}>{applyingEvaluationRecommendation ? '正在回退…' : '回退到此策略'}</button></div>)}</div>}{evaluation && <div className="knowledge-evaluation-results"><strong>{evaluation.judged_total ? <>Hit@1 {Math.round((evaluation.hit_at_1 ?? evaluation.recall_at_1 ?? 0) * 100)}% · Hit@3 {Math.round((evaluation.hit_at_3 ?? evaluation.recall_at_3 ?? 0) * 100)}% · MRR {evaluation.mrr || 0}</> : <>命中 {evaluation.hit_count} / {evaluation.total}</>}</strong>{evaluation.metrics?.k_values.map((k) => <p key={`metric-${k}`}>K={k} · Recall {Math.round((evaluation.metrics?.recall[String(k)] || 0) * 100)}% · Precision {Math.round((evaluation.metrics?.precision[String(k)] || 0) * 100)}% · NDCG {Math.round((evaluation.metrics?.ndcg[String(k)] || 0) * 100)}%</p>)}<p>召回通道覆盖：关键词 {evaluation.route_coverage.keyword || 0} · 向量 {evaluation.route_coverage.vector || 0} · 图谱 {evaluation.route_coverage.graph || 0} · 重排 {evaluation.route_coverage.reranker || 0}</p>{evaluation.recommendations?.map((item) => <div className="knowledge-evaluation-recommendation" key={item.field}>建议将{item.field === 'candidate_multiplier' ? '候选倍数' : 'MMR 相关性权重'}从 {item.current} 调整为 {item.suggested}：{item.reason}<button onClick={() => void applyEvaluationRecommendation(item)} disabled={!collectionId || applyingEvaluationRecommendation || evaluating}>{applyingEvaluationRecommendation ? '正在应用…' : '应用建议并重新评测'}</button></div>)}{evaluation.results.map((result) => <article key={result.question} className={result.status}><b>{result.status === 'pass' ? `通过${result.expected_rank ? ` · 第 ${result.expected_rank} 位` : ''}` : result.status === 'hit' ? '有召回' : '未命中'} · {result.question}</b>{result.hits[0] ? <p>《{result.hits[0].title}》 · 最终分数 {result.hits[0].score.toFixed(3)} · {result.hits[0].routes.join(' + ')}<br />{result.hits[0].excerpt}</p> : <p>建议补充对应资料，或调整问题措辞。</p>}{result.status !== 'pass' && <div className="knowledge-bad-case-action"><input aria-label={`失败原因：${result.question}`} value={badCaseReasons[result.question] || ''} onChange={(event) => setBadCaseReasons((items) => ({ ...items, [result.question]: event.target.value }))} placeholder="失败原因（可选）" maxLength={1000} /><button onClick={() => void saveEvaluationBadCase(result)} disabled={recordingBadCase === result.question}>{recordingBadCase === result.question ? '正在保存…' : '加入 Bad Case'}</button></div>}</article>)}</div>}{badCases.length > 0 && <div className="knowledge-bad-case-list"><strong>已记录的失败样例</strong>{badCases.slice(0, 10).map((item) => <div key={item.id || item.question}><span>{item.question}{item.reason ? ` · ${item.reason}` : ''}</span><button onClick={() => void replayBadCase(item)} disabled={!item.id || replayingBadCase === item.id}>{replayingBadCase === item.id ? '正在重放…' : '重放'}</button></div>)}</div>}</details>
       <div className="knowledge-evaluation-generator"><button onClick={() => void generateEvaluationSuite()} disabled={generatingEvaluation || !entries.some((entry) => entry.status === 'ready')}>{generatingEvaluation ? '正在生成评测用例…' : '自动生成评测用例'}</button><small>从当前知识库的已就绪资料生成问题与预期资料。</small></div>
+      <p className="knowledge-evaluation-label-help">拒答评测格式：问题 || 预期标题 || 切片 ID || true 或 false。true 表示有答案，false 表示知识库无答案；无答案可留空标题和切片。阈值是初始规则，需要用独立标注集校准。</p>
+      {evaluation?.answerability && evaluation.answerability.total > 0 && <div className="knowledge-answer-quality"><b>证据决策评测 · {evaluation.answerability.total} 题</b><p>拒答准确率 {evaluation.answerability.refusal_accuracy === null ? '未评测' : Math.round(evaluation.answerability.refusal_accuracy * 100) + '%'} · 错误回答率 {evaluation.answerability.false_answer_rate === null ? '未评测' : Math.round(evaluation.answerability.false_answer_rate * 100) + '%'} · 错误拒答率 {evaluation.answerability.false_refusal_rate === null ? '未评测' : Math.round(evaluation.answerability.false_refusal_rate * 100) + '%'}</p><small>衡量是否放行证据，并非生成答案的事实正确率；请求澄清计为暂不回答。</small></div>}
       {evaluation?.answer_score !== null && evaluation?.answer_score !== undefined && <div className="knowledge-answer-quality"><b>答案质量 {Math.round(evaluation.answer_score * 100)}%</b><span>证据一致性 {Math.round((evaluation.grounded_rate || 0) * 100)}%</span><small>仅对带参考答案的自动生成用例运行本地模型判定。</small></div>}
       </div></details>
       <div className={`knowledge-workspace ${libraryCollapsed ? 'library-collapsed' : ''}`}>
@@ -712,7 +742,7 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
                 <button className="knowledge-collection-delete" onClick={() => { setDeleteCollectionId(item.id); setCollectionActionError(''); }} aria-label={`删除${item.name}`}>×</button>
                 {retrievalConfigCollectionId === item.id && <form className="knowledge-collection-confirm knowledge-collection-retrieval" onSubmit={(event) => { event.preventDefault(); void saveCollectionRetrievalConfig(); }}>
                   <strong>检索策略</strong><p>仅作用于“{item.name}”。</p>
-                  {retrievalConfig ? <><label>Top-K<input aria-label="Top-K" value={retrievalConfig.top_k} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, top_k: Number(event.target.value) } : current)} type="number" min="1" max="20" required /></label><label>候选倍数<input aria-label="候选倍数" value={retrievalConfig.candidate_multiplier} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, candidate_multiplier: Number(event.target.value) } : current)} type="number" min="1" max="10" required /></label><label>最低相关度<input aria-label="最低相关度" value={retrievalConfig.minimum_relevance_score} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, minimum_relevance_score: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.05" required /></label><label>MMR 相关性权重<input aria-label="MMR 相关性权重" value={retrievalConfig.mmr_relevance_weight} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, mmr_relevance_weight: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.05" required /></label></> : <p>正在读取当前配置…</p>}
+                  {retrievalConfig ? <><label>Top-K<input aria-label="Top-K" value={retrievalConfig.top_k} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, top_k: Number(event.target.value) } : current)} type="number" min="1" max="20" required /></label><label>候选倍数<input aria-label="候选倍数" value={retrievalConfig.candidate_multiplier} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, candidate_multiplier: Number(event.target.value) } : current)} type="number" min="1" max="10" required /></label><label>最低相关度<input aria-label="最低相关度" value={retrievalConfig.minimum_relevance_score} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, minimum_relevance_score: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.05" required /></label><label>MMR 相关性权重<input aria-label="MMR 相关性权重" value={retrievalConfig.mmr_relevance_weight} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, mmr_relevance_weight: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.05" required /></label><label><input aria-label="启用证据不足拒答" checked={retrievalConfig.abstention_enabled} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, abstention_enabled: event.target.checked } : current)} type="checkbox" />启用证据不足拒答</label><label>回答阈值<input aria-label="回答阈值" value={retrievalConfig.answer_threshold} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, answer_threshold: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.05" required /></label><label>歧义分差<input aria-label="歧义分差" value={retrievalConfig.ambiguity_gap} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, ambiguity_gap: Number(event.target.value) } : current)} type="number" min="0" max="1" step="0.01" required /></label><label>最少证据数<input aria-label="最少证据数" value={retrievalConfig.min_evidence_count} onChange={(event) => setRetrievalConfig((current) => current ? { ...current, min_evidence_count: Number(event.target.value) } : current)} type="number" min="1" max="10" required /></label></> : <p>正在读取当前配置…</p>}
                   {collectionActionError && <small>{collectionActionError}</small>}<div><button type="submit" disabled={!retrievalConfig || retrievalConfigSaving}>{retrievalConfigSaving ? '保存中…' : '保存检索策略'}</button><button type="button" onClick={() => { setRetrievalConfigCollectionId(null); setCollectionActionError(''); }} disabled={retrievalConfigSaving}>取消</button></div>
                 </form>}
                 {renameCollectionId === item.id && <form className="knowledge-collection-confirm" onSubmit={(event) => { event.preventDefault(); void renameCollection(); }}>
@@ -733,7 +763,25 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
       <div className="knowledge-ask">
         <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="搜索资料、主题或关系…" />
         <button onClick={() => void ask()} disabled={!question.trim() || searching}>{searching ? '检索中' : '检索'}</button>
-        <label className="knowledge-upload-button">{uploading ? '正在导入…' : '导入资料'}<input type="file" accept=".pdf,.docx,.xlsx,.xls,.pptx,.html,.mhtml,.md,.txt,.png,.jpg,.jpeg,.webp" onChange={(event) => void upload(event.target.files?.[0])} disabled={uploading || !collectionId} /></label>
+        <label
+          className={`knowledge-upload-button knowledge-upload-dropzone ${uploadDragging ? 'is-dragging' : ''}`}
+          data-testid="knowledge-upload-dropzone"
+          onDragEnter={(event) => { event.preventDefault(); if (!uploading && collectionId) setUploadDragging(true); }}
+          onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setUploadDragging(false); }}
+          onDrop={(event) => { event.preventDefault(); setUploadDragging(false); void upload(event.dataTransfer.files); }}
+        >
+          {uploadProgress ? `正在导入 ${uploadProgress.completed}/${uploadProgress.total}` : uploadDragging ? '松开以导入文件' : '拖拽或点击导入'}
+          <input
+            className="visually-hidden"
+            type="file"
+            aria-label="导入资料"
+            multiple
+            accept=".pdf,.docx,.xlsx,.xls,.pptx,.html,.mhtml,.md,.txt,.png,.jpg,.jpeg,.webp"
+            onChange={(event) => { const files = event.target.files; event.target.value = ''; void upload(files || undefined); }}
+            disabled={uploading || !collectionId}
+          />
+        </label>
       </div>
       <div className="knowledge-view-controls"><div className="knowledge-view-tabs" role="tablist" aria-label="知识可视化方式"><button className={knowledgeView === 'mindmap' ? 'active' : ''} aria-pressed={knowledgeView === 'mindmap'} onClick={() => setKnowledgeView('mindmap')}>文档思维导图</button><button className={knowledgeView === 'relations' ? 'active' : ''} aria-pressed={knowledgeView === 'relations'} onClick={() => setKnowledgeView('relations')}>跨资料关系图</button></div>{selected && detailPanelClosed && <button className="knowledge-detail-toggle" onClick={() => setDetailPanelClosed(false)}>打开资料详情</button>}</div>
       </div>
@@ -758,7 +806,11 @@ export default function KnowledgePage({ openDocumentId, openChunkId }: { openDoc
       {hits !== null && (
         <div className="knowledge-hits">
           <h2>检索结果</h2>
-          {hits.length === 0 ? (
+          {searchDecision?.status === 'no_answer' ? (
+            <div className="knowledge-search-decision no-answer"><strong>知识库中没有足够依据回答这个问题</strong><p>{searchDecision.reason}，请补充资料或换一种更具体的问法。</p></div>
+          ) : searchDecision?.status === 'ambiguous' ? (
+            <div className="knowledge-search-decision ambiguous"><strong>当前问题可能存在多个答案</strong><p>{searchDecision.reason}，请补充时间、对象或业务范围。</p></div>
+          ) : hits.length === 0 ? (
             <p className="knowledge-empty">没有找到相关内容</p>
           ) : (
             <ul className="knowledge-hit-list">

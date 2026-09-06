@@ -4,10 +4,20 @@ from iris_agent.skill_center.errors import SkillNotFoundError
 from iris_agent.skill_center.service import SkillCenterService
 from iris_agent.tools.base import Tool, ToolInvocationError
 
+_SKILL_ALIASES = {
+    "web_search": "web-research",
+    "web-search": "web-research",
+    "search_internet": "web-research",
+    "search-internet": "web-research",
+    "internet_search": "web-research",
+    "internet-search": "web-research",
+}
+
 
 def build_use_skill_tool(service: SkillCenterService) -> Tool:
     def use_skill(skill_id: str):
-        skill = service.find_skill(skill_id)
+        lookup_id = _SKILL_ALIASES.get(skill_id.strip().lower(), skill_id)
+        skill = service.find_skill(lookup_id)
         if skill is None:
             raise ToolInvocationError("skill_not_found", "技能不存在") from None
         return {"id": skill.id, "name": skill.name, "content": skill.body}

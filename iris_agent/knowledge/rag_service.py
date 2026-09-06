@@ -403,20 +403,24 @@ class RagKnowledgeService:
 
     def list_collections(self): return self.repository.list_collections()
     def create_collection(self, name: str, description: str | None = None): return self.repository.create_collection(name, description)
-    def _default_retrieval_config(self) -> dict[str, int | float]:
+    def _default_retrieval_config(self) -> dict[str, int | float | bool]:
         return {
             "top_k": self.retrieval_limit,
             "candidate_multiplier": self.retrieval_candidate_multiplier,
             "minimum_relevance_score": self.minimum_relevance_score,
             "mmr_relevance_weight": self._mmr_relevance_weight,
+            "abstention_enabled": True,
+            "answer_threshold": 0.55,
+            "ambiguity_gap": 0.08,
+            "min_evidence_count": 1,
         }
 
-    def collection_retrieval_config(self, collection_id: str) -> dict[str, int | float]:
+    def collection_retrieval_config(self, collection_id: str) -> dict[str, int | float | bool]:
         config = self._default_retrieval_config()
         config.update(self.repository.collection_retrieval_config(collection_id))
         return config
 
-    def update_collection_retrieval_config(self, collection_id: str, updates: dict[str, object]) -> dict[str, int | float]:
+    def update_collection_retrieval_config(self, collection_id: str, updates: dict[str, object]) -> dict[str, int | float | bool]:
         self.repository.update_collection_retrieval_config(collection_id, updates)
         return self.collection_retrieval_config(collection_id)
     def delete_collection(self, collection_id: str) -> bool:
@@ -520,11 +524,17 @@ class RagKnowledgeService:
             raise ValueError("评测 K 值必须包含 1 到 50 之间的整数")
         results = []
         metric_rows = []
+        answerability_rows: list[tuple[bool, bool]] = []
+        decision_config = self.collection_retrieval_config(collection_id) if collection_id else self._default_retrieval_config()
         for raw_case in (cases or [{"question": item} for item in questions])[:200]:
             text = str(raw_case.get("question") or "").strip()
             if not text:
                 continue
             hits = self.search(text, limit=max(ks), collection_id=collection_id)
+            decision = self._evidence_decision(hits, decision_config)
+            expected_answerable = raw_case.get("expected_answerable")
+            if isinstance(expected_answerable, bool):
+                answerability_rows.append((expected_answerable, decision["status"] == "answerable"))
             expected_id = str(raw_case.get("expected_document_id") or "").strip()
             expected_title = str(raw_case.get("expected_title") or "").strip().casefold()
             expected_answer = str(raw_case.get("expected_answer") or "").strip()
@@ -575,7 +585,8 @@ class RagKnowledgeService:
                             "relevant_document_ids": sorted(relevant_documents), "relevant_chunk_ids": sorted(relevant_chunks),
                             "expected_answer": expected_answer or None, "status": status,
                             "top_score": round(hits[0].score, 4) if hits else 0.0, "expected_rank": rank,
-                            "metrics": case_metrics, "answer_quality": answer_quality,
+                            "expected_answerable": expected_answerable if isinstance(expected_answerable, bool) else None,
+                            "decision": decision, "metrics": case_metrics, "answer_quality": answer_quality,
                             "hits": [{"title": hit.title, "document_id": hit.document_id, "chunk_id": hit.chunk_id,
                                       "score": round(hit.score, 4), "excerpt": hit.content[:220], "routes": list(hit.routes)} for hit in hits]})
         judged = [item for item in results if item["metrics"] is not None]
@@ -591,11 +602,27 @@ class RagKnowledgeService:
         recall_at_1 = metrics["hit_rate"].get("1")
         recall_at_3 = metrics["hit_rate"].get("3")
         mrr = metrics["mrr"]
+        expected_answerable_count = sum(expected for expected, _ in answerability_rows)
+        expected_no_answer_count = len(answerability_rows) - expected_answerable_count
+        correct_decisions = sum(expected == actual for expected, actual in answerability_rows)
+        correct_refusals = sum(not expected and not actual for expected, actual in answerability_rows)
+        false_answers = sum(not expected and actual for expected, actual in answerability_rows)
+        false_refusals = sum(expected and not actual for expected, actual in answerability_rows)
+        answerability = {
+            "total": len(answerability_rows),
+            "expected_answerable": expected_answerable_count,
+            "expected_no_answer": expected_no_answer_count,
+            "accuracy": round(correct_decisions / len(answerability_rows), 3) if answerability_rows else None,
+            "refusal_accuracy": round(correct_refusals / expected_no_answer_count, 3) if expected_no_answer_count else None,
+            "false_answer_rate": round(false_answers / expected_no_answer_count, 3) if expected_no_answer_count else None,
+            "false_refusal_rate": round(false_refusals / expected_answerable_count, 3) if expected_answerable_count else None,
+        }
         evaluation = {"collection_id": collection_id, "total": len(results), "hit_count": sum(item["status"] != "miss" for item in results), "judged_total": len(judged),
                 "recall_at_1": recall_at_1, "recall_at_3": recall_at_3, "mrr": mrr,
                 "hit_at_1": recall_at_1, "hit_at_3": recall_at_3, "metrics": metrics,
                 "answer_score": round(sum(answer_scores) / len(answer_scores), 3) if answer_scores else None,
                 "grounded_rate": round(sum(bool(value) for value in grounded) / len(grounded), 3) if grounded else None,
+                "answerability": answerability,
                 "route_coverage": route_coverage, "recommendations": self._evaluation_recommendations(collection_id, recall_at_1, recall_at_3, mrr), "results": results}
         evaluation["quality_gate"] = self._evaluate_quality_gate(collection_id, recall_at_1, recall_at_3, mrr)
         if collection_id:
@@ -751,6 +778,7 @@ class RagKnowledgeService:
                 or str(case.get("expected_document_id") or "").strip()
                 or str(case.get("expected_title") or "").strip()
                 or case.get("relevant_titles")
+                or isinstance(case.get("expected_answerable"), bool)
             )
             rows.append({
                 "index": index,
@@ -1021,6 +1049,37 @@ class RagKnowledgeService:
             return self._search_in_collection(query, limit, collection_id)
         return self._search_across_collections(query, limit)
 
+    def search_with_decision(self, query: str, limit: int | None = None, collection_id: str | None = None) -> dict:
+        hits = self.search(query, limit=limit, collection_id=collection_id)
+        config = self.collection_retrieval_config(collection_id) if collection_id else self._default_retrieval_config()
+        return {"decision": self._evidence_decision(hits, config), "hits": [hit.to_dict() for hit in hits]}
+
+    @staticmethod
+    def _evidence_decision(hits: list[RagSearchHit], config: dict[str, object]) -> dict:
+        """Heuristic evidence gate; confidence is a score, not a calibrated probability."""
+        hits = sorted(hits, key=lambda hit: hit.score, reverse=True)
+        if not hits:
+            return {"status": "no_answer", "confidence": 1.0, "reason": "没有检索到可用证据", "top_score": 0.0, "score_gap": 0.0, "route_count": 0}
+        top_score = max(0.0, min(1.0, float(hits[0].score)))
+        second_score = max(0.0, min(1.0, float(hits[1].score))) if len(hits) > 1 else 0.0
+        score_gap = max(0.0, top_score - second_score)
+        route_count = len(set(hits[0].routes))
+        threshold = max(float(config.get("answer_threshold", 0.55)), float(config.get("minimum_relevance_score", 0)))
+        ambiguity_gap = float(config.get("ambiguity_gap", 0.08))
+        minimum_evidence = int(config.get("min_evidence_count", 1))
+        if not bool(config.get("abstention_enabled", True)):
+            status, confidence, reason = "answerable", top_score, "证据拒答判断已关闭"
+        elif sum(hit.score >= threshold for hit in hits) < minimum_evidence or top_score < threshold:
+            status = "no_answer"
+            confidence = min(1.0, max(0.0, 1.0 - top_score / max(threshold, 0.01)))
+            reason = "最高结果未达到回答阈值" if top_score < threshold else "有效证据数量不足"
+        elif len(hits) > 1 and score_gap < ambiguity_gap and top_score < threshold + 0.1:
+            status, confidence, reason = "ambiguous", top_score, "多个候选证据得分接近，需要补充问题"
+        else:
+            status, confidence, reason = "answerable", top_score, "检索证据达到回答阈值"
+        return {"status": status, "confidence": round(confidence, 4), "reason": reason,
+                "top_score": round(top_score, 4), "score_gap": round(score_gap, 4), "route_count": route_count}
+
     def _search_across_collections(self, query: str, limit: int | None) -> list[RagSearchHit]:
         collections = self._route_collections(query)
         if not collections:
@@ -1213,8 +1272,11 @@ class RagKnowledgeService:
         minimum_relevance_score = self.minimum_relevance_score if collection_id is None else float(
             self.collection_retrieval_config(collection_id)["minimum_relevance_score"]
         )
-        hits = [] if mode == "global" else [
-            hit for hit in self.search(query, collection_id=collection_id)
+        raw_hits = [] if mode == "global" else self.search(query, collection_id=collection_id)
+        decision_config = self.collection_retrieval_config(collection_id) if collection_id else self._default_retrieval_config()
+        decision = self._evidence_decision(raw_hits, decision_config)
+        hits = [] if decision["status"] != "answerable" else [
+            hit for hit in raw_hits
             if hit.score >= (
                 minimum_relevance_score if collection_id else float(self.collection_retrieval_config(hit.collection_id or "collection-general")["minimum_relevance_score"])
             )
@@ -1270,7 +1332,11 @@ class RagKnowledgeService:
             })
         graph_section = "\n\n[资料中的知识图谱关系]\n" + "\n".join(relation_lines) if relation_lines else ""
         if not parts and not graph_section:
-            return "", []
+            if decision["status"] == "ambiguous":
+                return ("[知识库证据判断]\n多个候选证据接近，暂时无法确定。请用户补充时间、对象或业务范围，"
+                        "不要直接选择一个答案，也不要生成引用。", [])
+            return ("[知识库证据判断]\n知识库没有足够证据回答当前问题。请明确告知用户知识库中暂无可靠答案，"
+                    "不要依据常识补充答案，也不要生成引用。", [])
         heading = {"precise": "[本地知识库精准检索结果]", "global": "[本地知识库全局图谱关系]", "mix": "[本地知识库综合检索结果]"}[mode]
         return heading + "\n" + "\n\n".join(parts) + graph_section + "\n回答涉及上述内容时请用 [1]、[2] 标明来源。", citations
 

@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 .pytest-*/
 .pytest-*.log
+/.tmp/
+/.tmp-*
+/node_modules/
+/web-react/npm-reinstall*.log
 .venv/
 .worktrees/
 .superpowers/

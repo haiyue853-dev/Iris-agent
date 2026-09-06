@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from iris_agent.tools.base import Tool, ToolInvocationError
@@ -7,7 +7,14 @@ from iris_agent.tools.base import Tool, ToolInvocationError
 def build_current_time_tool(default_timezone: str = "Asia/Shanghai") -> Tool:
     def current_time(timezone: str = default_timezone):
         try:
-            now = datetime.now(ZoneInfo(timezone))
+            try:
+                zone = ZoneInfo(timezone)
+            except ZoneInfoNotFoundError:
+                if timezone == "Asia/Shanghai":
+                    zone = dt_timezone(timedelta(hours=8))
+                else:
+                    raise
+            now = datetime.now(zone)
         except ZoneInfoNotFoundError as exc:
             raise ToolInvocationError("invalid_timezone", f"未知时区: {timezone}") from exc
         return {"timezone": timezone, "iso": now.isoformat()}

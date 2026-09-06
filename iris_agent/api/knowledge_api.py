@@ -87,10 +87,16 @@ def register_knowledge_routes(app, knowledge) -> None:
         limit: int = Query(5, ge=1, le=20),
         collection_id: str | None = Query(default=None, max_length=50),
     ):
-        hits = (knowledge.search(query, limit=limit, collection_id=collection_id)
-                if hasattr(knowledge, "list_documents")
-                else knowledge.search(query, limit=limit))
-        return {"hits": [hit.to_dict() for hit in hits]}
+        if hasattr(knowledge, "search_with_decision"):
+            return knowledge.search_with_decision(query, limit=limit, collection_id=collection_id)
+        hits = knowledge.search(query, limit=limit)
+        return {
+            "decision": {"status": "answerable" if hits else "no_answer", "confidence": 1.0,
+                         "reason": "存在关键词检索结果" if hits else "没有检索到可用证据",
+                         "top_score": float(hits[0].score) if hits else 0.0, "score_gap": 0.0,
+                         "route_count": 1 if hits else 0},
+            "hits": [hit.to_dict() for hit in hits],
+        }
 
     @router.get("/search/debug")
     def debug_knowledge_search(

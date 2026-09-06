@@ -12,7 +12,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type KnowledgeCollection = { id: string; name: string; description: string | null; created_at: number };
-export type KnowledgeCollectionRetrievalConfig = { top_k: number; candidate_multiplier: number; minimum_relevance_score: number; mmr_relevance_weight: number };
+export type KnowledgeCollectionRetrievalConfig = { top_k: number; candidate_multiplier: number; minimum_relevance_score: number; mmr_relevance_weight: number; abstention_enabled: boolean; answer_threshold: number; ambiguity_gap: number; min_evidence_count: number };
+export type KnowledgeSearchDecision = { status: 'answerable' | 'ambiguous' | 'no_answer'; confidence: number; reason: string; top_score: number; score_gap: number; route_count: number };
+export type KnowledgeSearchResult = { hits: KnowledgeSearchHit[]; decision: KnowledgeSearchDecision };
 
 export async function listKnowledge(collectionId?: string): Promise<KnowledgeEntry[]> {
   const result = await request<{ entries?: KnowledgeEntry[]; documents?: KnowledgeEntry[] }>(`/api/knowledge${collectionId ? `?collection_id=${encodeURIComponent(collectionId)}` : ''}`);
@@ -77,10 +79,15 @@ export async function moveKnowledge(id: string, collectionId: string): Promise<K
 }
 
 export async function searchKnowledge(query: string, limit?: number, collectionId?: string): Promise<KnowledgeSearchHit[]> {
+  return (await searchKnowledgeWithDecision(query, limit, collectionId)).hits;
+}
+
+export async function searchKnowledgeWithDecision(query: string, limit?: number, collectionId?: string): Promise<KnowledgeSearchResult> {
   const params = new URLSearchParams({ query });
   if (limit) params.set('limit', String(limit));
   if (collectionId) params.set('collection_id', collectionId);
-  return (await request<{ hits: KnowledgeSearchHit[] }>(`/api/knowledge/search?${params.toString()}`)).hits;
+  const result = await request<KnowledgeSearchResult>(`/api/knowledge/search?${params.toString()}`);
+  return { hits: result.hits || [], decision: result.decision || { status: result.hits?.length ? 'answerable' : 'no_answer', confidence: 0, reason: '未返回证据判断', top_score: result.hits?.[0]?.score || 0, score_gap: 0, route_count: 0 } };
 }
 
 export type RetrievalDebugCandidate = {
@@ -140,8 +147,9 @@ export async function getKnowledgeIndexProgress(): Promise<KnowledgeIndexProgres
 export async function importKnowledgeBackup(file: File, collectionId: string): Promise<{ imported: number }> { const backup = JSON.parse(await file.text()); return request<{ imported: number }>('/api/knowledge/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup, collection_id: collectionId }) }); }
 export type KnowledgeEvaluationGate = { recall_at_1: number; recall_at_3: number; mrr: number };
 export type KnowledgeRetrievalMetrics = { k_values: number[]; hit_rate: Record<string, number>; recall: Record<string, number>; precision: Record<string, number>; ndcg: Record<string, number>; mrr: number | null };
-export type KnowledgeEvaluation = { collection_id?: string | null; history_id?: string; total: number; hit_count: number; judged_total: number; recall_at_1: number | null; recall_at_3: number | null; hit_at_1?: number | null; hit_at_3?: number | null; metrics?: KnowledgeRetrievalMetrics; mrr: number | null; answer_score: number | null; grounded_rate: number | null; quality_gate?: { thresholds: KnowledgeEvaluationGate | null; passed: boolean | null; failures: Array<{ metric: keyof KnowledgeEvaluationGate; actual: number; threshold: number }> }; route_coverage: Record<string, number>; recommendations: Array<{ field: 'candidate_multiplier' | 'mmr_relevance_weight'; current: number; suggested: number; reason: string }>; results: Array<{ question: string; expected_title?: string | null; expected_document_id?: string | null; relevant_document_ids?: string[]; relevant_chunk_ids?: string[]; expected_answer?: string | null; status: 'pass' | 'hit' | 'miss'; top_score: number; expected_rank?: number | null; answer_quality?: { answer: string; answer_score: number | null; grounded: boolean | null; reason: string } | null; hits: Array<{ title: string; document_id: string; chunk_id?: string; score: number; excerpt: string; routes: string[] }> }> };
-export type KnowledgeEvaluationCase = { question: string; expected_title?: string; expected_document_id?: string; relevant_document_ids?: string[]; relevant_chunk_ids?: string[]; relevant_titles?: string[]; expected_answer?: string };
+export type KnowledgeEvaluation = { answerability?: KnowledgeAnswerabilityMetrics; collection_id?: string | null; history_id?: string; total: number; hit_count: number; judged_total: number; recall_at_1: number | null; recall_at_3: number | null; hit_at_1?: number | null; hit_at_3?: number | null; metrics?: KnowledgeRetrievalMetrics; mrr: number | null; answer_score: number | null; grounded_rate: number | null; quality_gate?: { thresholds: KnowledgeEvaluationGate | null; passed: boolean | null; failures: Array<{ metric: keyof KnowledgeEvaluationGate; actual: number; threshold: number }> }; route_coverage: Record<string, number>; recommendations: Array<{ field: 'candidate_multiplier' | 'mmr_relevance_weight'; current: number; suggested: number; reason: string }>; results: Array<{ question: string; expected_title?: string | null; expected_document_id?: string | null; relevant_document_ids?: string[]; relevant_chunk_ids?: string[]; expected_answer?: string | null; status: 'pass' | 'hit' | 'miss'; top_score: number; expected_rank?: number | null; answer_quality?: { answer: string; answer_score: number | null; grounded: boolean | null; reason: string } | null; hits: Array<{ title: string; document_id: string; chunk_id?: string; score: number; excerpt: string; routes: string[] }> }> };
+export type KnowledgeEvaluationCase = { question: string; expected_title?: string; expected_document_id?: string; relevant_document_ids?: string[]; relevant_chunk_ids?: string[]; relevant_titles?: string[]; expected_answer?: string; expected_answerable?: boolean };
+export type KnowledgeAnswerabilityMetrics = { total: number; expected_answerable: number; expected_no_answer: number; accuracy: number | null; refusal_accuracy: number | null; false_answer_rate: number | null; false_refusal_rate: number | null };
 export type KnowledgeEvaluationCaseValidation = { summary: { total: number; annotated: number; duplicates: number; empty_annotations: number; invalid_chunks: number }; rows: Array<{ index: number; duplicate: boolean; empty_annotation: boolean; invalid_chunk_ids: string[] }> };
 export type KnowledgeEvaluationHistoryItem = { id: string; created_at: number; total: number; hit_count: number; judged_total: number; recall_at_1: number | null; recall_at_3: number | null; hit_at_1?: number | null; hit_at_3?: number | null; metrics?: KnowledgeRetrievalMetrics; mrr: number | null; config: KnowledgeCollectionRetrievalConfig };
 export async function evaluateKnowledge(cases: KnowledgeEvaluationCase[], collectionId?: string): Promise<KnowledgeEvaluation> { return request<KnowledgeEvaluation>('/api/knowledge/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cases, collection_id: collectionId || null }) }); }

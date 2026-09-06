@@ -34,6 +34,9 @@ def build_add_knowledge_tool(service: KnowledgeService) -> Tool:
 
 def build_search_knowledge_tool(service: KnowledgeService, collection_id: str | None = None) -> Tool:
     def search_knowledge(query: str, limit: int | None = None):
+        if hasattr(service, "search_with_decision"):
+            result = service.search_with_decision(query, limit, collection_id=collection_id)
+            return {**result, "hits": result["hits"] if result["decision"]["status"] == "answerable" else []}
         hits = (
             service.search(query, limit, collection_id=collection_id)
             if hasattr(service, "list_documents")

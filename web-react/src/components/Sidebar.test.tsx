@@ -32,6 +32,13 @@ describe('AppSidebar navigation', () => {
     expect(screen.getByRole('button', { name: '设置' })).toBeVisible();
   });
 
+  it('uses the Iris logo image for the home button', () => {
+    renderSidebar();
+    const logo = screen.getByRole('button', { name: '返回首页' }).querySelector('img');
+    expect(logo).toHaveAttribute('src', '/iris-logo.png');
+    expect(logo).toHaveAttribute('alt', '');
+  });
+
   it('exposes expanded state on the sidebar shell by default', () => {
     const { container } = renderSidebar();
     const shell = container.querySelector('[data-slot="sidebar"]');

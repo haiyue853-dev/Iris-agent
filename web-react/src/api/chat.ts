@@ -3,6 +3,17 @@ import type { Toolset } from '../lib/capability-mode';
 
 const API_BASE = 'http://localhost:8000';
 
+export function formatChatError(error: unknown, code?: string): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '请求失败，请稍后重试。';
+  if (code === 'provider_error') {
+    return `${message}。请检查设置中的 API 地址、API Key 和模型名称后重试。`;
+  }
+  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed/i.test(message)) {
+    return '无法连接 Iris 服务，请确认后端已启动，并检查网络连接后重试。';
+  }
+  return message;
+}
+
 async function checked(response: Response): Promise<Response> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

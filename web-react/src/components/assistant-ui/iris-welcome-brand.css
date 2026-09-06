@@ -1,0 +1,84 @@
+.aui-thread-welcome-message.iris-welcome-brand {
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.iris-welcome-brand-art {
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 480px);
+  flex-shrink: 0;
+  margin: 0 auto 8px;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, rgb(0 0 0 / 95%) 80%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, rgb(0 0 0 / 95%) 80%, transparent 100%);
+}
+
+.iris-welcome-brand .iris-welcome-brand-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.iris-welcome-brand-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(110deg,
+    transparent 42%,
+    rgb(210 215 225 / 30%) 47%,
+    rgb(255 255 255 / 85%) 50%,
+    rgb(210 215 225 / 30%) 53%,
+    transparent 58%);
+  background-size: 240% 100%;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  -webkit-mask-image: var(--iris-brand-image);
+  mask-image: var(--iris-brand-image);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: iris-brand-shimmer 8s ease-in-out infinite;
+}
+
+@keyframes iris-brand-shimmer {
+  0%, 10% { background-position: 160% 50%; }
+  48%, 100% { background-position: -60% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iris-welcome-brand-art::after {
+    display: none;
+    animation: none;
+  }
+}
+
+.aui-thread-welcome-message.iris-welcome-brand h1 {
+  font-size: clamp(1.35rem, 2.6vw, 1.7rem);
+  line-height: 1.35;
+  letter-spacing: -0.035em;
+}
+
+.aui-thread-welcome-message.iris-welcome-brand p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+@container (max-width: 32rem) {
+  .aui-thread-welcome-message.iris-welcome-brand {
+    gap: 8px;
+  }
+
+  .iris-welcome-brand-art {
+    width: min(100%, 360px);
+    margin-bottom: 4px;
+  }
+}
+
+@media (max-height: 700px) {
+  .iris-welcome-brand-art {
+    max-width: 360px;
+  }
+}

@@ -37,6 +37,24 @@ def test_use_skill_loads_bundled_skill(service):
     assert result.value["name"] == "AI 日报"
 
 
+def test_use_skill_accepts_tool_style_web_search_id(service):
+    use = build_use_skill_tool(service)
+
+    result = use.invoke({"skill_id": "web_search"})
+
+    assert result.ok
+    assert result.value["id"] == "web-research"
+
+
+def test_use_skill_accepts_search_internet_alias(service):
+    use = build_use_skill_tool(service)
+
+    result = use.invoke({"skill_id": "search_internet"})
+
+    assert result.ok
+    assert result.value["id"] == "web-research"
+
+
 def test_use_skill_unknown_returns_error(service):
     use = build_use_skill_tool(service)
 

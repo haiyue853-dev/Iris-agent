@@ -88,6 +88,10 @@ class TaskCenterService:
                 return call_id
         return None
 
+    def approval_state(self, task_id: str, call_id: str) -> tuple[str, str] | None:
+        """Return the in-memory lifecycle state for an approval call."""
+        return self._approval_states.get((task_id, call_id))
+
     def tool_started(self, task_id: str, tool_name: str, **_ignored: object) -> AgentTask:
         tool_name = self._safe_tool_name(tool_name)
         return self._append(task_id, "tool_started", f"开始调用工具：{tool_name}", tool_name=tool_name)

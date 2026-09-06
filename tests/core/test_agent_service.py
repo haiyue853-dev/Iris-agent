@@ -27,6 +27,145 @@ def test_service_persists_tool_messages_before_completion(tmp_path):
     assert "message_id" in events[-1].data
 
 
+def test_turn_prompt_requires_direct_web_search_for_live_web_requests(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(Provider(), ToolRegistry()), repo, "system")
+
+    prompt = service._turn_prompt(
+        session.id,
+        "去百度搜一下热搜前五条输出给我",
+        [],
+        "fast",
+        None,
+        "mix",
+        False,
+        [],
+    )
+
+    assert "必须直接调用 web_search" in prompt
+
+
+def test_build_messages_excludes_messages_marked_hidden_from_model(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    repo.append(session.id, Message(role="user", content="旧问题"))
+    repo.append(session.id, Message(role="assistant", content="错误的历史拒答", context_visible=False))
+    repo.append(session.id, Message(role="tool", content='{"error":"web_search_failed"}', context_visible=False))
+    repo.append(session.id, Message(role="user", content="新问题"))
+    service = AgentService(AgentLoop(Provider(), ToolRegistry()), repo, "system")
+
+    messages = service._build_messages(repo.get(session.id))
+
+    assert [message.content for message in messages if message.role != "system"] == ["旧问题", "新问题"]
+
+
+def test_build_messages_excludes_legacy_failed_tool_answer_chain(tmp_path):
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    repo.append(session.id, Message(role="user", content="旧问题"))
+    call = ToolCall("failed-call", "use_skill", {"skill_id": "web_search"})
+    repo.append(session.id, Message(role="assistant", tool_calls=[call]))
+    repo.append(session.id, Message(role="tool", content='{"error":"skill_not_found","message":"技能不存在"}', tool_call_id=call.id, name=call.name))
+    repo.append(session.id, Message(role="assistant", content="当前没有联网工具"))
+    repo.append(session.id, Message(role="user", content="新问题"))
+    service = AgentService(AgentLoop(Provider(), ToolRegistry()), repo, "system")
+
+    messages = service._build_messages(repo.get(session.id))
+
+    assert [message.content for message in messages if message.role != "system"] == ["旧问题", "新问题"]
+
+
+def test_failed_tool_fallback_answer_is_hidden_from_future_context(tmp_path):
+    class FailingProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderResponse(tool_calls=[ToolCall("failed-call", "broken", {})])
+            return ProviderResponse(content="工具失败后的兜底回答")
+
+    registry = ToolRegistry()
+    registry.register(Tool("broken", "broken", {"type": "object", "properties": {}}, lambda: (_ for _ in ()).throw(RuntimeError("boom"))))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(FailingProvider(), registry), repo, "system")
+
+    list(service.run(session.id, "旧问题"))
+
+    saved = repo.get(session.id).messages
+    assert saved[-1].content == "工具失败后的兜底回答"
+    assert saved[-1].context_visible is False
+
+
+def test_simple_live_hot_search_uses_direct_fast_path(tmp_path):
+    class UnusedProvider:
+        def complete(self, messages, tools):
+            raise AssertionError("simple live lookup should not require a second model call")
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search",
+        "search",
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        lambda query: {"results": [{"title": "热搜第一条", "url": "https://example.com/hot", "snippet": "热搜摘要"}]},
+    ))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(UnusedProvider(), registry), repo, "system")
+
+    events = list(service.run(session.id, "今天的百度热搜第一是什么"))
+
+    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
+    assert "热搜第一条" in events[-1].data["content"]
+
+
+def test_simple_current_time_uses_direct_fast_path(tmp_path):
+    class UnusedProvider:
+        def complete(self, messages, tools):
+            raise AssertionError("simple time lookup should not require a model call")
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "current_time",
+        "time",
+        {"type": "object", "properties": {}},
+        lambda: {"iso": "2026-09-05T20:00:00+08:00"},
+    ))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(UnusedProvider(), registry), repo, "system")
+
+    events = list(service.run(session.id, "现在几点"))
+
+    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
+    assert "2026-09-05T20:00:00+08:00" in events[-1].data["content"]
+
+
+def test_simple_news_lookup_uses_direct_fast_path(tmp_path):
+    class UnusedProvider:
+        def complete(self, messages, tools):
+            raise AssertionError("simple news lookup should not require a model call")
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search",
+        "search",
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        lambda query: {"results": [{"title": "美国头条", "url": "https://example.com", "snippet": "新闻摘要"}]},
+    ))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(UnusedProvider(), registry), repo, "system")
+
+    events = list(service.run(session.id, "今天美国有什么最大的新闻热点"))
+
+    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
+    assert "美国头条" in events[-1].data["content"]
+
+
 def test_service_uses_session_model_provider(tmp_path):
     class GlobalProvider:
         model = "global"
@@ -161,6 +300,30 @@ def test_approved_collaboration_request_unlocks_delegation_tools_for_the_same_tu
     assert provider.schemas == [["request_subagent_collaboration"], ["delegate_tasks"]]
 
 
+def test_approved_collaboration_with_existing_delegation_tools_does_not_duplicate(tmp_path):
+    class CollaborationProvider:
+        def __init__(self):
+            self.count = 0
+
+        def complete(self, messages, tools):
+            self.count += 1
+            if self.count == 1:
+                return ProviderResponse(tool_calls=[ToolCall("ask-1", "request_subagent_collaboration", {"reason": "多路搜索"})])
+            return ProviderResponse(content="已完成")
+
+    registry = ToolRegistry()
+    registry.register(Tool("request_subagent_collaboration", "ask", {"type": "object", "properties": {"reason": {"type": "string"}}}, lambda reason: {"requested": True}, requires_approval=True))
+    registry.register(Tool("delegate_workflow", "delegate", {"type": "object", "properties": {}}, lambda: "ok"))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(CollaborationProvider(), registry), repo, "system")
+
+    list(service.run(session.id, "请使用多 Agent / 子代理搜索三类面试资料"))
+    events = list(service.resolve_tool_approval(session.id, "ask-1", True))
+
+    assert events[-1].type == "message_completed"
+
+
 def test_service_does_not_execute_rejected_tool_call(tmp_path):
     class ApprovalProvider:
         def __init__(self):
@@ -181,6 +344,27 @@ def test_service_does_not_execute_rejected_tool_call(tmp_path):
     events = list(service.resolve_tool_approval(session.id, "c1", False))
     assert calls == []
     assert events[0].data["error_code"] == "tool_approval_rejected"
+
+
+def test_rejected_collaboration_stops_without_running_delegation(tmp_path):
+    class CollaborationProvider:
+        def complete(self, messages, tools):
+            return ProviderResponse(tool_calls=[ToolCall("ask-1", "request_subagent_collaboration", {"reason": "多路搜索"})])
+
+    calls = []
+    registry = ToolRegistry()
+    registry.register(Tool("request_subagent_collaboration", "ask", {"type": "object", "properties": {"reason": {"type": "string"}}}, lambda reason: {"requested": True}, requires_approval=True))
+    registry.register(Tool("delegate_workflow", "delegate", {"type": "object", "properties": {}}, lambda: calls.append(True)))
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(CollaborationProvider(), registry), repo, "system")
+
+    list(service.run(session.id, "请使用多 Agent 搜索资料"))
+    events = list(service.resolve_tool_approval(session.id, "ask-1", False))
+
+    assert calls == []
+    assert [event.type for event in events] == ["tool_finished", "text_delta", "message_completed"]
+    assert events[-1].data["content"] == "已取消子代理协作。"
 
 
 def test_approved_request_reuses_its_original_scoped_registry(tmp_path):

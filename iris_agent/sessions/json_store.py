@@ -135,4 +135,4 @@ class JsonSessionRepository:
         citations = raw.get("citations", [])
         if not isinstance(citations, list) or any(not isinstance(item, dict) for item in citations):
             citations = []
-        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), attachment_ids=attachment_ids, prompt_content=raw.get("prompt_content"), runtime_epoch=raw.get("runtime_epoch"), citations=citations, id=raw.get("id") or f"message_{uuid.uuid4().hex}")
+        return Message(role=raw["role"], content=raw.get("content", ""), tool_calls=calls, tool_call_id=raw.get("tool_call_id"), name=raw.get("name"), attachment_ids=attachment_ids, prompt_content=raw.get("prompt_content"), runtime_epoch=raw.get("runtime_epoch"), citations=citations, context_visible=raw.get("context_visible", True), id=raw.get("id") or f"message_{uuid.uuid4().hex}")

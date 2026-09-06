@@ -66,6 +66,7 @@ export function useChat() {
   const [currentActivity, setCurrentActivity] = useState<string | null>(null);
   const activityResetTimerRef = useRef<number | null>(null);
   const currentSessionRef = useRef('');
+  const sessionMessagesRef = useRef(new Map<string, Message[]>());
   const currentTaskRef = useRef<string | null>(null);
   const pollersRef = useRef(new Map<string, TaskPoller>());
   const approvalRequestsRef = useRef(new Set<string>());
@@ -76,6 +77,18 @@ export function useChat() {
   const refreshSessions = useCallback(async () => setSessions(await listSessions()), []);
   useEffect(() => { refreshSessions().catch(() => undefined); }, [refreshSessions]);
   const showToast = useCallback((text: string) => { setToast(text); window.setTimeout(() => setToast(''), 1800); }, []);
+
+  const handleSessionAvailable = useCallback((session: Session, initialMessage?: string) => {
+    if (initialMessage?.trim()) {
+      sessionMessagesRef.current.set(session.id, [{ role: 'user', content: initialMessage }]);
+    }
+    setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    if (!currentSessionRef.current) {
+      currentSessionRef.current = session.id;
+      setCurrentSessionId(session.id);
+      if (initialMessage?.trim()) setMessages([{ role: 'user', content: initialMessage }]);
+    }
+  }, []);
 
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
   useEffect(() => { currentTaskRef.current = currentTaskId; }, [currentTaskId]);
@@ -377,7 +390,7 @@ export function useChat() {
     }
   }, [attachments, currentSessionId, showToast, startPolling]);
 
-  const handleSwitchSession = useCallback(async (id: string) => {
+  const handleSwitchSession = useCallback(async (id: string, failure?: string) => {
     const requestId = ++sessionSwitchRequestRef.current;
     const data = await getSession(id);
     if (requestId !== sessionSwitchRequestRef.current) return;
@@ -391,18 +404,29 @@ export function useChat() {
       startPolling(taskId, poller.sessionId);
       void pollTask(taskId, poller.sessionId);
     }
-    setMessages(data.messages);
+    const baseMessages = data.messages.length ? data.messages : (sessionMessagesRef.current.get(id) ?? []);
+    const nextMessages: Message[] = failure
+      ? [...baseMessages, { role: 'assistant', content: '', error: failure }]
+      : baseMessages;
+    sessionMessagesRef.current.set(id, nextMessages);
+    setMessages(nextMessages);
   }, [clearPollers, pollTask, restoreSessionTask, startPolling]);
-  const handleRefreshSession = useCallback(async (id: string) => {
+  const handleRefreshSession = useCallback(async (id: string, failure?: string) => {
     const data = await getSession(id);
     if (currentSessionRef.current === id) {
-      setMessages(data.messages);
-      return data.messages;
+      const baseMessages = data.messages.length ? data.messages : (sessionMessagesRef.current.get(id) ?? []);
+      const messages: Message[] = failure
+        ? [...baseMessages, { role: 'assistant', content: '', error: failure }]
+        : baseMessages;
+      sessionMessagesRef.current.set(id, messages);
+      setMessages(messages);
+      return messages;
     }
     return null;
   }, []);
   const handleDeleteSession = useCallback(async (id: string) => {
     await deleteSession(id);
+    sessionMessagesRef.current.delete(id);
     discardSessionTasks(id);
     if (id === currentSessionId) {
       sessionSwitchRequestRef.current += 1;
@@ -469,5 +493,5 @@ export function useChat() {
   const handleRegenerate = useCallback(() => showToast('当前版本暂不支持重新生成'), [showToast]);
   const handleEditMessage = useCallback((_index: number, _content: string) => showToast('当前版本暂不支持编辑历史消息'), [showToast]);
 
-  return { messages, isStreaming, streamingContent, currentActivity, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, attachments, uploadFiles, removeAttachment, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleRefreshSession, handleDeleteSession };
+  return { messages, isStreaming, streamingContent, currentActivity, toast, pendingApproval, currentSessionId, currentTaskId, currentTaskStatus, queuePosition, approvalCallId, approvalSubmitting, sessions, attachments, uploadFiles, removeAttachment, handleSendWithSession, resolvePendingApproval, handleRegenerate, handleStop, handleNewChat, handleCopy, handleEditMessage, handleSwitchSession, handleSessionAvailable, handleRefreshSession, handleDeleteSession };
 }

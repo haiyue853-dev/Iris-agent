@@ -2,12 +2,13 @@ import json
 import base64
 import re
 import threading
+import uuid
 from time import monotonic
 from contextlib import nullcontext
 from collections.abc import Callable, Iterator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from iris_agent.core.errors import ToolApprovalNotFoundError, ValidationError
+from iris_agent.core.errors import ProviderError, ToolApprovalNotFoundError, ValidationError
 from iris_agent.core.models import AgentEvent, Message, ProviderResponse, ToolCall
 from iris_agent.core.runtime import SessionRuntimeSnapshot
 from iris_agent.context_compression.compressor import ContextCompressor
@@ -82,17 +83,20 @@ class AgentLoop:
         working = list(messages)
         tool_rounds = 0
         used_one_shot_lookups: set[str] = set()
+        executed_one_shot_lookups: set[str] = set()
         finalization_requested = False
+        finalization_instruction_added = False
         forced_tool_call_attempts = 0
         while True:
             if cancelled():
                 return
             model_started_at = monotonic()
             first_token_at: float | None = None
-            if tool_rounds >= self.max_tool_rounds:
-                if not finalization_requested:
+            if tool_rounds >= self.max_tool_rounds or finalization_requested:
+                finalization_requested = True
+                if not finalization_instruction_added:
                     working.append(Message(role="system", content="工具预算已用完。只能基于已有工具结果直接给出最终结论；不得再调用工具，也不要描述过程。"))
-                    finalization_requested = True
+                    finalization_instruction_added = True
                 available_tool_schemas = []
             else:
                 available_tool_schemas = [
@@ -100,22 +104,39 @@ class AgentLoop:
                     for schema in registry.schemas()
                     if schema.get("function", {}).get("name") not in used_one_shot_lookups
                 ]
-            stream = getattr(provider, "stream", None)
-            if callable(stream):
-                content_parts: list[str] = []
-                tool_calls: list[ToolCall] = []
-                for chunk in stream(working, available_tool_schemas):
-                    if cancelled():
-                        return
-                    if chunk.content:
-                        first_token_at = first_token_at or monotonic()
-                        content_parts.append(chunk.content)
-                        yield AgentEvent("text_delta", {"content": chunk.content})
-                    if chunk.tool_calls:
-                        tool_calls = chunk.tool_calls
-                response = ProviderResponse("".join(content_parts), tool_calls)
-            else:
-                response = provider.complete(working, available_tool_schemas)
+            try:
+                stream = getattr(provider, "stream", None)
+                if callable(stream):
+                    content_parts: list[str] = []
+                    tool_calls: list[ToolCall] = []
+                    for chunk in stream(working, available_tool_schemas):
+                        if cancelled():
+                            return
+                        if chunk.content:
+                            first_token_at = first_token_at or monotonic()
+                            content_parts.append(chunk.content)
+                            yield AgentEvent("text_delta", {"content": chunk.content})
+                        if chunk.tool_calls:
+                            tool_calls = chunk.tool_calls
+                    response = ProviderResponse("".join(content_parts), tool_calls)
+                else:
+                    response = provider.complete(working, available_tool_schemas)
+            except ProviderError:
+                fallback = self._fallback_from_tool_results(working)
+                if fallback is None:
+                    raise
+                completed_at = monotonic()
+                yield AgentEvent("text_delta", {"content": fallback})
+                yield AgentEvent("message_completed", {
+                    "content": fallback,
+                    "metrics": {
+                        "first_token_ms": 0,
+                        "duration_ms": round((completed_at - model_started_at) * 1000),
+                        "model": getattr(provider, "model", None),
+                        "fallback": True,
+                    },
+                })
+                return
             if not response.tool_calls:
                 if response.content and not callable(stream):
                     yield AgentEvent("text_delta", {"content": response.content})
@@ -126,7 +147,8 @@ class AgentLoop:
                 forced_tool_call_attempts += 1
                 if forced_tool_call_attempts >= 2:
                     completed_at = monotonic()
-                    yield AgentEvent("message_completed", {"content": response.content or "已根据已获取的信息完成处理。", "metrics": {"first_token_ms": None if first_token_at is None else round((first_token_at - model_started_at) * 1000), "duration_ms": round((completed_at - model_started_at) * 1000), "model": getattr(provider, "model", None)}})
+                    content = self._fallback_from_tool_results(working) or "已达到工具调用上限，模型未能生成最终答复。请根据已有工具结果缩小问题后重试。"
+                    yield AgentEvent("message_completed", {"content": content, "metrics": {"first_token_ms": None if first_token_at is None else round((first_token_at - model_started_at) * 1000), "duration_ms": round((completed_at - model_started_at) * 1000), "model": getattr(provider, "model", None)}})
                     return
                 working.append(Message(role="assistant", content=response.content))
                 continue
@@ -180,6 +202,15 @@ class AgentLoop:
                     call_index += 1
                 if cancelled():
                     return
+                if call.name in executed_one_shot_lookups:
+                    working.append(Message(
+                        role="tool",
+                        content=json.dumps({"error": "tool_already_used", "message": "该查询工具本轮已执行，请直接基于已有结果回答。"}, ensure_ascii=False),
+                        tool_call_id=call.id,
+                        name=call.name,
+                    ))
+                    finalization_requested = True
+                    continue
                 yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
                 if registry.requires_approval(call.name):
                     yield AgentEvent("tool_approval_requested", {
@@ -194,9 +225,52 @@ class AgentLoop:
                     yield tool_event
                     if tool_event.type == "tool_finished": final_data = tool_event.data
                 if final_data is None: return
+                if call.name in self._ONE_SHOT_LOOKUP_TOOLS:
+                    executed_one_shot_lookups.add(call.name)
+                    finalization_requested = True
                 content = json.dumps(final_data.get("result") if final_data.get("ok") else {"error": final_data.get("error_code"), "message": final_data.get("error_message")}, ensure_ascii=False)
                 working.append(Message(role="tool", content=content, tool_call_id=call.id, name=call.name))
                 if cancelled(): return
+
+    @staticmethod
+    def _fallback_from_tool_results(messages: list[Message]) -> str | None:
+        for message in reversed(messages):
+            if message.role != "tool":
+                continue
+            try:
+                payload = json.loads(message.content)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("error"):
+                continue
+            name = message.name or "工具"
+            if name == "web_search":
+                results = payload.get("results")
+                if isinstance(results, list):
+                    lines = []
+                    for index, item in enumerate(results[:3], 1):
+                        if not isinstance(item, dict):
+                            continue
+                        title = str(item.get("title") or item.get("name") or "未命名结果").strip()
+                        snippet = str(item.get("snippet") or item.get("summary") or "").strip()
+                        url = str(item.get("url") or item.get("link") or "").strip()
+                        line = f"{index}. {title}"
+                        if snippet:
+                            line += f"\n   {snippet}"
+                        if url:
+                            line += f"\n   来源：{url}"
+                        lines.append(line)
+                    if lines:
+                        return "已获取到搜索结果：\n" + "\n".join(lines)
+            if name == "current_time" and payload.get("iso"):
+                return f"当前时间：{payload['iso']}"
+            if name == "search_knowledge" and isinstance(payload.get("hits"), list):
+                hits = [str(item.get("content") or item.get("text") or item) for item in payload["hits"][:3] if isinstance(item, dict)]
+                if hits:
+                    return "已获取到知识库结果：\n" + "\n".join(f"{index}. {hit}" for index, hit in enumerate(hits, 1))
+            if payload:
+                return f"{name} 已完成，结果如下：\n{json.dumps(payload, ensure_ascii=False, indent=2)[:4000]}"
+        return None
 
 
 class AgentService:
@@ -257,6 +331,8 @@ class AgentService:
     def _turn_prompt(self, session_id: str, user_message: str, attachment_ids: list[str], response_mode: str, knowledge_collection_id: str | None, knowledge_query_mode: str, knowledge_enabled: bool, citations: list[dict], skill_name: str | None = None, skill_instruction: str | None = None) -> str:
         mode_instruction = "[本轮模式] 快速模式：优先直接、简洁回答，仅在确有必要时调用工具。" if response_mode == "fast" else "[本轮模式] 思考模式：充分分析，必要时调用工具核实。"
         parts = [user_message, mode_instruction]
+        if self._is_live_web_request(user_message):
+            parts.append("[联网搜索要求] 用户请求了实时或外部网络信息，必须直接调用 web_search 工具获取结果；不要调用 use_skill 代替 web_search，也不要根据历史消息声称没有联网工具。")
         if self._is_fast_interview_collection_request(user_message):
             parts.append("[快速面经入库模式] 只能调用 collect_interview_knowledge 一次。不要调用子代理、search_knowledge、web_search、fetch_page 或 add_knowledge；工具返回后直接告知用户审核草稿已生成，不要输出过程性旁白。")
         if skill_instruction:
@@ -291,7 +367,25 @@ class AgentService:
         registry = self._registry_for(session.id, knowledge_collection_id)
         snapshot = self._ensure_runtime_snapshot(session, registry)
         messages = [Message(role="system", content=content) for content in snapshot.system_messages]
+        failed_tool_call_ids = {
+            message.tool_call_id
+            for message in session.messages
+            if message.role == "tool" and message.tool_call_id and self._is_failed_tool_message(message)
+        }
+        failed_tool_since_user = False
         for message in session.messages:
+            if message.role == "user":
+                failed_tool_since_user = False
+            if not message.context_visible:
+                if message.role == "tool":
+                    failed_tool_since_user = True
+                continue
+            if message.role == "tool" and self._is_failed_tool_message(message):
+                failed_tool_since_user = True
+                continue
+            if message.role == "assistant":
+                if any(call.id in failed_tool_call_ids for call in message.tool_calls) or (failed_tool_since_user and not message.tool_calls):
+                    continue
             if message.attachment_ids and self.attachment_service is not None:
                 details = []
                 image_urls: list[str] = []
@@ -314,6 +408,16 @@ class AgentService:
             else:
                 messages.append(message)
         return messages
+
+    @staticmethod
+    def _is_failed_tool_message(message: Message) -> bool:
+        if message.role != "tool":
+            return False
+        try:
+            payload = json.loads(message.content)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return isinstance(payload, dict) and bool(payload.get("error"))
 
     def run(self, session_id: str, user_message: str, attachment_ids: list[str] | None = None, knowledge_collection_id: str | None = None, knowledge_query_mode: str = "mix", knowledge_enabled: bool = False, is_cancelled: Callable[[], bool] | None = None, response_mode: str = "fast", toolsets: tuple[str, ...] | list[str] | None = None, skill_name: str | None = None, skill_instruction: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
@@ -347,7 +451,35 @@ class AgentService:
             session = self.sessions.get(session_id)
             messages = self._build_messages(session, knowledge_collection_id)
             try:
-                yield from self._run_loop(session_id, messages, registry, is_cancelled, citations, provider, owned_provider)
+                direct_lookup = (
+                    self._is_simple_live_web_lookup(user_message)
+                    and "web_search" in registry.names()
+                    and not registry.requires_approval("web_search")
+                )
+                direct_time = (
+                    self._is_simple_current_time_request(user_message)
+                    and "current_time" in registry.names()
+                    and not registry.requires_approval("current_time")
+                )
+                if direct_lookup:
+                    yield from self._run_direct_live_lookup(
+                        session_id,
+                        user_message,
+                        registry,
+                        is_cancelled,
+                        citations,
+                        provider,
+                    )
+                elif direct_time:
+                    yield from self._run_direct_current_time_lookup(
+                        session_id,
+                        registry,
+                        is_cancelled,
+                        citations,
+                        provider,
+                    )
+                else:
+                    yield from self._run_loop(session_id, messages, registry, is_cancelled, citations, provider, owned_provider)
             finally:
                 if owned_provider and not any(key[0] == session_id for key in self._pending_approvals):
                     getattr(provider, "close", lambda: None)()
@@ -381,19 +513,35 @@ class AgentService:
             call, registry, is_cancelled, citations, provider, owned_provider = pending
             if is_cancelled():
                 return
-            if call.name == "request_subagent_collaboration":
+            is_collaboration_request = call.name == "request_subagent_collaboration"
+            if is_collaboration_request and not approved:
                 registry.replace_prefix("request_subagent_collaboration", [])
-                if approved:
-                    for delegation_tool in self.loop.tools.tools_with_prefix("delegate_"):
-                        registry.register(delegation_tool)
+                registry.replace_prefix("delegate_", [])
             if approved:
                 for event in self.loop.execute_tool_call(call, registry, is_cancelled):
                     if event.type == "tool_finished": self._persist_tool_result(session_id, event)
                     yield event
+                if is_collaboration_request:
+                    registry.replace_prefix("request_subagent_collaboration", [])
+                    for delegation_tool in self.loop.tools.tools_with_prefix("delegate_"):
+                        if delegation_tool.name not in registry.names():
+                            registry.register(delegation_tool)
             else:
                 event = self._tool_finished_event(call, ToolExecutionResult(False, error_code="tool_approval_rejected", error_message="用户拒绝执行此工具调用"))
                 self._persist_tool_result(session_id, event)
                 yield event
+                if call.name == "request_subagent_collaboration":
+                    message = Message(role="assistant", content="已取消子代理协作。", citations=list(citations or []))
+                    self.sessions.append(session_id, message)
+                    yield AgentEvent("text_delta", {"content": message.content})
+                    yield AgentEvent("message_completed", {
+                        "message_id": message.id,
+                        "content": message.content,
+                        "citations": list(citations or []),
+                        "follow_up_suggestions": self._follow_up_suggestions(list(citations or [])),
+                        "metrics": {"first_token_ms": 0, "duration_ms": 0, "model": getattr(provider, "model", None)},
+                    })
+                    return
             if is_cancelled(): return
             session = self.sessions.get(session_id)
             messages = self._build_messages(session)
@@ -437,12 +585,170 @@ class AgentService:
         )
 
     @staticmethod
+    def _is_live_web_request(message: str) -> bool:
+        return bool(re.search(r"百度|微博|热搜|新闻|热点|联网|外部网站|实时", message, re.IGNORECASE))
+
+    @staticmethod
+    def _is_simple_live_hot_lookup(message: str) -> bool:
+        normalized = message.strip().lower()
+        if not re.search(r"热搜", normalized):
+            return False
+        if not re.search(r"第一(?:条|名)?|第\s*1|top\s*1|头条", normalized):
+            return False
+        return bool(re.search(r"百度|微博|今天|今日|现在|当前|实时", normalized))
+
+    @staticmethod
+    def _is_simple_live_web_lookup(message: str) -> bool:
+        normalized = message.strip().lower()
+        if not AgentService._is_live_web_request(normalized):
+            return False
+        if re.search(r"分析|解释|总结|比较|详细|深入|为什么|如何|核实|原文|全文|抓取|研究|对比", normalized):
+            return False
+        return bool(re.search(r"搜索|搜一下|查询|查一下|新闻|热点|热搜|news|search", normalized))
+
+    @staticmethod
+    def _is_simple_current_time_request(message: str) -> bool:
+        normalized = message.strip().lower()
+        return bool(re.search(r"现在几点|当前时间|现在时间|几点了|几号|日期|what time|current time", normalized))
+
+    @staticmethod
+    def _direct_lookup_text(value: object) -> tuple[str, list[dict]]:
+        results = value.get("results", []) if isinstance(value, dict) else []
+        if not isinstance(results, list):
+            results = []
+        first = next((item for item in results if isinstance(item, dict)), None)
+        if first is None:
+            return "暂未找到热搜结果，请稍后重试。", []
+        citations = []
+        lines = []
+        for index, item in enumerate(results[:3], 1):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("name") or "未命名结果").strip()
+            snippet = str(item.get("snippet") or item.get("summary") or "").strip()
+            url = str(item.get("url") or item.get("link") or "").strip()
+            label = "热搜第一条" if index == 1 and re.search(r"热搜", title + snippet) else f"{index}."
+            entry = f"{label} {title}" if label != "1." else f"{label} {title}"
+            if snippet:
+                entry += f"\n{snippet}"
+            if url:
+                entry += f"\n来源：{url}"
+            lines.append(entry)
+            citations.append({"index": index, "title": title, "url": url, "snippet": snippet})
+        if not lines:
+            return "暂未找到搜索结果，请稍后重试。", []
+        return "\n\n".join(lines), citations
+
+    def _run_direct_live_lookup(
+        self,
+        session_id: str,
+        user_message: str,
+        registry: ToolRegistry,
+        is_cancelled: Callable[[], bool] | None,
+        citations: list[dict],
+        provider: ModelProvider,
+    ) -> Iterator[AgentEvent]:
+        cancelled = is_cancelled or (lambda: False)
+        if cancelled():
+            return
+        started = monotonic()
+        call = ToolCall(f"call_{uuid.uuid4().hex}", "web_search", self._direct_lookup_arguments(registry, user_message))
+        yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
+        self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
+        result = registry.invoke(call.name, call.arguments)
+        finished = self._tool_finished_event(call, result)
+        yield finished
+        self._persist_tool_result(session_id, finished)
+        if cancelled():
+            return
+        if result.ok:
+            content, found_citations = self._direct_lookup_text(result.value)
+            citations.extend(found_citations)
+        else:
+            content = "热搜查询失败，请稍后重试。"
+        message = Message(
+            role="assistant",
+            content=content,
+            citations=list(citations),
+            context_visible=result.ok,
+        )
+        self.sessions.append(session_id, message)
+        yield AgentEvent("text_delta", {"content": content})
+        yield AgentEvent("message_completed", {
+            "message_id": message.id,
+            "content": content,
+            "citations": list(citations),
+            "follow_up_suggestions": self._follow_up_suggestions(list(citations)),
+            "metrics": {
+                "first_token_ms": 0,
+                "duration_ms": round((monotonic() - started) * 1000),
+                "model": getattr(provider, "model", None),
+            },
+        })
+
+    def _run_direct_current_time_lookup(
+        self,
+        session_id: str,
+        registry: ToolRegistry,
+        is_cancelled: Callable[[], bool] | None,
+        citations: list[dict],
+        provider: ModelProvider,
+    ) -> Iterator[AgentEvent]:
+        cancelled = is_cancelled or (lambda: False)
+        if cancelled():
+            return
+        started = monotonic()
+        call = ToolCall(f"call_{uuid.uuid4().hex}", "current_time", {})
+        yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
+        self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
+        result = registry.invoke(call.name, call.arguments)
+        finished = self._tool_finished_event(call, result)
+        yield finished
+        self._persist_tool_result(session_id, finished)
+        if cancelled():
+            return
+        if result.ok and isinstance(result.value, dict):
+            content = f"当前时间：{result.value.get('iso', '未知')}"
+        elif result.ok:
+            content = f"当前时间：{result.value}"
+        else:
+            content = "获取当前时间失败，请稍后重试。"
+        message = Message(role="assistant", content=content, citations=list(citations), context_visible=result.ok)
+        self.sessions.append(session_id, message)
+        yield AgentEvent("text_delta", {"content": content})
+        yield AgentEvent("message_completed", {
+            "message_id": message.id,
+            "content": content,
+            "citations": list(citations),
+            "follow_up_suggestions": self._follow_up_suggestions(list(citations)),
+            "metrics": {
+                "first_token_ms": 0,
+                "duration_ms": round((monotonic() - started) * 1000),
+                "model": getattr(provider, "model", None),
+            },
+        })
+
+    @staticmethod
+    def _direct_lookup_arguments(registry: ToolRegistry, user_message: str) -> dict:
+        properties = {}
+        for schema in registry.schemas():
+            function = schema.get("function", {})
+            if function.get("name") == "web_search":
+                properties = function.get("parameters", {}).get("properties", {})
+                break
+        arguments = {"query": user_message}
+        optional = {"limit": 3, "topic": "news", "time_range": "day"}
+        arguments.update({name: value for name, value in optional.items() if name in properties})
+        return arguments
+
+    @staticmethod
     def _is_explicit_delegation_request(message: str) -> bool:
         return bool(re.search(r"子代理|分工|并行协作|多代理|多个代理", message, re.IGNORECASE))
 
 
     def _run_loop(self, session_id: str, messages: list[Message], registry: ToolRegistry, is_cancelled: Callable[[], bool] | None = None, citations: list[dict] | None = None, provider: ModelProvider | None = None, owned_provider: bool = False) -> Iterator[AgentEvent]:
         cancelled = is_cancelled or (lambda: False)
+        turn_has_failed_tool = False
         for event in self.loop._run_with_provider(provider or self.loop.get_provider(), messages, registry, cancelled):
             if event.type == "tool_started":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
@@ -452,10 +758,11 @@ class AgentService:
                 with self._approval_lock:
                     self._pending_approvals[(session_id, call.id)] = (call, registry, cancelled, list(citations or []), provider or self.loop.get_provider(), owned_provider)
             elif event.type == "tool_finished":
+                turn_has_failed_tool = not bool(event.data.get("ok")) or turn_has_failed_tool
                 self._persist_tool_result(session_id, event)
             elif event.type == "message_completed":
                 citation_items = list(citations or [])
-                message = Message(role="assistant", content=str(event.data.get("content", "")), citations=citation_items)
+                message = Message(role="assistant", content=str(event.data.get("content", "")), citations=citation_items, context_visible=not turn_has_failed_tool)
                 self.sessions.append(session_id, message)
                 yield AgentEvent("message_completed", {
                     "message_id": message.id,
@@ -491,4 +798,4 @@ class AgentService:
 
     def _persist_tool_result(self, session_id: str, event: AgentEvent) -> None:
         payload = event.data.get("result") if event.data.get("ok") else {"error": event.data.get("error_code"), "message": event.data.get("error_message")}
-        self.sessions.append(session_id, Message(role="tool", content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(event.data["call_id"]), name=str(event.data["name"])))
+        self.sessions.append(session_id, Message(role="tool", content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(event.data["call_id"]), name=str(event.data["name"]), context_visible=bool(event.data.get("ok"))))

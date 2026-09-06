@@ -2,7 +2,7 @@ import type { KnowledgeEvaluationCase } from '../../api/knowledge';
 
 export type EvaluationDatasetFormat = 'json' | 'csv';
 
-const CSV_COLUMNS = ['question', 'expected_title', 'relevant_document_ids', 'relevant_chunk_ids', 'expected_answer'] as const;
+const CSV_COLUMNS = ['question', 'expected_title', 'relevant_document_ids', 'relevant_chunk_ids', 'expected_answer', 'expected_answerable'] as const;
 
 function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
@@ -25,6 +25,7 @@ function normalizeCase(value: unknown): KnowledgeEvaluationCase | null {
     ...(relevantDocumentIds.length ? { relevant_document_ids: relevantDocumentIds } : {}),
     ...(relevantChunkIds.length ? { relevant_chunk_ids: relevantChunkIds } : {}),
     ...(expectedAnswer ? { expected_answer: expectedAnswer } : {}),
+    ...(typeof row.expected_answerable === 'boolean' ? { expected_answerable: row.expected_answerable } : {}),
   };
 }
 
@@ -61,6 +62,7 @@ function parseCsv(source: string): KnowledgeEvaluationCase[] {
     relevant_document_ids: (values[indexes.get('relevant_document_ids') ?? -1] || '').split('|').filter(Boolean),
     relevant_chunk_ids: (values[indexes.get('relevant_chunk_ids') ?? -1] || '').split('|').filter(Boolean),
     expected_answer: values[indexes.get('expected_answer') ?? -1],
+    expected_answerable: values[indexes.get('expected_answerable') ?? -1]?.trim().toLowerCase() === 'true' ? true : values[indexes.get('expected_answerable') ?? -1]?.trim().toLowerCase() === 'false' ? false : undefined,
   })).filter((item): item is KnowledgeEvaluationCase => item !== null);
 }
 
@@ -68,7 +70,7 @@ export function serializeEvaluationDataset(cases: KnowledgeEvaluationCase[], for
   const normalized = cases.map(normalizeCase).filter((item): item is KnowledgeEvaluationCase => item !== null);
   if (format === 'json') return JSON.stringify({ version: 1, cases: normalized }, null, 2);
   const rows = normalized.map((item) => [item.question, item.expected_title || '', (item.relevant_document_ids || []).join('|'),
-    (item.relevant_chunk_ids || []).join('|'), item.expected_answer || ''].map(csvCell).join(','));
+    (item.relevant_chunk_ids || []).join('|'), item.expected_answer || '', typeof item.expected_answerable === 'boolean' ? String(item.expected_answerable) : ''].map(csvCell).join(','));
   return [CSV_COLUMNS.join(','), ...rows].join('\r\n');
 }
 

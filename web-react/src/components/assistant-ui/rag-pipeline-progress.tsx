@@ -1,4 +1,4 @@
-import { CheckIcon, LoaderCircleIcon, SearchIcon, SparklesIcon, WaypointsIcon } from "lucide-react";
+import { CircleAlertIcon, CheckIcon, LoaderCircleIcon, SearchIcon, SparklesIcon, WaypointsIcon } from "lucide-react";
 import type { IrisRagPipelineStage } from "@/lib/irisRuntime";
 
 const labels = { planning: "分析问题", retrieval: "检索知识", rerank: "重排候选", generation: "生成回答" } as const;
@@ -6,6 +6,7 @@ const icons = { planning: WaypointsIcon, retrieval: SearchIcon, rerank: SearchIc
 const routeLabels: Record<string, string> = { keyword: "关键词", vector: "向量", graph: "图谱", reranker: "重排" };
 
 function stageDetail(stage: IrisRagPipelineStage): string {
+  if (stage.status === "failed") return "未完成";
   if (stage.stage === "planning" && stage.detail.mode) {
     return stage.detail.mode === "global" ? "全局关联模式" : stage.detail.mode === "precise" ? "精准检索模式" : "混合检索模式";
   }
@@ -25,8 +26,8 @@ export function RagPipelineProgress({ stages }: { stages: IrisRagPipelineStage[]
     <div className="iris-rag-pipeline-steps">{stages.map((stage) => {
       const Icon = icons[stage.stage];
       const running = stage.status === "running";
-      return <div className={`iris-rag-pipeline-step ${stage.status}`} key={stage.stage} aria-label={`${labels[stage.stage]}${running ? "进行中" : "已完成"}`}>
-        <span className="iris-rag-pipeline-icon">{running ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : stage.status === "completed" ? <CheckIcon className="size-3.5" /> : <Icon className="size-3.5" />}</span>
+      return <div className={`iris-rag-pipeline-step ${stage.status}`} key={stage.stage} aria-label={`${labels[stage.stage]}${running ? "进行中" : stage.status === "failed" ? "失败" : "已完成"}`}>
+        <span className="iris-rag-pipeline-icon">{running ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : stage.status === "completed" ? <CheckIcon className="size-3.5" /> : stage.status === "failed" ? <CircleAlertIcon className="size-3.5" /> : <Icon className="size-3.5" />}</span>
         <span><strong>{labels[stage.stage]}</strong><small>{stageDetail(stage)}</small></span>
       </div>;
     })}</div>

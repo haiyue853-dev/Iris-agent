@@ -11,6 +11,10 @@ const cases = [{
 }];
 
 describe('evaluation dataset files', () => {
+  it.each(['json', 'csv'] as const)('preserves both answerability labels through %s', (format) => {
+    const labeled = [{ question: '有答案', expected_answerable: true }, { question: '无答案', expected_answerable: false }];
+    expect(parseEvaluationDataset(serializeEvaluationDataset(labeled, format), `cases.${format}`)).toEqual(labeled);
+  });
   it.each(['json', 'csv'] as const)('round-trips chunk ground truth through %s', (format) => {
     const exported = serializeEvaluationDataset(cases, format);
 

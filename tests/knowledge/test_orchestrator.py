@@ -111,3 +111,14 @@ def test_retrieve_deduplicates_content_and_assigns_unified_citations():
     assert {item["source_type"] for item in citations} >= {"document", "memory"}
     duplicate_text = [item for item in citations if item.get("content") == "统一知识检索编排器"]
     assert len(duplicate_text) == 1
+
+
+def test_context_preserves_rag_abstention_instead_of_replacing_it_with_history():
+    orchestrator, rag = make_orchestrator()
+    notice = "[知识库证据判断]\n知识库没有足够证据。请请求补充资料，不要生成引用。"
+    rag.context_for = lambda *args: (notice, [])
+
+    context, citations = orchestrator.context_for("统一知识检索编排器", "session-1", "collection-1", "mix")
+
+    assert context == notice
+    assert citations == []

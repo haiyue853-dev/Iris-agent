@@ -1,6 +1,26 @@
 import type { ReasoningMessagePartComponent, ReasoningMessagePartProps } from "@assistant-ui/react";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useId, useState } from "react";
+
+function IrisThinkingIcon({ running }: { running: boolean }) {
+  return (
+    <svg
+      className={`iris-thinking-mark${running ? " is-running" : ""}`}
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m3.25 11.5 3.5-5 3.1 3.3 4.05-5.8" />
+      <path d="m10.55 14.8 2.65-3.25 3.05 1.2" />
+      <circle cx="3.25" cy="11.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="4" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
 
 export const Reasoning: ReasoningMessagePartComponent = ({ text, status }: ReasoningMessagePartProps) => {
   const running = status.type === "running";
@@ -16,7 +36,7 @@ export const Reasoning: ReasoningMessagePartComponent = ({ text, status }: Reaso
         aria-controls={regionId}
         onClick={() => setOpen((value) => !value)}
       >
-        <BrainIcon className="size-4" aria-hidden="true" />
+        <IrisThinkingIcon running={running} />
         <span>{running ? "正在思考" : "思考过程"}</span>
         {running && (
           <span className="ml-1 inline-flex gap-1" aria-label="思考中">

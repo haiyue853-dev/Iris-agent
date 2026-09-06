@@ -7,7 +7,8 @@ const { streamChat } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("../api/chat", () => ({
+vi.mock("../api/chat", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../api/chat")>(),
   streamChat,
   streamToolApproval: vi.fn(),
 }));
@@ -161,5 +162,84 @@ describe("Iris chat adapter", () => {
     const approval = await stream.next();
 
     expect(approval.value.content[0].result?.title).toBe("此任务较复杂，是否启用子代理协作？");
+  });
+
+  it("stops promptly when the transport never settles", async () => {
+    let transportSignal!: AbortSignal;
+    streamChat.mockImplementationOnce(async (...args: unknown[]) => {
+      transportSignal = args[2] as AbortSignal;
+      await new Promise<void>(() => undefined);
+    });
+    const queue = createEventQueue();
+    const adapter = createIrisAdapter({
+      getSessionId: () => "session-1",
+      ensureSession: async () => "session-1",
+      enqueue: queue.push,
+      queue,
+      registerController: () => undefined,
+    });
+    const controller = new AbortController();
+    const stream = adapter.run({
+      messages: [{ role: "user", content: [{ type: "text", text: "今天的热点2个" }] }],
+      abortSignal: controller.signal,
+    } as never) as AsyncGenerator<unknown>;
+
+    await stream.next();
+    controller.abort();
+    const stopped = await Promise.race([
+      stream.next(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 150)),
+    ]);
+
+    expect(stopped).not.toBeNull();
+    expect(transportSignal.aborted).toBe(true);
+  });
+});
+
+
+describe("Iris transport failures", () => {
+  function start() {
+    const queue = createEventQueue();
+    const adapter = createIrisAdapter({
+      getSessionId: () => "session-1",
+      ensureSession: async () => "session-1",
+      enqueue: queue.push,
+      queue,
+      registerController: () => undefined,
+    });
+    return adapter.run({
+      messages: [{ role: "user", content: [{ type: "text", text: "你好" }] }],
+      abortSignal: new AbortController().signal,
+    } as never) as AsyncGenerator<{ content: Array<{ type: string; text?: string }>; status: { type: string; reason?: string } }>;
+  }
+
+  it("reports an unexpectedly closed response instead of waiting forever", async () => {
+    streamChat.mockResolvedValueOnce(undefined);
+    const stream = start();
+    await stream.next();
+    const next = await Promise.race([
+      stream.next(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 150)),
+    ]);
+    expect(next).not.toBeNull();
+    expect(next!.value.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("响应中断") }),
+    ]));
+    const terminal = await stream.next();
+    expect(terminal.value.status).toMatchObject({ type: "incomplete", reason: "error" });
+    await stream.return(undefined);
+  });
+
+  it("reports an empty model completion instead of rendering a blank answer", async () => {
+    streamChat.mockImplementationOnce(async (...args: unknown[]) => {
+      (args[3] as (event: unknown) => void)({ type: "message_completed", data: { content: "", citations: [] } });
+    });
+    const stream = start();
+    await stream.next();
+    const next = await stream.next();
+    expect(next.value.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("未返回有效内容") }),
+    ]));
+    await stream.return(undefined);
   });
 });

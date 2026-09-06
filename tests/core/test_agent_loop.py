@@ -1,6 +1,7 @@
 from iris_agent.core.agent import AgentLoop
 from iris_agent.core.agent_loop import AgentLoop as CompatibleAgentLoop
 from iris_agent.core.models import Message, ProviderResponse, ToolCall
+from iris_agent.core.errors import ProviderError
 from iris_agent.tools.builtin.time_tool import build_current_time_tool
 from iris_agent.tools.registry import ToolRegistry
 from iris_agent.providers.switchable import SwitchableProvider
@@ -60,6 +61,53 @@ def test_loop_hides_one_shot_lookup_tools_after_the_first_use():
 
     assert events[-1].data["content"] == "done"
     assert provider.tool_schemas == [["web_search"], []]
+
+
+def test_loop_does_not_execute_repeated_one_shot_lookup_calls():
+    calls = []
+    provider = FakeProvider(
+        ProviderResponse(tool_calls=[ToolCall("search-1", "web_search", {"query": "热点"})]),
+        ProviderResponse(tool_calls=[ToolCall("search-2", "web_search", {"query": "更多热点"})]),
+        ProviderResponse(content="done"),
+    )
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search",
+        "search",
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        lambda query: calls.append(query) or {"query": query},
+    ))
+
+    events = list(AgentLoop(provider, registry).run([Message(role="user", content="查热点")]))
+
+    assert calls == ["热点"]
+    assert [event.type for event in events] == ["tool_started", "tool_finished", "text_delta", "message_completed"]
+
+
+def test_loop_returns_successful_tool_result_when_final_model_times_out():
+    class TimeoutAfterToolProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderResponse(tool_calls=[ToolCall("search-1", "web_search", {"query": "美国新闻"})])
+            raise ProviderError("模型首个响应超时，请稍后重试")
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "web_search",
+        "search",
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        lambda query: {"results": [{"title": "美国头条", "url": "https://example.com", "snippet": "摘要"}]},
+    ))
+
+    events = list(AgentLoop(TimeoutAfterToolProvider(), registry).run([Message(role="user", content="美国新闻")]))
+
+    assert events[-1].type == "message_completed"
+    assert "美国头条" in events[-1].data["content"]
+    assert events[-1].data["metrics"]["fallback"] is True
 
 
 

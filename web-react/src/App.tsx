@@ -27,6 +27,8 @@ function App() {
     const saved = localStorage.getItem('iris_active_view');
     return VALID_VIEWS.includes(saved as AppView) ? (saved as AppView) : 'chat';
   });
+  const [chatRuntimeKey, setChatRuntimeKey] = useState(0);
+  const [chatVisited, setChatVisited] = useState(() => activeView === 'chat');
   const [umlVisited, setUmlVisited] = useState(() => activeView === 'uml');
   const [knowledgeCollections, setKnowledgeCollections] = useState<KnowledgeCollection[]>([]);
   const [chatKnowledgeCollectionId, setChatKnowledgeCollectionId] = useState(() => localStorage.getItem('iris_chat_knowledge_collection') || '');
@@ -45,10 +47,22 @@ function App() {
     handleDeleteSession,
     handleNewChat,
     handleRefreshSession,
+    handleSessionAvailable,
   } = useChat();
+
+  const handleSessionSwitchWithRuntime = useCallback(async (id: string) => {
+    await handleSwitchSession(id);
+    setChatRuntimeKey((key) => key + 1);
+  }, [handleSwitchSession]);
+
+  const handleNewChatWithRuntime = useCallback(() => {
+    setChatRuntimeKey((key) => key + 1);
+    handleNewChat();
+  }, [handleNewChat]);
 
   useEffect(() => {
     localStorage.setItem('iris_active_view', activeView);
+    if (activeView === 'chat') setChatVisited(true);
     if (activeView === 'uml') setUmlVisited(true);
   }, [activeView]);
   useEffect(() => { void listKnowledgeCollections().then(setKnowledgeCollections).catch(() => setKnowledgeCollections([])); }, []);
@@ -76,26 +90,26 @@ function App() {
         if (messages.length > 0) {
           if (confirm('确定要新建会话吗？')) {
             setActiveView('chat');
-            handleNewChat();
+            handleNewChatWithRuntime();
           }
         } else {
           setActiveView('chat');
-          handleNewChat();
+          handleNewChatWithRuntime();
         }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [handleNewChat, messages.length]);
+  }, [handleNewChatWithRuntime, messages.length]);
 
   const handleNewChatFromSidebar = () => {
     setActiveView('chat');
-    handleNewChat();
+    handleNewChatWithRuntime();
   };
 
-  const handleSessionCreated = useCallback((id: string) => {
-    void handleSwitchSession(id);
-  }, [handleSwitchSession]);
+  const handleSessionCreated = useCallback((id: string, failure?: string) => {
+    void handleRefreshSession(id, failure).catch(() => undefined);
+  }, [handleRefreshSession]);
 
   return (
     <div className="iris-app-shell">
@@ -103,7 +117,7 @@ function App() {
         onNewChat={handleNewChatFromSidebar}
         currentSessionId={currentSessionId}
         sessions={sessions}
-        onSessionSwitch={handleSwitchSession}
+        onSessionSwitch={handleSessionSwitchWithRuntime}
         onSessionDelete={handleDeleteSession}
         activeView={activeView}
         onViewChange={setActiveView}
@@ -113,6 +127,24 @@ function App() {
         {umlVisited && (
           <div className="view-shell" hidden={activeView !== 'uml'}>
             <UmlFlowPage />
+          </div>
+        )}
+        {chatVisited && (
+          <div className="view-shell" hidden={activeView !== 'chat'}>
+            <AssistantChat
+              key={chatRuntimeKey}
+              sessionId={currentSessionId}
+              sessionModelProfileId={sessions.find((item) => item.id === currentSessionId)?.model_profile_id}
+              messages={messages}
+              knowledgeCollectionId={chatKnowledgeCollectionId}
+              knowledgeQueryMode={chatKnowledgeQueryMode}
+              useKnowledge={chatUseKnowledge}
+              initialSkill={activeSkill}
+              onSkillUsed={() => setActiveSkill(null)}
+              onSessionCreated={handleSessionCreated}
+              onSessionAvailable={handleSessionAvailable}
+              onSessionRefreshed={handleRefreshSession}
+            />
           </div>
         )}
         {activeView === 'uml' ? null : activeView === 'tasks' ? (
@@ -130,28 +162,14 @@ function App() {
         ) : activeView === 'reports' ? (
           <DailyReportPage currentSessionId={currentSessionId} />
         ) : activeView === 'skills' ? (
-          <SkillsPage onNavigate={setActiveView} onActivateSkill={(skill) => { handleNewChat(); setActiveSkill(skill); }} />
+          <SkillsPage onNavigate={setActiveView} onActivateSkill={(skill) => { handleNewChatWithRuntime(); setActiveSkill(skill); }} />
         ) : activeView === 'mcp' ? (
           <McpPage />
         ) : activeView === 'automation' || activeView === 'radar' ? (
           <AutomationPage />
         ) : activeView === 'aihot' ? (
           <AihotDailyPage />
-        ) : (
-          <><AssistantChat
-            key={currentSessionId || "__new__"}
-            sessionId={currentSessionId}
-            sessionModelProfileId={sessions.find((item) => item.id === currentSessionId)?.model_profile_id}
-            messages={messages}
-            knowledgeCollectionId={chatKnowledgeCollectionId}
-            knowledgeQueryMode={chatKnowledgeQueryMode}
-            useKnowledge={chatUseKnowledge}
-            initialSkill={activeSkill}
-            onSkillUsed={() => setActiveSkill(null)}
-            onSessionCreated={handleSessionCreated}
-            onSessionRefreshed={handleRefreshSession}
-          /></>
-        )}
+        ) : null}
       </main>
 
       {toast && <div className="copy-toast show">{toast}</div>}

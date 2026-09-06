@@ -11,7 +11,6 @@ import { StreamingCursor } from "@/components/assistant-ui/streaming-cursor";
 import { PromptPreviewControls } from "@/components/assistant-ui/prompt-preview-controls";
 import { ActiveSkillChip, SkillPicker } from "@/components/assistant-ui/skill-picker";
 import { CAPABILITY_MODE_KEY, CAPABILITY_MODE_LABELS, nextCapabilityMode, readCapabilityMode } from "@/lib/capability-mode";
-import { Suggestions } from "@/components/assistant-ui/suggestions";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { useChatAutoFollow } from "@/components/assistant-ui/use-chat-auto-follow";
 import { optimizePrompt } from "@/api/prompt";
@@ -43,8 +42,11 @@ import {
   SquareIcon,
   WandSparklesIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FC } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FC } from "react";
 import { useIrisChat } from "@/components/assistant-ui/iris-chat-context";
+
+import irisWelcomeLogo from "@/assets/iris-welcome-logo.png";
+import "./iris-welcome-brand.css";
 
 type PromptOptimizerNotice = { message: string; hasError: boolean } | null;
 
@@ -108,7 +110,22 @@ const ThreadWelcome: FC<{ optimizerNotice: PromptOptimizerNotice; onOptimizerNot
   return (
     <div className="aui-thread-welcome-root iris-chat-welcome mx-auto flex min-h-[70dvh] w-full max-w-(--thread-max-width) grow flex-col justify-center pb-[10dvh] sm:pb-[6dvh]">
       <div className="aui-thread-welcome-center flex w-full flex-col gap-6">
-        <div className="aui-thread-welcome-message flex flex-col px-1 sm:px-4">
+        <div className="aui-thread-welcome-message iris-welcome-brand flex flex-col px-1 sm:px-4">
+          <div
+            className="iris-welcome-brand-art"
+            style={{ "--iris-brand-image": `url("${irisWelcomeLogo}")` } as CSSProperties}
+          >
+            <img
+              className="iris-welcome-brand-image"
+              src={irisWelcomeLogo}
+              alt="Iris 女神品牌标志"
+              width={1983}
+              height={793}
+              decoding="async"
+              fetchPriority="high"
+              draggable={false}
+            />
+          </div>
           <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in font-semibold text-2xl duration-200">
             有什么我可以帮你？
           </h1>
@@ -136,7 +153,6 @@ const Composer: FC<{ optimizerNotice: PromptOptimizerNotice; onOptimizerNoticeCh
   }, [runtime]);
   return (
     <ComposerPrimitive.Root className="aui-composer-root iris-prompt-input relative flex w-full flex-col">
-      <ComposerSuggestions />
       <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone iris-prompt-dropzone flex w-full flex-col rounded-2xl border border-input bg-background outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
         <div className="iris-prompt-header"><ComposerAttachments /><ActiveSkillChip /></div>
         <div className="iris-prompt-body"><ImeSafeComposerInput /></div>
@@ -224,11 +240,6 @@ const ImeSafeComposerInput: FC = () => {
   );
 };
 
-const ComposerSuggestions: FC = () => {
-  const runtime = useComposerRuntime();
-  return <Suggestions items={["分析这个项目", "帮我定位问题", "运行项目测试"]} onSelect={(value) => runtime.setText(value)} />;
-};
-
 const PromptOptimizer: FC<{ notice: PromptOptimizerNotice; onNoticeChange: (notice: PromptOptimizerNotice) => void }> = ({ notice, onNoticeChange }) => {
   const runtime = useComposerRuntime();
   const text = useComposer((state) => state.text);
@@ -304,8 +315,8 @@ const ComposerAction: FC = () => {
 const MessageError: FC = () => {
   return (
     <MessagePrimitive.Error>
-      <ErrorPrimitive.Root className="aui-message-error-root mt-2 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm dark:bg-destructive/5 dark:text-red-200">
-        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
+      <ErrorPrimitive.Root role="alert" className="aui-message-error-root mt-2 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm dark:bg-destructive/5 dark:text-red-200">
+        <ErrorPrimitive.Message className="aui-message-error-message" />
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
   );

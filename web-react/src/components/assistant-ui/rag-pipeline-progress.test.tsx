@@ -21,3 +21,10 @@ describe("RagPipelineProgress", () => {
     expect(screen.getByLabelText("生成回答进行中")).toBeInTheDocument();
   });
 });
+
+
+it("labels a failed retrieval stage as failed instead of completed", () => {
+  render(<RagPipelineProgress stages={[{ stage: "generation", status: "failed", detail: {} }]} />);
+  expect(screen.getByLabelText("生成回答失败")).toHaveTextContent("未完成");
+  expect(screen.queryByLabelText("生成回答进行中")).not.toBeInTheDocument();
+});

@@ -187,7 +187,7 @@ class McpCenterService:
         while current is not None:
             if isinstance(current, FileNotFoundError):
                 return "startup_failed"
-            if isinstance(current, TimeoutError):
+            if isinstance(current, (TimeoutError, httpx.TimeoutException)):
                 return "timeout"
             if str(current) == "MCP tool returned an error":
                 return "tool_error"
@@ -323,10 +323,15 @@ class McpCenterService:
         if session.session_id:
             headers["Mcp-Session-Id"] = session.session_id
         try:
-            response = session.client.post(server.url, json={"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}, headers=headers)
-            response.raise_for_status()
-            session.session_id = response.headers.get("mcp-session-id", session.session_id)
-            payload: Any = response.json() if "text/event-stream" not in response.headers.get("content-type", "") else self._sse_payload(response.text)
+            deadline = time.monotonic() + server.timeout_seconds
+            with session.client.stream("POST", server.url, json={"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}, headers=headers) as response:
+                response.raise_for_status()
+                session.session_id = response.headers.get("mcp-session-id", session.session_id)
+                if "text/event-stream" in response.headers.get("content-type", ""):
+                    payload = self._read_sse_response(response, request_id, deadline)
+                else:
+                    response.read()
+                    payload = response.json()
             if not isinstance(payload, dict) or payload.get("id") != request_id or "error" in payload:
                 raise ValueError("MCP returned an invalid response")
         except (httpx.HTTPError, ValueError, json.JSONDecodeError) as exc:
@@ -334,6 +339,21 @@ class McpCenterService:
             raise ValueError("MCP HTTP request failed") from exc
         session.next_request_id += 1
         return payload
+
+    @staticmethod
+    def _read_sse_response(response: httpx.Response, expected_id: int, deadline: float) -> dict[str, object]:
+        data: list[str] = []
+        for line in response.iter_lines():
+            if time.monotonic() >= deadline:
+                raise httpx.ReadTimeout("MCP response deadline exceeded")
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                payload = json.loads("\n".join(data))
+                data.clear()
+                if isinstance(payload, dict) and payload.get("id") == expected_id:
+                    return payload
+        raise ValueError("MCP stream ended without a matching response")
 
     @staticmethod
     def _sse_payload(text: str) -> dict[str, object]:
@@ -387,14 +407,25 @@ class McpCenterService:
     @staticmethod
     def _read_response(process: subprocess.Popen[str], expected_id: int, timeout_seconds: int) -> dict[str, object]:
         assert process.stdout is not None
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        deadline = time.monotonic() + timeout_seconds
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="iris-mcp-read")
+        try:
             while True:
-                line = pool.submit(process.stdout.readline).result(timeout=timeout_seconds)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("MCP response deadline exceeded")
+                line = pool.submit(process.stdout.readline).result(timeout=remaining)
                 if not line: raise ValueError("MCP process ended")
                 message = json.loads(line)
+                if not isinstance(message, dict):
+                    raise ValueError("MCP returned an invalid response")
                 if message.get("id") == expected_id:
                     if "error" in message: raise ValueError("MCP returned an error")
                     return message
+        finally:
+            # The caller terminates the session on failure, releasing readline.
+            # Waiting here would prevent it from ever reaching that cleanup.
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def _load(self) -> dict[str, McpServer]:
         if not self.settings_file.is_file():

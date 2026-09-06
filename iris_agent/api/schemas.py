@@ -206,6 +206,10 @@ class KnowledgeCollectionRetrievalConfigUpdateRequest(BaseModel):
     candidate_multiplier: int | None = Field(default=None, ge=1, le=10)
     minimum_relevance_score: float | None = Field(default=None, ge=0, le=1)
     mmr_relevance_weight: float | None = Field(default=None, ge=0, le=1)
+    abstention_enabled: bool | None = None
+    answer_threshold: float | None = Field(default=None, ge=0, le=1)
+    ambiguity_gap: float | None = Field(default=None, ge=0, le=1)
+    min_evidence_count: int | None = Field(default=None, ge=1, le=10)
 
     @model_validator(mode="after")
     def require_retrieval_config_value(self):

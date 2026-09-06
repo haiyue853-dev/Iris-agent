@@ -12,17 +12,21 @@ from uuid import uuid4
 _COLLECTION_ID = re.compile(r"^collection-[0-9a-f]{32}$|^collection-general$")
 _RETRIEVAL_CONFIG_FIELDS = frozenset({
     "top_k", "candidate_multiplier", "minimum_relevance_score", "mmr_relevance_weight",
+    "abstention_enabled", "answer_threshold", "ambiguity_gap", "min_evidence_count",
 })
 
 
-def normalise_retrieval_config(config: Mapping[str, object] | None) -> dict[str, int | float]:
+def normalise_retrieval_config(config: Mapping[str, object] | None) -> dict[str, int | float | bool]:
     if config is None:
         return {}
     if not isinstance(config, Mapping) or not set(config).issubset(_RETRIEVAL_CONFIG_FIELDS):
         raise ValueError("invalid knowledge collection retrieval config")
-    normalised: dict[str, int | float] = {}
+    normalised: dict[str, int | float | bool] = {}
     for key, value in config.items():
-        if key in {"top_k", "candidate_multiplier"}:
+        if key == "abstention_enabled":
+            if not isinstance(value, bool):
+                raise ValueError("invalid abstention_enabled")
+        elif key in {"top_k", "candidate_multiplier", "min_evidence_count"}:
             if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= (20 if key == "top_k" else 10):
                 raise ValueError(f"invalid {key}")
         elif not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not 0 <= value <= 1:
@@ -37,7 +41,7 @@ class KnowledgeCollection:
     name: str
     description: str | None
     created_at: float
-    retrieval_config: dict[str, int | float] = field(default_factory=dict)
+    retrieval_config: dict[str, int | float | bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not _COLLECTION_ID.fullmatch(self.id):

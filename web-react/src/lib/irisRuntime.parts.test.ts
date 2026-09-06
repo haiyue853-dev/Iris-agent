@@ -83,10 +83,18 @@ describe("tool part grouping", () => {
 
     const cancelledGroup = groupToolParts(parts, true, priorResult);
 
-    expect(cancelledGroup[0].result).toBe(priorResult);
+    expect(cancelledGroup[0].result).not.toBe(priorResult);
     expect(cancelledGroup[0]).toMatchObject({
       result: { items: [{ callId: "c1", state: "cancelled" }] },
     });
+  });
+
+  it("does not mutate a frozen tool group result during a later stream update", () => {
+    const priorResult = Object.freeze({ __irisKind: "tool-group" as const, items: [] });
+
+    expect(() => groupToolParts([
+      { type: "tool-call", toolCallId: "c1", toolName: "delegate_tasks", args: {}, argsText: "{}" },
+    ], false, priorResult)).not.toThrow();
   });
 });
 

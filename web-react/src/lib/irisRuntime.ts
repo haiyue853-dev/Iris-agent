@@ -7,7 +7,7 @@ import type {
   ToolCallMessagePart,
 } from "@assistant-ui/react";
 import type { AgentEvent, Message } from "../types";
-import { streamChat, streamToolApproval } from "../api/chat";
+import { formatChatError, streamChat, streamToolApproval } from "../api/chat";
 import type { Toolset } from "./capability-mode";
 import { cancelTask } from "../api/tasks";
 
@@ -168,8 +168,9 @@ export function groupToolParts(parts: ToolCallMessagePart[], cancelled = false, 
       result: part.result,
       state: part.isError ? "failed" : part.result === undefined ? (cancelled ? "cancelled" : "running") : "completed",
     }));
-  const result = previousResult ?? { __irisKind: "tool-group" as const, items };
-  result.items = items;
+  const result = previousResult
+    ? { ...previousResult, items }
+    : { __irisKind: "tool-group" as const, items };
 
   return [{
     type: "tool-call",
@@ -199,7 +200,7 @@ export type IrisAdapterDeps = {
   enqueue: (event: AgentEvent) => void;
   queue: IrisEventQueue;
   registerController: (controller: IrisAdapterController) => void;
-  onSessionCreated?: (sessionId: string) => void;
+  onSessionCreated?: (sessionId: string, failure?: string) => void;
   onEvent?: (event: AgentEvent) => void;
   getModelProfileId?: () => string | null;
   onRunningChange?: (running: boolean) => void;
@@ -263,7 +264,14 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       if (!text.trim()) return;
       const regenerateFromMessageId = regenerationMessageId(messages, runConfig);
 
-      const sessionId = await deps.ensureSession(text);
+      let sessionId: string;
+      try {
+        sessionId = await deps.ensureSession(text);
+      } catch (error) {
+        const message = formatChatError(error);
+        yield { content: [], status: { type: "incomplete", reason: "error", error: message } };
+        return;
+      }
       deps.onRunningChange?.(true);
       const toolsets = deps.getToolsets?.();
       const skillId = deps.getSkillId?.();
@@ -286,17 +294,19 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
 
       const requestCancellation = () => {
         cancelRequested = true;
+        transportAbort.abort();
         if (renderedToolGroup) groupToolParts([...toolParts.values()], true, renderedToolGroup);
         if (!taskId || cancelPromise) return cancelPromise;
         cancelPromise = cancelTask(taskId)
           .then(() => undefined)
-          .catch(() => undefined)
-          .finally(() => transportAbort.abort());
+          .catch(() => undefined);
         return cancelPromise;
       };
       const onAbort = () => { void requestCancellation(); };
       abortSignal.addEventListener("abort", onAbort, { once: true });
+      let streamHasTerminalEvent = false;
       const enqueueEvent = (event: AgentEvent) => {
+        if (["message_completed", "error", "tool_approval_requested"].includes(event.type)) streamHasTerminalEvent = true;
         if (event.type === "task_started") {
           taskId = event.data.task_id;
           if (cancelRequested) void requestCancellation();
@@ -425,13 +435,18 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
               ? event.data.follow_up_suggestions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
               : [];
             modelMetrics = event.data.metrics;
-            ragStages = ragStages.map((item) => item.stage === "generation" ? { ...item, status: "completed" } : item);
+            if (!textAccum.trim() && toolParts.size === 0) {
+              errored = true;
+              errorMessage = "模型未返回有效内容，请检查模型配置后重试。";
+            }
+            ragStages = ragStages.map((item) => item.stage === "generation" ? { ...item, status: errored ? "failed" : "completed" } : item);
             if (skillId) deps.onSkillUsed?.();
             break;
           case "error":
             awaitingFirstResponse = false;
             errored = true;
-            errorMessage = event.data.message || "生成失败，请稍后重试。";
+            errorMessage = formatChatError(event.data.message || "生成失败，请稍后重试。", event.data.code);
+            ragStages = ragStages.map((item) => item.status === "running" ? { ...item, status: "failed" } : item);
             break;
           default:
             break;
@@ -447,9 +462,13 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       });
 
       // Original stream: yields up to `tool_approval_requested`, then ends.
-      const streamPromise = streamChat(sessionId, text, transportAbort.signal, enqueueEvent, [], deps.getKnowledgeCollectionId?.(), deps.getKnowledgeQueryMode?.() || "mix", deps.getUseKnowledge?.() || false, regenerateFromMessageId, deps.getResponseMode?.() || "fast", toolsets, skillId).catch((err) => {
+      const streamPromise = streamChat(sessionId, text, transportAbort.signal, enqueueEvent, [], deps.getKnowledgeCollectionId?.(), deps.getKnowledgeQueryMode?.() || "mix", deps.getUseKnowledge?.() || false, regenerateFromMessageId, deps.getResponseMode?.() || "fast", toolsets, skillId).then(() => {
+        if (!streamHasTerminalEvent && !abortSignal.aborted && !transportAbort.signal.aborted) {
+          enqueueEvent({ type: "error", data: { code: "stream_incomplete", message: "响应中断，未收到完整回复，请重试。" } });
+        }
+      }).catch((err) => {
         if ((err as Error)?.name !== "AbortError") {
-          deps.enqueue({ type: "error", data: { code: "stream_error", message: String(err) } });
+          enqueueEvent({ type: "error", data: { code: "stream_error", message: formatChatError(err) } });
         }
       });
 
@@ -474,19 +493,20 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           errored = true;
           errorMessage = String(err);
           yield {
-            content: buildContent(false, `生成失败：${errorMessage}`),
+            content: buildContent(),
             status: { type: "incomplete", reason: "error", error: String(err) },
           };
           return;
         }
       } finally {
-        await streamPromise;
-        if (cancelPromise) await cancelPromise;
+        if (!cancelRequested && !abortSignal.aborted) await streamPromise;
+        if (cancelPromise && !abortSignal.aborted) await cancelPromise;
         abortSignal.removeEventListener("abort", onAbort);
         deps.onRunningChange?.(false);
       }
 
-      deps.onSessionCreated?.(sessionId);
+      if (errored) deps.onSessionCreated?.(sessionId, errorMessage);
+      else deps.onSessionCreated?.(sessionId);
       if (cancelled || cancelRequested) {
         yield {
           content: buildContent(true, "已停止生成。"),
@@ -495,7 +515,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
         return;
       }
       yield {
-        content: buildContent(false, errored ? `生成失败：${errorMessage || "请稍后重试。"}` : ""),
+        content: buildContent(),
         status: errored
           ? { type: "incomplete", reason: "error", error: errorMessage || "生成失败，请稍后重试。" }
           : { type: "complete", reason: "stop" },
@@ -557,6 +577,9 @@ export function toThreadMessages(history: Message[]): ThreadMessageLike[] {
         role: role as "user" | "assistant",
         content: m.role === "assistant" ? groupSourceParts(content) : content,
         id: m.id || `${m.role}-${i}`,
+        ...(m.role === "assistant" && m.error
+          ? { status: { type: "incomplete", reason: "error", error: m.error } }
+          : {}),
       } as ThreadMessageLike);
   });
   return result;

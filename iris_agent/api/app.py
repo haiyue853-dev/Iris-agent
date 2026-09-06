@@ -325,6 +325,7 @@ def create_app(
     approval_tool_names: dict[tuple[str, str], str] = {}
     tool_started_at: dict[tuple[str, str], float] = {}
     processing_approvals: set[tuple[str, str]] = set()
+    completed_approvals: dict[tuple[str, str], float] = {}
     approval_lock = threading.Lock()
 
     def clear_approval(session_id: str, call_id: str) -> None:
@@ -464,10 +465,13 @@ def create_app(
                         elif event.type == "tool_approval_requested":
                             call_id = str(event.data["call_id"])
                             tool_name = str(event.data["name"])
-                            task_center.approval_requested(task_id, call_id, tool_name)
+                            if task_id is not None:
+                                task_center.approval_requested(task_id, call_id, tool_name)
                             with approval_lock:
-                                approval_tasks[(request.session_id, call_id)] = task_id
+                                if task_id is not None:
+                                    approval_tasks[(request.session_id, call_id)] = task_id
                                 approval_tool_names[(request.session_id, call_id)] = tool_name
+                                completed_approvals.pop((request.session_id, call_id), None)
                         elif event.type == "tool_finished":
                             with approval_lock:
                                 started_at = tool_started_at.pop((request.session_id, str(event.data["call_id"])), None)
@@ -481,6 +485,12 @@ def create_app(
                         elif event.type == "error":
                             task_center.fail(task_id)
                             terminal = True
+                    elif event.type == "tool_approval_requested":
+                        call_id = str(event.data["call_id"])
+                        tool_name = str(event.data["name"])
+                        with approval_lock:
+                            approval_tool_names[(request.session_id, call_id)] = tool_name
+                            completed_approvals.pop((request.session_id, call_id), None)
                     yield json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
                 if task_id is not None and not terminal and task_center.get_task(task_id).status == "running":
                     task_center.fail(task_id)
@@ -514,12 +524,21 @@ def create_app(
         sessions.get(session_id)
 
         def generate():
+            key = (session_id, call_id)
             with approval_lock:
-                task_id = approval_tasks.pop((session_id, call_id), None) if task_center is not None else None
-                tool_name = approval_tool_names.pop((session_id, call_id), None)
-                already_processing = (session_id, call_id) in processing_approvals
-                if task_id is not None:
-                    processing_approvals.add((session_id, call_id))
+                cutoff = monotonic() - 300
+                for completed_key, completed_at in list(completed_approvals.items()):
+                    if completed_at < cutoff:
+                        completed_approvals.pop(completed_key, None)
+                task_id = approval_tasks.get(key) if task_center is not None else None
+                tool_name = approval_tool_names.get(key)
+                already_processing = key in processing_approvals
+                already_completed = key in completed_approvals
+                known_approval = task_id is not None or tool_name is not None
+                if not already_processing and known_approval:
+                    processing_approvals.add(key)
+            if already_processing or already_completed:
+                return
             terminal = False
             try:
                 if task_center is not None and task_id is None:
@@ -565,7 +584,10 @@ def create_app(
                 if task_id is not None and not terminal and task_center.get_task(task_id).status == "running":
                     task_center.fail(task_id)
                     terminal = True
-                clear_approval(session_id, call_id)
+                if known_approval:
+                    with approval_lock:
+                        completed_approvals[key] = monotonic()
+                    clear_approval(session_id, call_id)
             except GeneratorExit:
                 if task_id is not None and not terminal:
                     task_center.stop(task_id)
@@ -583,7 +605,7 @@ def create_app(
                 logger.exception("Tool approval handling failed")
                 yield json.dumps({"type": "error", "data": {"code": "internal_error", "message": "Internal server error"}}, ensure_ascii=False) + "\n"
             finally:
-                if task_id is not None:
+                if known_approval:
                     clear_approval(session_id, call_id)
 
         return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

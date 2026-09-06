@@ -12,18 +12,19 @@ import {
   type IrisAdapterController,
 } from "@/lib/irisRuntime";
 import type { AgentEvent, Message } from "@/types";
-import { createSession, setSessionModelProfile, streamChat } from "@/api/chat";
+import { createSession, formatChatError, setSessionModelProfile, streamChat } from "@/api/chat";
 import { getDelegation } from "@/api/delegations";
 import { fetchSettingsProfiles } from "@/api/settings";
 import { fetchSkills } from "@/api/skills";
 import { readCapabilityMode, readOnlineSearchEnabled, toolsetsForMode, withOnlineSearch } from "@/lib/capability-mode";
-import type { SkillInfo } from "@/types";
+import type { Session, SkillInfo } from "@/types";
 
 type AssistantChatProps = {
   sessionId: string;
   messages: Message[];
   onEvent?: (event: AgentEvent) => void;
-  onSessionCreated?: (sessionId: string) => void;
+  onSessionCreated?: (sessionId: string, failure?: string) => void;
+  onSessionAvailable?: (session: Session, initialMessage?: string) => void;
   onSessionRefreshed?: (sessionId: string) => Promise<Message[] | null>;
   knowledgeCollectionId?: string;
   knowledgeQueryMode?: "precise" | "global" | "mix";
@@ -39,6 +40,7 @@ export function AssistantChat({
   messages,
   onEvent,
   onSessionCreated,
+  onSessionAvailable,
   onSessionRefreshed,
   knowledgeCollectionId,
   knowledgeQueryMode = "mix",
@@ -128,6 +130,7 @@ export function AssistantChat({
           if (sessionIdRef.current) return sessionIdRef.current;
           const session = await createSession(text.slice(0, 30) || "新会话", selectedModelProfileId);
           sessionIdRef.current = session.id;
+          onSessionAvailable?.(session, text);
           return session.id;
         },
         enqueue,
@@ -145,6 +148,7 @@ export function AssistantChat({
       queue,
       enqueue,
       onSessionCreated,
+      onSessionAvailable,
       knowledgeCollectionId,
       knowledgeQueryMode,
       useKnowledge,
@@ -184,11 +188,19 @@ export function AssistantChat({
       const toolsets = activeSkill?.allowed_toolsets?.length
         ? withOnlineSearch(activeSkill.allowed_toolsets, readOnlineSearchEnabled())
         : toolsetsForMode(readCapabilityMode(), readOnlineSearchEnabled());
+      let failure = "";
+      let completed = false;
       await streamChat(
         activeSessionId,
         sourceMessage.content,
         new AbortController().signal,
-        () => undefined,
+        (event) => {
+          if (event.type === "error") failure = formatChatError(event.data.message, event.data.code);
+          if (event.type === "message_completed") {
+            completed = true;
+            if (!event.data.content?.trim()) failure = "模型未返回有效内容，请检查模型配置后重试。";
+          }
+        },
         sourceMessage.attachment_ids ?? [],
         knowledgeCollectionId || undefined,
         knowledgeQueryMode,
@@ -198,8 +210,16 @@ export function AssistantChat({
         toolsets,
         activeSkill?.id,
       );
+      if (failure) throw new Error(failure);
+      if (!completed) throw new Error("响应中断，未收到完整回复，请重试。");
       const refreshedMessages = await onSessionRefreshed?.(activeSessionId);
       if (refreshedMessages) runtime.thread.reset(toThreadMessages(refreshedMessages));
+    } catch (error) {
+      const history = messages.slice(0, messages.indexOf(sourceMessage) + 1);
+      runtime.thread.reset(toThreadMessages([
+        ...history,
+        { role: "assistant", content: "", error: formatChatError(error) },
+      ]));
     } finally {
       setIsRegenerating(false);
     }

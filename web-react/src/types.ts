@@ -33,6 +33,7 @@ export type Message = {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  error?: string;
   tool_call_id?: string;
   name?: string;
   reasoning?: string;

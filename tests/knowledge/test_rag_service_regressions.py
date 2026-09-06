@@ -206,6 +206,108 @@ def test_search_diversifies_near_duplicate_results(tmp_path):
         service.close()
 
 
+def test_search_decision_rejects_when_no_evidence_is_retrieved(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        result = service.search_with_decision("知识库中不存在的问题", collection_id="collection-general")
+
+        assert result["decision"]["status"] == "no_answer"
+        assert result["decision"]["confidence"] == 1.0
+        assert result["hits"] == []
+    finally:
+        service.close()
+
+
+def test_search_decision_marks_close_low_confidence_results_as_ambiguous(tmp_path):
+    service = make_service(tmp_path)
+    service.search = lambda query, limit=None, collection_id=None: [
+        RagSearchHit("document-1", "chunk-1", "资料一", "候选答案一", None, 0.61, routes=("vector", "reranker")),
+        RagSearchHit("document-2", "chunk-2", "资料二", "候选答案二", None, 0.57, routes=("vector", "reranker")),
+    ]
+    try:
+        service.update_collection_retrieval_config("collection-general", {
+            "answer_threshold": 0.55,
+            "ambiguity_gap": 0.08,
+        })
+
+        result = service.search_with_decision("存在两个接近答案的问题", collection_id="collection-general")
+
+        assert result["decision"]["status"] == "ambiguous"
+        assert result["decision"]["top_score"] == 0.61
+        assert result["decision"]["score_gap"] == 0.04
+    finally:
+        service.close()
+
+
+def test_search_decision_accepts_strong_evidence(tmp_path):
+    service = make_service(tmp_path)
+    service.search = lambda query, limit=None, collection_id=None: [
+        RagSearchHit("document-1", "chunk-1", "目标资料", "明确答案", None, 0.86, routes=("keyword", "vector", "reranker")),
+        RagSearchHit("document-2", "chunk-2", "干扰资料", "其他内容", None, 0.41, routes=("keyword",)),
+    ]
+    try:
+        result = service.search_with_decision("明确问题", collection_id="collection-general")
+
+        assert result["decision"]["status"] == "answerable"
+        assert result["decision"]["confidence"] == 0.86
+        assert result["decision"]["route_count"] == 3
+        assert len(result["hits"]) == 2
+    finally:
+        service.close()
+
+
+def test_search_decision_counts_only_evidence_above_the_threshold(tmp_path):
+    service = make_service(tmp_path)
+    service.search = lambda *args, **kwargs: [
+        RagSearchHit("d1", "c1", "可靠资料", "答案", None, 0.9),
+        RagSearchHit("d2", "c2", "无关资料", "噪声", None, 0.1),
+    ]
+    try:
+        service.update_collection_retrieval_config("collection-general", {"min_evidence_count": 2})
+        result = service.search_with_decision("问题", collection_id="collection-general")
+        assert result["decision"]["status"] == "no_answer"
+        assert result["decision"]["reason"] == "有效证据数量不足"
+    finally:
+        service.close()
+
+
+def test_no_answer_annotation_is_valid_without_positive_chunk_labels(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        validation = service.validate_evaluation_cases([{"question": "没有答案的问题", "expected_answerable": False}])
+        assert validation["summary"]["annotated"] == 1
+        assert validation["summary"]["empty_annotations"] == 0
+    finally:
+        service.close()
+
+
+def test_knowledge_tool_does_not_return_rejected_evidence(tmp_path):
+    from iris_agent.tools.builtin.knowledge_tools import build_search_knowledge_tool
+    service = make_service(tmp_path)
+    service.search = lambda *args, **kwargs: [RagSearchHit("d1", "c1", "弱相关", "不能用于回答的内容", None, 0.1)]
+    try:
+        result = build_search_knowledge_tool(service, "collection-general").invoke({"query": "问题"})
+        assert result.ok
+        assert result.value["hits"] == []
+        assert result.value["decision"]["status"] == "no_answer"
+    finally:
+        service.close()
+
+
+def test_ambiguous_context_requests_clarification_without_citations(tmp_path):
+    service = make_service(tmp_path)
+    service.search = lambda *args, **kwargs: [
+        RagSearchHit("d1", "c1", "方案一", "描述一", None, 0.6),
+        RagSearchHit("d2", "c2", "方案二", "描述二", None, 0.58),
+    ]
+    try:
+        context, citations = service.context_for("哪个方案", "collection-general", "precise")
+        assert "补充时间、对象或业务范围" in context
+        assert citations == []
+    finally:
+        service.close()
+
+
 def test_collection_retrieval_config_overrides_default_top_k(tmp_path):
     service = make_service(tmp_path, chunk_target_chars=1000, retrieval_limit=5)
     try:
@@ -386,6 +488,38 @@ def test_collection_evaluation_computes_chunk_level_metrics_at_requested_k(tmp_p
         assert evaluation["metrics"]["ndcg"] == {"1": 0.0, "3": 0.693}
         assert evaluation["metrics"]["mrr"] == 0.5
         assert evaluation["results"][0]["relevant_chunk_ids"] == ["chunk-1", "chunk-2"]
+    finally:
+        service.close()
+
+
+def test_collection_evaluation_measures_false_answers_and_false_refusals(tmp_path):
+    service = make_service(tmp_path)
+    outcomes = {
+        "库外问题": [RagSearchHit("d1", "c1", "弱相关", "无关内容", None, 0.2, routes=("vector",))],
+        "明确问题": [RagSearchHit("d2", "c2", "正确资料", "明确答案", None, 0.9, routes=("keyword", "vector", "reranker"))],
+        "模糊问题": [
+            RagSearchHit("d3", "c3", "候选一", "答案一", None, 0.61, routes=("vector", "reranker")),
+            RagSearchHit("d4", "c4", "候选二", "答案二", None, 0.58, routes=("vector", "reranker")),
+        ],
+    }
+    service.search = lambda query, limit=None, collection_id=None: outcomes[query]
+    try:
+        evaluation = service.evaluate_queries([], "collection-general", [
+            {"question": "库外问题", "expected_answerable": False},
+            {"question": "明确问题", "expected_answerable": True},
+            {"question": "模糊问题", "expected_answerable": True},
+        ])
+
+        assert evaluation["answerability"] == {
+            "total": 3,
+            "expected_answerable": 2,
+            "expected_no_answer": 1,
+            "accuracy": 0.667,
+            "refusal_accuracy": 1.0,
+            "false_answer_rate": 0.0,
+            "false_refusal_rate": 0.5,
+        }
+        assert [item["decision"]["status"] for item in evaluation["results"]] == ["no_answer", "answerable", "ambiguous"]
     finally:
         service.close()
 
@@ -703,13 +837,17 @@ def test_context_applies_relevance_threshold_without_discarding_normal_hits(tmp_
     strict = make_service(tmp_path, minimum_relevance_score=0.9)
     try:
         strict.add_text("苹果", "苹果是一种水果")
-        assert strict.context_for("苹果") == ("", [])
+        context, citations = strict.context_for("苹果")
+        assert "没有足够证据" in context
+        assert "不要依据常识补充答案" in context
+        assert citations == []
     finally:
         strict.close()
 
     normal_path = tmp_path / "normal"
     normal = make_service(normal_path, minimum_relevance_score=0.2)
     try:
+        normal.update_collection_retrieval_config("collection-general", {"answer_threshold": 0.2})
         normal.add_text("苹果", "苹果是一种水果")
         context, citations = normal.context_for("苹果")
         assert "苹果是一种水果" in context

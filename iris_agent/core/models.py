@@ -38,6 +38,7 @@ class Message:
     prompt_content: str | None = None
     runtime_epoch: int | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
+    context_visible: bool = True
     id: str = field(default_factory=lambda: f"message_{uuid.uuid4().hex}")
 
     def __post_init__(self) -> None:
@@ -53,6 +54,8 @@ class Message:
             raise ValueError("runtime_epoch must be a positive integer or None")
         if not isinstance(self.citations, list) or any(not isinstance(item, dict) for item in self.citations):
             raise ValueError("citations must be a list of objects")
+        if not isinstance(self.context_visible, bool):
+            raise ValueError("context_visible must be a boolean")
 
     @property
     def model_content(self) -> str:

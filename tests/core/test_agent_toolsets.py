@@ -74,6 +74,8 @@ def test_ordinary_request_does_not_expose_delegation_tools(tmp_path):
     session = repo.create("test")
     service = AgentService(AgentLoop(provider, registry), repo, "system")
 
-    list(service.run(session.id, "搜索今天的 AI 新闻"))
+    # Explicit news searches now use the direct lookup path without an LLM.
+    # Use an ordinary request here so this still tests model tool visibility.
+    list(service.run(session.id, "解释一下 AI 中的注意力机制"))
 
     assert [[schema["function"]["name"] for schema in schemas] for schemas in provider.tools] == [["web_search"]]

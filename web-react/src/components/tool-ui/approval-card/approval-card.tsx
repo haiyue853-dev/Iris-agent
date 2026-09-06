@@ -36,7 +36,7 @@ function ApprovalCardReceipt({
   className,
 }: ApprovalCardReceiptProps) {
   const isApproved = choice === "approved";
-  const displayLabel = actionLabel ?? (isApproved ? "Approved" : "Denied");
+  const displayLabel = actionLabel ?? (isApproved ? "已选择是" : "已选择否");
 
   return (
     <div
@@ -54,12 +54,12 @@ function ApprovalCardReceipt({
     >
       <div
         className={cn(
-          "bg-card/60 flex w-full items-center gap-3 rounded-2xl border px-4 py-3 shadow-xs",
+          "bg-card/60 flex w-full items-center gap-3 rounded-none border px-4 py-3 shadow-xs",
         )}
       >
         <span
           className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-full bg-muted",
+            "flex size-8 shrink-0 items-center justify-center rounded-none bg-muted",
             isApproved ? "text-primary" : "text-muted-foreground",
           )}
         >
@@ -89,8 +89,8 @@ export function ApprovalCard({
   onCancel,
 }: ApprovalCardProps) {
   const resolvedVariant = variant ?? "default";
-  const resolvedConfirmLabel = confirmLabel ?? "Approve";
-  const resolvedCancelLabel = cancelLabel ?? "Deny";
+  const resolvedConfirmLabel = confirmLabel ?? "是";
+  const resolvedCancelLabel = cancelLabel ?? "否";
   const Icon = icon ? getLucideIcon(icon) : null;
 
   const handleAction = React.useCallback(
@@ -143,7 +143,7 @@ export function ApprovalCard({
       ) : (
         <article
           className={cn(
-            "flex w-full min-w-64 max-w-md flex-col gap-3",
+            "flex w-full min-w-64 max-w-md flex-col gap-3 rounded-none",
             "text-foreground",
             className,
           )}
@@ -154,12 +154,12 @@ export function ApprovalCard({
           aria-describedby={description ? `${id}-description` : undefined}
           onKeyDown={handleKeyDown}
         >
-          <div className="bg-card flex w-full flex-col gap-4 rounded-2xl border p-5 shadow-xs">
+          <div className="bg-card flex w-full flex-col gap-4 rounded-none border p-5 shadow-xs">
             <div className="flex items-start gap-3">
               {Icon && (
                 <span
                   className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-xl",
+                    "flex size-10 shrink-0 items-center justify-center rounded-none",
                     isDestructive
                       ? "bg-destructive/10 text-destructive"
                       : "bg-primary/10 text-primary",
