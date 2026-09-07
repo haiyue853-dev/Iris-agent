@@ -96,3 +96,24 @@ def test_compress_strips_tool_content_from_summary_input():
     text = provider.last_messages[1].content
     assert "topkey" not in text
     assert "read_file" in text
+
+
+def test_summary_keeps_tool_arguments_results_and_errors():
+    from iris_agent.core.models import ToolCall
+    messages = [
+        Message(role='assistant', tool_calls=[ToolCall('c', 'lookup', {'query': 'release date'})]),
+        Message(role='tool', name='lookup', tool_call_id='c', content='{"date":"2026-09-06","api_key":"hidden"}'),
+        Message(role='tool', name='command', content='{"error":"exit_1","message":"compile failed"}'),
+    ]
+    text = ContextCompressor._serialize(messages)
+    assert 'release date' in text
+    assert '2026-09-06' in text
+    assert 'compile failed' in text
+    assert 'hidden' not in text
+
+
+def test_compression_counts_large_tool_arguments_and_non_ascii_text():
+    from iris_agent.core.models import ToolCall
+    compressor = ContextCompressor(FakeProvider('summary'), trigger_tokens=100)
+    assert compressor.needs_compression([Message(role='assistant', tool_calls=[ToolCall('c', 'write', {'text': 'x' * 2000})])])
+    assert compressor.needs_compression([Message(role='user', content='中文' * 100)])

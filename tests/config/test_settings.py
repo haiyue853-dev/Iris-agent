@@ -1,5 +1,13 @@
 from pathlib import Path
 
+
+def test_tool_execution_and_output_limits_load_from_yaml(tmp_path):
+    from iris_agent.config.settings import load_settings
+    path = tmp_path / 'agent.yaml'
+    path.write_text('tools:\n  execution_timeout_seconds: 15\n  max_concurrent_executions: 3\n  result_context_chars: 1000\n  total_result_context_chars: 4000\n', encoding='utf-8')
+    tools = load_settings(path).tools
+    assert (tools.execution_timeout_seconds, tools.max_concurrent_executions, tools.result_context_chars, tools.total_result_context_chars) == (15, 3, 1000, 4000)
+
 import pytest
 
 from iris_agent.config.settings import _knowledge_path, load_settings

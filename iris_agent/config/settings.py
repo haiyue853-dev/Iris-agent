@@ -64,6 +64,16 @@ class ToolSettings:
     command_timeout_seconds: int = 60
     command_max_output_chars: int = 20_000
     allowed_commands: tuple[str, ...] = ("python", "pytest", "npm", "node", "git")
+    execution_timeout_seconds: float = 120
+    max_concurrent_executions: int = 8
+    result_context_chars: int = 20000
+    total_result_context_chars: int = 60000
+
+    def __post_init__(self):
+        if not math.isfinite(self.execution_timeout_seconds) or self.execution_timeout_seconds <= 0:
+            raise ConfigurationError('tools.execution_timeout_seconds must be positive and finite')
+        if self.max_concurrent_executions < 1 or self.result_context_chars < 512 or self.total_result_context_chars < 512:
+            raise ConfigurationError('Tool concurrency must be positive and output limits must be at least 512')
 
 
 @dataclass(slots=True)
@@ -479,7 +489,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
             max_text_chars=int(attachments.get("max_text_chars", 50_000)),
             temporary_ttl_seconds=int(attachments.get("temporary_ttl_seconds", 86_400)),
         ),
-        tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000)), command_timeout_seconds=int(tools.get("command_timeout_seconds", 60)), command_max_output_chars=int(tools.get("command_max_output_chars", 20_000)), allowed_commands=tuple(tools.get("allowed_commands", ("python", "pytest", "npm", "node", "git")))),
+        tools=ToolSettings(enabled=list(tools.get("enabled", ToolSettings().enabled)), workspace_root=Path(tools.get("workspace_root", "workspace")), max_read_chars=int(tools.get("max_read_chars", 20_000)), command_timeout_seconds=int(tools.get("command_timeout_seconds", 60)), command_max_output_chars=int(tools.get("command_max_output_chars", 20_000)), allowed_commands=tuple(tools.get("allowed_commands", ("python", "pytest", "npm", "node", "git"))), execution_timeout_seconds=float(tools.get('execution_timeout_seconds', 120)), max_concurrent_executions=int(tools.get('max_concurrent_executions', 8)), result_context_chars=int(tools.get('result_context_chars', 20000)), total_result_context_chars=int(tools.get('total_result_context_chars', 60000))),
         skills=SkillSettings(
             directory=Path(skills.get("directory", "data/skills")),
             settings_file=Path(skills.get("settings_file", str(Path(str(skills.get("directory", "data/skills"))) / "settings.json"))),

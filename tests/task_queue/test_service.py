@@ -21,6 +21,32 @@ def _wait_for(predicate, timeout: float = 2.0) -> None:
     raise AssertionError("condition was not reached before timeout")
 
 
+def test_queue_passes_cancellation_signal_to_running_agent(tmp_path):
+    started, stopped = threading.Event(), threading.Event()
+
+    class CancellableAgent:
+        def run(self, session_id, message, is_cancelled=None):
+            started.set()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if is_cancelled and is_cancelled():
+                    stopped.set()
+                    return
+                time.sleep(.01)
+            yield AgentEvent('message_completed', {})
+
+    center = TaskCenterService(tmp_path / 'tasks')
+    queue = TaskQueueService(CancellableAgent(), center, QueueRepository(tmp_path / 'queue'))
+    task = queue.submit('session_test', 'wait')
+    queue.start()
+    try:
+        assert started.wait(1)
+        queue.cancel(task.id)
+        assert stopped.wait(.3)
+    finally:
+        queue.stop()
+
+
 class ControlledAgentService:
     """A deterministic AgentService substitute that exposes worker ordering."""
 

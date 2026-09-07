@@ -15,6 +15,8 @@ from iris_agent.context_compression.compressor import ContextCompressor
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.service import ProfileService
 from iris_agent.tools.base import ToolExecutionResult
+from iris_agent.tools.execution import DEFAULT_EXECUTOR, ToolExecutor
+from iris_agent.tools.output import ToolOutputBudget
 from iris_agent.providers.base import ModelProvider
 from iris_agent.sessions.base import Session, SessionRepository
 from iris_agent.tools.capabilities import CapabilityResolver
@@ -29,11 +31,13 @@ class AgentLoop:
     # their context, adding a full model round-trip each time.
     _ONE_SHOT_LOOKUP_TOOLS = frozenset({"web_search", "search_knowledge", "recall", "current_time", "request_subagent_collaboration"})
 
-    def __init__(self, provider: ModelProvider, tools: ToolRegistry, max_tool_rounds: int = 8):
+    def __init__(self, provider: ModelProvider, tools: ToolRegistry, max_tool_rounds: int = 8, *, executor: ToolExecutor | None = None, output_budget: ToolOutputBudget | None = None):
         self._provider = provider
         self._provider_lock = threading.RLock()
         self.tools = tools
         self.max_tool_rounds = max_tool_rounds
+        self.executor = executor or DEFAULT_EXECUTOR
+        self.output_budget = output_budget or ToolOutputBudget()
 
     @property
     def provider(self) -> ModelProvider:
@@ -49,21 +53,13 @@ class AgentLoop:
 
     def execute_tool_call(self, call: ToolCall, registry: ToolRegistry, cancelled: Callable[[], bool]) -> Iterator[AgentEvent]:
         """Execute one tool and forward optional incremental progress events."""
+        if cancelled():
+            return
         if call.argument_error:
             result = ToolExecutionResult(False, error_code=call.argument_error, error_message="工具参数不是有效 JSON")
         else:
-            result = registry.invoke(call.name, call.arguments)
-            stream = getattr(result.value, "stream", None) if result.ok else None
-            if callable(stream):
-                execution = result.value
-                for progress in stream():
-                    yield AgentEvent("tool_progress", {"call_id": call.id, "name": call.name, **dict(progress)})
-                    if cancelled():
-                        cancel = getattr(execution, "cancel", None)
-                        if callable(cancel): cancel()
-                result = ToolExecutionResult(True, value=getattr(execution, "result", None))
-            elif cancelled():
-                return
+            yield from self.executor.execute(call, registry, cancelled)
+            return
         data = {"call_id": call.id, "name": call.name, "ok": result.ok}
         if result.ok: data["result"] = result.value
         else: data.update({"error_code": result.error_code, "error_message": result.error_message})
@@ -77,10 +73,11 @@ class AgentLoop:
         with context as request_provider:
             yield from self._run_with_provider(request_provider, messages, tools, is_cancelled)
 
-    def _run_with_provider(self, provider: ModelProvider, messages: list[Message], tools: ToolRegistry | None = None, is_cancelled: Callable[[], bool] | None = None) -> Iterator[AgentEvent]:
+    def _run_with_provider(self, provider: ModelProvider, messages: list[Message], tools: ToolRegistry | None = None, is_cancelled: Callable[[], bool] | None = None, *, output_scope: str | None = None) -> Iterator[AgentEvent]:
         registry = tools or self.tools
         cancelled = is_cancelled or (lambda: False)
         working = list(messages)
+        output_scope = output_scope or uuid.uuid4().hex
         tool_rounds = 0
         used_one_shot_lookups: set[str] = set()
         executed_one_shot_lookups: set[str] = set()
@@ -90,12 +87,17 @@ class AgentLoop:
         while True:
             if cancelled():
                 return
+            model_messages = self.output_budget.prepare(working, output_scope)
+            if any('read_tool_result' in message.model_content for message in model_messages) and 'read_tool_result' not in registry.names():
+                registry = registry.copy()
+                registry.register(self.output_budget.reader(output_scope, working))
             model_started_at = monotonic()
             first_token_at: float | None = None
             if tool_rounds >= self.max_tool_rounds or finalization_requested:
                 finalization_requested = True
                 if not finalization_instruction_added:
                     working.append(Message(role="system", content="工具预算已用完。只能基于已有工具结果直接给出最终结论；不得再调用工具，也不要描述过程。"))
+                    model_messages.append(working[-1])
                     finalization_instruction_added = True
                 available_tool_schemas = []
             else:
@@ -109,7 +111,7 @@ class AgentLoop:
                 if callable(stream):
                     content_parts: list[str] = []
                     tool_calls: list[ToolCall] = []
-                    for chunk in stream(working, available_tool_schemas):
+                    for chunk in stream(model_messages, available_tool_schemas):
                         if cancelled():
                             return
                         if chunk.content:
@@ -120,7 +122,7 @@ class AgentLoop:
                             tool_calls = chunk.tool_calls
                     response = ProviderResponse("".join(content_parts), tool_calls)
                 else:
-                    response = provider.complete(working, available_tool_schemas)
+                    response = provider.complete(model_messages, available_tool_schemas)
             except ProviderError:
                 fallback = self._fallback_from_tool_results(working)
                 if fallback is None:
@@ -173,7 +175,7 @@ class AgentLoop:
                     for fetch_call in fetch_batch:
                         yield AgentEvent("tool_started", {"call_id": fetch_call.id, "name": fetch_call.name, "arguments": fetch_call.arguments})
                     executor = ThreadPoolExecutor(max_workers=min(3, len(fetch_batch)), thread_name_prefix="iris-fetch")
-                    futures = [executor.submit(registry.invoke, fetch_call.name, fetch_call.arguments) for fetch_call in fetch_batch]
+                    futures = [executor.submit(lambda fc: list(self.execute_tool_call(fc, registry, cancelled)), fetch_call) for fetch_call in fetch_batch]
                     pending = set(futures)
                     while pending:
                         if cancelled():
@@ -186,14 +188,14 @@ class AgentLoop:
                     if cancelled():
                         return
                     for fetch_call, future in zip(fetch_batch, futures):
-                        result = future.result()
-                        data = {"call_id": fetch_call.id, "name": fetch_call.name, "ok": result.ok}
-                        if result.ok:
-                            data["result"] = result.value
-                        else:
-                            data.update({"error_code": result.error_code, "error_message": result.error_message})
-                        yield AgentEvent("tool_finished", data)
-                        content = json.dumps(result.value if result.ok else {"error": result.error_code, "message": result.error_message}, ensure_ascii=False)
+                        events = future.result()
+                        data = next((event.data for event in events if event.type == 'tool_finished'), None)
+                        if data is None:
+                            return
+                        if data.get('error_code') in {'tool_timeout', 'tool_executor_busy'}:
+                            finalization_requested = True
+                        yield from events
+                        content = json.dumps(data.get('result') if data['ok'] else {"error": data.get('error_code'), "message": data.get('error_message')}, ensure_ascii=False)
                         working.append(Message(role="tool", content=content, tool_call_id=fetch_call.id, name=fetch_call.name))
                     continue
                 if fetch_batch:
@@ -225,12 +227,18 @@ class AgentLoop:
                     yield tool_event
                     if tool_event.type == "tool_finished": final_data = tool_event.data
                 if final_data is None: return
+                if final_data.get('error_code') in {'tool_timeout', 'tool_executor_busy'}:
+                    finalization_requested = True
                 if call.name in self._ONE_SHOT_LOOKUP_TOOLS:
                     executed_one_shot_lookups.add(call.name)
                     finalization_requested = True
                 content = json.dumps(final_data.get("result") if final_data.get("ok") else {"error": final_data.get("error_code"), "message": final_data.get("error_message")}, ensure_ascii=False)
                 working.append(Message(role="tool", content=content, tool_call_id=call.id, name=call.name))
                 if cancelled(): return
+                if final_data.get('error_code') in {'tool_timeout', 'tool_executor_busy'}:
+                    for skipped in response.tool_calls[call_index:]:
+                        working.append(Message(role='tool', content=json.dumps({'error': 'tool_batch_stopped', 'message': '前一个工具未及时完成，后续操作未执行。'}, ensure_ascii=False), tool_call_id=skipped.id, name=skipped.name))
+                    break
 
     @staticmethod
     def _fallback_from_tool_results(messages: list[Message]) -> str | None:
@@ -655,11 +663,8 @@ class AgentService:
         call = ToolCall(f"call_{uuid.uuid4().hex}", "web_search", self._direct_lookup_arguments(registry, user_message))
         yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
         self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
-        result = registry.invoke(call.name, call.arguments)
-        finished = self._tool_finished_event(call, result)
-        yield finished
-        self._persist_tool_result(session_id, finished)
-        if cancelled():
+        result = yield from self._execute_direct_tool(session_id, call, registry, cancelled)
+        if result is None or cancelled():
             return
         if result.ok:
             content, found_citations = self._direct_lookup_text(result.value)
@@ -701,11 +706,8 @@ class AgentService:
         call = ToolCall(f"call_{uuid.uuid4().hex}", "current_time", {})
         yield AgentEvent("tool_started", {"call_id": call.id, "name": call.name, "arguments": call.arguments})
         self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
-        result = registry.invoke(call.name, call.arguments)
-        finished = self._tool_finished_event(call, result)
-        yield finished
-        self._persist_tool_result(session_id, finished)
-        if cancelled():
+        result = yield from self._execute_direct_tool(session_id, call, registry, cancelled)
+        if result is None or cancelled():
             return
         if result.ok and isinstance(result.value, dict):
             content = f"当前时间：{result.value.get('iso', '未知')}"
@@ -728,6 +730,15 @@ class AgentService:
             },
         })
 
+    def _execute_direct_tool(self, session_id, call, registry, cancelled):
+        result = None
+        for event in self.loop.execute_tool_call(call, registry, cancelled):
+            if event.type == 'tool_finished':
+                self._persist_tool_result(session_id, event)
+                result = ToolExecutionResult(event.data['ok'], event.data.get('result'), event.data.get('error_code'), event.data.get('error_message'))
+            yield event
+        return result
+
     @staticmethod
     def _direct_lookup_arguments(registry: ToolRegistry, user_message: str) -> dict:
         properties = {}
@@ -749,7 +760,7 @@ class AgentService:
     def _run_loop(self, session_id: str, messages: list[Message], registry: ToolRegistry, is_cancelled: Callable[[], bool] | None = None, citations: list[dict] | None = None, provider: ModelProvider | None = None, owned_provider: bool = False) -> Iterator[AgentEvent]:
         cancelled = is_cancelled or (lambda: False)
         turn_has_failed_tool = False
-        for event in self.loop._run_with_provider(provider or self.loop.get_provider(), messages, registry, cancelled):
+        for event in self.loop._run_with_provider(provider or self.loop.get_provider(), messages, registry, cancelled, output_scope=session_id):
             if event.type == "tool_started":
                 call = ToolCall(str(event.data["call_id"]), str(event.data["name"]), dict(event.data.get("arguments", {})))
                 self.sessions.append(session_id, Message(role="assistant", tool_calls=[call]))
@@ -798,4 +809,6 @@ class AgentService:
 
     def _persist_tool_result(self, session_id: str, event: AgentEvent) -> None:
         payload = event.data.get("result") if event.data.get("ok") else {"error": event.data.get("error_code"), "message": event.data.get("error_message")}
-        self.sessions.append(session_id, Message(role="tool", content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(event.data["call_id"]), name=str(event.data["name"]), context_visible=bool(event.data.get("ok"))))
+        message = Message(role="tool", content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(event.data["call_id"]), name=str(event.data["name"]), context_visible=bool(event.data.get("ok")))
+        message = self.loop.output_budget.prepare([message], session_id)[0]
+        self.sessions.append(session_id, message)

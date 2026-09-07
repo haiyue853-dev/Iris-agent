@@ -226,7 +226,11 @@ def _build_application(
         max_summary_chars=settings.context.max_summary_chars,
         enabled=settings.context.enabled,
     )
-    loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds)
+    from iris_agent.tools.execution import ToolExecutor
+    from iris_agent.tools.output import ToolOutputBudget
+    loop = AgentLoop(provider, registry, settings.agent.max_tool_rounds,
+        executor=ToolExecutor(settings.tools.execution_timeout_seconds, settings.tools.max_concurrent_executions),
+        output_budget=ToolOutputBudget(settings.sessions.directory.parent / 'tool_results', settings.tools.result_context_chars, settings.tools.total_result_context_chars))
     settings_profiles = SettingsProfileService(profile_store, make_provider, provider_handle.replace, provider_handle.current)
     def resolve_model_profile(profile_id: str):
         try:
@@ -284,6 +288,8 @@ def _build_application(
         default_max_rounds=settings.subagent.default_max_rounds,
         default_allowed_tools=settings.subagent.allowed_tools,
         max_parallel_tasks=settings.subagent.max_parallel_tasks,
+        executor=loop.executor,
+        output_budget=loop.output_budget,
     )
     delegation = DelegationService(subagent, DelegationRepository(settings.sessions.directory.parent / "subagent" / "delegation.sqlite3"), settings.subagent.max_parallel_tasks, sessions=sessions)
     subagent.delegation = delegation

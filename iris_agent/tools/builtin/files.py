@@ -32,8 +32,10 @@ class CommandExecution:
         self.args, self.command, self.cwd, self.timeout, self.max_output_chars, self.root = args, command, cwd, timeout, max_output_chars, root
         self.process: subprocess.Popen[str] | None = None
         self.result: dict | None = None
+        self._cancel_requested = threading.Event()
 
     def cancel(self) -> None:
+        self._cancel_requested.set()
         process = self.process
         if process is not None and process.poll() is None:
             with _command_lock: _cancelled_commands.add(id(process))
@@ -41,9 +43,13 @@ class CommandExecution:
             except OSError: pass
 
     def stream(self):
+        if self._cancel_requested.is_set():
+            return
         started = time.monotonic(); lines: Queue[str] = Queue(); timed_out = False
         process = subprocess.Popen(self.args, cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.process = process
+        if self._cancel_requested.is_set():
+            self.cancel()
         with _command_lock: _active_commands.add(process)
         def read_lines() -> None:
             if process.stdout is not None:

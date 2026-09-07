@@ -23,6 +23,8 @@ class SubagentRunner:
         default_max_rounds: int = 6,
         default_allowed_tools: list[str] | None = None,
         max_parallel_tasks: int = 5,
+        executor=None,
+        output_budget=None,
     ):
         self.provider = provider
         self.tool_subset = tool_subset
@@ -33,6 +35,8 @@ class SubagentRunner:
         self.default_max_rounds = default_max_rounds
         self.default_allowed_tools = default_allowed_tools or []
         self.max_parallel_tasks = max_parallel_tasks
+        self.executor = executor
+        self.output_budget = output_budget
 
     def run(self, request: SubagentRequest, is_cancelled: Callable[[], bool] | None = None) -> SubagentResult:
         goal = request.goal[: self.max_goal_chars]
@@ -50,7 +54,9 @@ class SubagentRunner:
             allowed = list(role.allowed_tools) if role.allowed_tools is not None else self.default_allowed_tools
         tools = self.tool_subset(allowed)
         max_rounds = request.max_rounds if request.max_rounds is not None else role.max_rounds or self.default_max_rounds
-        loop = AgentLoop(self.provider, tools, max_rounds)
+        if max_rounds <= 0:
+            return SubagentResult(ok=False, result='', rounds=0)
+        loop = AgentLoop(self.provider, tools, max_rounds, executor=self.executor, output_budget=self.output_budget)
 
         result = ""
         ok = False

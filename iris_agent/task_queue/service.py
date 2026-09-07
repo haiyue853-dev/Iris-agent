@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from inspect import signature, Parameter
 from time import monotonic
 import threading
 from typing import Protocol
@@ -237,7 +238,12 @@ class TaskQueueService:
             self.task_center.start(job.task_id)
             if job.task_id in self._cancel_requested:
                 return
-        events = self.agent_service.run(job.session_id, job.message)
+        run = self.agent_service.run
+        parameters = signature(run).parameters
+        if 'is_cancelled' in parameters or any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values()):
+            events = run(job.session_id, job.message, is_cancelled=lambda: self._is_cancelled(job.task_id))
+        else:
+            events = run(job.session_id, job.message)
         resumed_call_id: str | None = None
         while True:
             paused = False

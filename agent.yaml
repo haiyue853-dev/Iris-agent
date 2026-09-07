@@ -82,6 +82,10 @@ tools:
   workspace_root: .
   max_read_chars: 20000
   command_timeout_seconds: 60
+  execution_timeout_seconds: 120
+  max_concurrent_executions: 8
+  result_context_chars: 20000
+  total_result_context_chars: 60000
   command_max_output_chars: 20000
   allowed_commands: [python, pytest, npm, node, git]
 
