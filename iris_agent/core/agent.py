@@ -1,5 +1,6 @@
 import json
 import base64
+import logging
 import re
 import threading
 import uuid
@@ -8,9 +9,43 @@ from contextlib import nullcontext
 from collections.abc import Callable, Iterator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+_LOGGER = logging.getLogger(__name__)
+
+# ---- 意图词表 ---------------------------------------------------------------
+# 今天修掉的三个 bug（存档劫持、联网漏判、时间漏「今天」）其实是同一个根因：
+# 「用户想干什么」散落在多处用正则猜，词表各自漂移、互不一致。
+# 这里把联网相关的判定收拢到一处，写清取舍，方便一处修改、一处测试。
+
+# 联网意图：只收「检索动作词 + 网络名词」。
+# 刻意不收「最新/最近/今天」这类时间词——它们属于待办时间解析（parse_chinese_due_at），
+# 收进来会让「最近三天提醒我」这种待办语句被误判成要联网。
+_WEB_INTENT = re.compile(
+    r"百度|微博|热搜|新闻|热点|联网|外部网站|实时|上网|网上|网搜"
+    r"|搜索|搜一下|搜搜|查一下|查询|查阅"
+    r"|google|bing|duckduckgo|news|search|look\s*up",
+    re.IGNORECASE,
+)
+
+# 直连快捷路径会完全绕开模型，所以要求更严：必须有明确的检索动作词。
+_EXPLICIT_LOOKUP = re.compile(
+    r"搜索|搜一下|搜搜|查一下|查询|新闻|热点|热搜|news|search|look\s*up",
+    re.IGNORECASE,
+)
+
+# 明显指向本地存档 / 知识库的说法，不该走联网。
+_LOCAL_SOURCE = re.compile(
+    r"存档|归档|我之前保存的|之前保存的|我的笔记|我存的|我记的|知识库", re.IGNORECASE
+)
+
+# 看起来要深加工的请求，留给模型自己拆解，不要抢答。
+_DEEP_WORK = re.compile(
+    r"分析|解释|总结|比较|详细|深入|为什么|如何|核实|原文|全文|抓取|研究|对比", re.IGNORECASE
+)
+
 from iris_agent.core.errors import ProviderError, ToolApprovalNotFoundError, ValidationError
 from iris_agent.core.models import AgentEvent, Message, ProviderResponse, ToolCall
 from iris_agent.core.runtime import SessionRuntimeSnapshot
+from iris_agent.memory.auto_capture import MemoryAutoCapture
 from iris_agent.context_compression.compressor import ContextCompressor
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.service import ProfileService
@@ -79,6 +114,9 @@ class AgentLoop:
         working = list(messages)
         output_scope = output_scope or uuid.uuid4().hex
         tool_rounds = 0
+        latest_request = next((message.content for message in reversed(messages) if message.role == "user"), "")
+        research_requested = re.search(r"核实|验证|比较|对比|深入|详细|研究|原文|全文|多来源|交叉|research|verify|compare|in.depth", latest_request, re.I)
+        one_shot_tools = self._ONE_SHOT_LOOKUP_TOOLS - {"web_search"} if research_requested else self._ONE_SHOT_LOOKUP_TOOLS
         used_one_shot_lookups: set[str] = set()
         executed_one_shot_lookups: set[str] = set()
         finalization_requested = False
@@ -156,7 +194,7 @@ class AgentLoop:
                 continue
             tool_rounds += 1
             used_one_shot_lookups.update(
-                call.name for call in response.tool_calls if call.name in self._ONE_SHOT_LOOKUP_TOOLS
+                call.name for call in response.tool_calls if call.name in one_shot_tools
             )
             working.append(Message(role="assistant", content=response.content, tool_calls=response.tool_calls))
             call_index = 0
@@ -229,7 +267,7 @@ class AgentLoop:
                 if final_data is None: return
                 if final_data.get('error_code') in {'tool_timeout', 'tool_executor_busy'}:
                     finalization_requested = True
-                if call.name in self._ONE_SHOT_LOOKUP_TOOLS:
+                if call.name in one_shot_tools:
                     executed_one_shot_lookups.add(call.name)
                     finalization_requested = True
                 content = json.dumps(final_data.get("result") if final_data.get("ok") else {"error": final_data.get("error_code"), "message": final_data.get("error_message")}, ensure_ascii=False)
@@ -288,6 +326,8 @@ class AgentService:
         self.system_prompt = system_prompt
         self.memory = memory
         self.profile_service = profile_service
+        # 由 bootstrap 注入：规则粗筛 + 模型判断的自动记忆写入（见 memory/auto_capture.py）。
+        self.memory_capture: MemoryAutoCapture | None = None
         self.compressor = compressor
         self.attachment_service = attachment_service
         self.knowledge = knowledge
@@ -306,22 +346,30 @@ class AgentService:
         )
         return response.content.strip() or draft
 
-    def _ensure_runtime_snapshot(self, session: Session, registry: ToolRegistry, provider: ModelProvider | None = None) -> SessionRuntimeSnapshot:
-        if session.runtime_snapshot is not None:
-            return session.runtime_snapshot
+    def _runtime_system_messages(self) -> tuple[str, ...]:
         system_messages = [self.system_prompt]
         if self.profile_service is not None:
             profile_text = self.profile_service.render()
             if profile_text:
                 system_messages.append(profile_text)
         if self.memory is not None:
-            for memory in self.memory.inject():
-                system_messages.append(f"[记忆·{memory.category}] {memory.content}")
+            for entry in self.memory.inject():
+                system_messages.append(f"[记忆·{entry.category}] {entry.content}")
+        return tuple(system_messages)
+
+    def _ensure_runtime_snapshot(self, session: Session, registry: ToolRegistry, provider: ModelProvider | None = None) -> SessionRuntimeSnapshot:
+        # 画像与长期记忆仍留在 system 前缀里（契约见 tests/core/test_agent_memory.py 与 test_agent_profile.py），
+        # 但它们会随对话增长，所以内容一变就 bump epoch 重建。QQ 网关把 (platform, user_id) 永久映射到同一个
+        # session，若只建一次，会话建立之后写入的记忆将永远进不了上下文。
+        system_messages = self._runtime_system_messages()
+        current = session.runtime_snapshot
+        if current is not None and current.system_messages == system_messages:
+            return current
         provider = provider or self.loop.get_provider()
         session.runtime_snapshot = SessionRuntimeSnapshot.create(
-            epoch=1,
+            epoch=1 if current is None else current.epoch + 1,
             model=getattr(provider, "model", None),
-            system_messages=tuple(system_messages),
+            system_messages=system_messages,
             tool_schemas=tuple(registry.schemas()),
         )
         self.sessions.save(session)
@@ -340,7 +388,7 @@ class AgentService:
         mode_instruction = "[本轮模式] 快速模式：优先直接、简洁回答，仅在确有必要时调用工具。" if response_mode == "fast" else "[本轮模式] 思考模式：充分分析，必要时调用工具核实。"
         parts = [user_message, mode_instruction]
         if self._is_live_web_request(user_message):
-            parts.append("[联网搜索要求] 用户请求了实时或外部网络信息，必须直接调用 web_search 工具获取结果；不要调用 use_skill 代替 web_search，也不要根据历史消息声称没有联网工具。")
+            parts.append("[联网检索要求] 用户提到了实时或外部网络信息。按「检索路由」判断来源：确属外部/实时信息就调用 web_search（不要用 use_skill 代替，也不要声称自己没有联网工具）；如果用户要的其实是他自己保存的存档、笔记或过往对话，改用 search_knowledge / recall。")
         if self._is_fast_interview_collection_request(user_message):
             parts.append("[快速面经入库模式] 只能调用 collect_interview_knowledge 一次。不要调用子代理、search_knowledge、web_search、fetch_page 或 add_knowledge；工具返回后直接告知用户审核草稿已生成，不要输出过程性旁白。")
         if skill_instruction:
@@ -356,7 +404,15 @@ class AgentService:
                 if context:
                     parts.append(context)
             except Exception:
-                pass
+                # 这里吞掉异常，用户只会看到「答得不对」而没有任何线索，排查时无从下手。
+                # 完整堆栈落盘到 logs/iris.log，但仍不打断本轮：知识库拿不到就退化为模型自身知识。
+                _LOGGER.exception(
+                    "知识库上下文检索失败，本轮降级为模型知识作答"
+                    "（session=%s collection=%s mode=%s）",
+                    session_id,
+                    knowledge_collection_id,
+                    knowledge_query_mode,
+                )
         if attachment_ids and self.attachment_service is not None:
             details = []
             for attachment_id in attachment_ids:
@@ -493,6 +549,9 @@ class AgentService:
                     getattr(provider, "close", lambda: None)()
             if self.profile_service is not None:
                 self.profile_service.maybe_update(user_message)
+            # 放在回复生成之后：即便命中抽取也不会拖慢用户拿到的答复。
+            if self.memory_capture is not None:
+                self.memory_capture.capture(user_message, source_session_id=session_id)
 
     def regenerate(self, session_id: str, message_id: str, user_message: str, attachment_ids: list[str] | None = None, knowledge_collection_id: str | None = None, knowledge_query_mode: str = "mix", knowledge_enabled: bool = False, is_cancelled: Callable[[], bool] | None = None, toolsets: tuple[str, ...] | list[str] | None = None, skill_name: str | None = None, skill_instruction: str | None = None) -> Iterator[AgentEvent]:
         with self.sessions.session_lock(session_id):
@@ -594,7 +653,26 @@ class AgentService:
 
     @staticmethod
     def _is_live_web_request(message: str) -> bool:
-        return bool(re.search(r"百度|微博|热搜|新闻|热点|联网|外部网站|实时", message, re.IGNORECASE))
+        """是否值得注入联网提示。
+
+        只影响提示注入，不影响是否由模型作答；提示本身是「按检索路由判断来源」
+        而不是强制 web_search（见 _turn_prompt），所以这里可以放宽一些。
+        """
+        return bool(_WEB_INTENT.search(message))
+
+    @staticmethod
+    def _is_simple_live_web_lookup(message: str) -> bool:
+        """是否能走「搜一次就直接作答」的快捷路径。
+
+        这条路径会**完全绕开模型**，因此比 _is_live_web_request 严格得多：
+        除联网意图外，还要求明确的检索动作词，且不能指向本地存档、不能像深加工请求。
+        """
+        normalized = message.strip()
+        if not AgentService._is_live_web_request(normalized):
+            return False
+        if _LOCAL_SOURCE.search(normalized) or _DEEP_WORK.search(normalized):
+            return False
+        return bool(_EXPLICIT_LOOKUP.search(normalized))
 
     @staticmethod
     def _is_simple_live_hot_lookup(message: str) -> bool:
@@ -604,15 +682,6 @@ class AgentService:
         if not re.search(r"第一(?:条|名)?|第\s*1|top\s*1|头条", normalized):
             return False
         return bool(re.search(r"百度|微博|今天|今日|现在|当前|实时", normalized))
-
-    @staticmethod
-    def _is_simple_live_web_lookup(message: str) -> bool:
-        normalized = message.strip().lower()
-        if not AgentService._is_live_web_request(normalized):
-            return False
-        if re.search(r"分析|解释|总结|比较|详细|深入|为什么|如何|核实|原文|全文|抓取|研究|对比", normalized):
-            return False
-        return bool(re.search(r"搜索|搜一下|查询|查一下|新闻|热点|热搜|news|search", normalized))
 
     @staticmethod
     def _is_simple_current_time_request(message: str) -> bool:

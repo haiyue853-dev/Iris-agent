@@ -18,6 +18,7 @@ class Tool:
     handler: Callable[..., Any]
     requires_approval: bool = False
     approval_context: dict[str, Any] | None = None
+    timeout_seconds: float | None = None
 
     def invoke(self, arguments: dict[str, Any]) -> ToolExecutionResult:
         try:

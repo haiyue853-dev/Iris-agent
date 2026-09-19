@@ -9,4 +9,10 @@ describe('toolsetsForMode', () => {
     expect(toolsetsForMode('collaboration', false)).not.toContain('research');
     expect(toolsetsForMode('daily', true)).toContain('research');
   });
+
+  it('keeps enabled MCP tools available in every chat capability mode', () => {
+    expect(toolsetsForMode('daily', false)).toContain('mcp');
+    expect(toolsetsForMode('research', false)).toContain('mcp');
+    expect(toolsetsForMode('collaboration', true)).toContain('mcp');
+  });
 });

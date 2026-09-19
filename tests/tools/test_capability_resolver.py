@@ -5,7 +5,7 @@ from iris_agent.tools.registry import ToolRegistry
 
 def _registry() -> ToolRegistry:
     registry = ToolRegistry()
-    for name in ("recall", "read_file", "write_file", "web_search"):
+    for name in ("recall", "read_file", "write_file", "web_search", "mcp__docs__search", "mcp__github__issues"):
         registry.register(Tool(name, name, {"type": "object", "properties": {}}, lambda: None))
     return registry
 
@@ -33,3 +33,13 @@ def test_resolver_rejects_unknown_toolset():
     else:
         raise AssertionError("unknown toolset must fail")
 
+
+def test_resolver_expands_dynamic_tool_prefixes_from_the_current_registry():
+    resolver = CapabilityResolver(
+        _registry(),
+        {"safe": ("read_file",), "mcp": ("mcp__*",)},
+    )
+
+    selected = resolver.resolve(("mcp", "safe"))
+
+    assert selected.names() == ("mcp__docs__search", "mcp__github__issues", "read_file")

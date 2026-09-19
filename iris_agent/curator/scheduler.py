@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime
 
 from iris_agent.automation.service import schedule_matches
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CuratorScheduler:
@@ -55,5 +58,6 @@ class CuratorScheduler:
             try:
                 self.run_pending()
             except Exception:
-                pass
+                # 调度器是守护线程，异常若静默吞掉，表现就是「审查从来没跑过」且毫无痕迹。
+                _LOGGER.exception("Curator 周期任务失败，将在下一个周期重试")
             self._stop.wait(60)

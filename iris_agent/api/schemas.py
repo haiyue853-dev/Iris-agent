@@ -11,7 +11,7 @@ class ChatRequest(BaseModel):
     knowledge_query_mode: Literal["precise", "global", "mix"] = "mix"
     use_knowledge: bool = False
     response_mode: Literal["fast", "thinking"] = "fast"
-    toolsets: list[Literal["safe", "research", "coding", "knowledge", "skills", "delegation"]] | None = None
+    toolsets: list[Literal["safe", "research", "coding", "knowledge", "skills", "delegation", "mcp"]] | None = None
     skill_id: str | None = Field(default=None, max_length=200)
     regenerate_from_message_id: str | None = Field(default=None, max_length=100)
 

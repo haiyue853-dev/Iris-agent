@@ -244,7 +244,7 @@ def test_browser_rejects_final_private_url_and_closes(monkeypatch):
     class Page:
         url = "http://127.0.0.1/final"
         def goto(self, url, timeout): pass
-        def wait_for_load_state(self, state): pass
+        def wait_for_load_state(self, state, timeout=None): pass
         def inner_text(self, selector): return "unsafe"
     class Browser:
         def new_context(self, **kwargs):
@@ -290,7 +290,7 @@ def test_context_route_handler_is_triggered_and_blocks_cross_host(monkeypatch):
             context.handler(
                 Route(), FakeRequest("https://evil.example/redirect", navigation=True, frame=self.main_frame)
             )
-        def wait_for_load_state(self, state): pass
+        def wait_for_load_state(self, state, timeout=None): pass
         def inner_text(self, selector): return "unsafe"
     class Context:
         def route(self, pattern, handler): self.handler = handler
@@ -331,7 +331,7 @@ def test_dangerous_subresource_abort_still_returns_main_document(monkeypatch, su
         main_frame = object()
         def goto(self, url, timeout):
             context.handler(Route(), FakeRequest(subresource_url, frame=self.main_frame))
-        def wait_for_load_state(self, state): pass
+        def wait_for_load_state(self, state, timeout=None): pass
         def locator(self, selector): return TextLocator("main body")
     class Context:
         def route(self, pattern, handler): self.handler = handler
@@ -363,7 +363,7 @@ def test_browser_closes_popup_pages(monkeypatch):
     class Page:
         url = "https://example.com/"
         def goto(self, url, timeout): context.page_handler(Popup())
-        def wait_for_load_state(self, state): pass
+        def wait_for_load_state(self, state, timeout=None): pass
         def locator(self, selector): return TextLocator("safe")
     class Context:
         def route(self, pattern, handler): pass
@@ -427,7 +427,7 @@ def _run_cdp_fetch(
         def goto(self, url, timeout):
             for length in data_lengths:
                 cdp.handlers["Network.dataReceived"]({"requestId": "1", "dataLength": length})
-        def wait_for_load_state(self, state): pass
+        def wait_for_load_state(self, state, timeout=None): pass
         def locator(self, selector):
             assert selector == "body"
             return Locator()

@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { groupSourceParts, groupToolParts, toThreadMessages, type IrisToolGroupResult } from "./irisRuntime";
 
 describe("toThreadMessages rich parts", () => {
+  it("keeps incremental tool output running until completion", () => {
+    const groups = groupToolParts([{
+      type: "tool-call", toolCallId: "web", toolName: "web_search", args: {}, argsText: "{}",
+      result: { stdout: "partial" }, irisRunning: true, irisProgress: { phase: "searching", source: "tavily" },
+    }]);
+    const result = groups[0].result as IrisToolGroupResult;
+    expect(result.items[0]).toMatchObject({ state: "running", progress: { source: "tavily" } });
+  });
   it("preserves reasoning and URL sources as typed assistant parts", () => {
     const [message] = toThreadMessages([
       {
@@ -28,6 +36,16 @@ describe("toThreadMessages rich parts", () => {
   it("keeps legacy text-only messages unchanged", () => {
     const [message] = toThreadMessages([{ role: "user", content: "你好" }]);
     expect(message.content).toEqual([{ type: "text", text: "你好" }]);
+  });
+
+  it("keeps the persisted assistant message id for speech synthesis", () => {
+    const [message] = toThreadMessages([
+      { id: "message_tomori", role: "assistant", content: "你好，我是高松灯。" },
+    ]);
+
+    expect(message.metadata).toEqual({
+      custom: { serverMessageId: "message_tomori" },
+    });
   });
 
   it("renders persisted knowledge drafts as editable tool parts", () => {

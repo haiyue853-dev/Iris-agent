@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from iris_agent.gateway.napcat import NapCatError, NapCatLauncher
+from iris_agent.gateway.napcat import NapCatError, NapCatLauncher, start_napcat_if_enabled
 
 
 def test_launches_configured_napcat_once(tmp_path):
@@ -81,3 +81,38 @@ def test_launch_requires_a_configured_path(tmp_path):
         launcher.launch()
 
     assert error.value.code == "napcat_not_configured"
+
+
+def test_launch_skips_when_an_existing_napcat_is_detected(tmp_path):
+    executable = tmp_path / "launcher-user.bat"
+    executable.write_text("@echo off", encoding="utf-8")
+    launcher = NapCatLauncher(tmp_path / "napcat.json", running_probe=lambda: True)
+    launcher.save_path(str(executable))
+
+    with patch("iris_agent.gateway.napcat.subprocess.Popen") as popen:
+        result = launcher.launch()
+
+    assert result["running"] is True
+    assert result["already_running"] is True
+    popen.assert_not_called()
+
+
+def test_auto_start_launches_napcat_only_when_enabled(tmp_path):
+    launcher = Mock()
+    launcher.launch.return_value = {"running": True}
+
+    assert start_napcat_if_enabled(launcher, enabled=False) is None
+    launcher.launch.assert_not_called()
+
+    assert start_napcat_if_enabled(launcher, enabled=True) == {"running": True}
+    launcher.launch.assert_called_once_with()
+
+
+def test_auto_start_does_not_stop_iris_when_napcat_cannot_launch(caplog):
+    launcher = Mock()
+    launcher.launch.side_effect = NapCatError("napcat_not_configured", "请先配置 NapCat")
+
+    result = start_napcat_if_enabled(launcher, enabled=True)
+
+    assert result is None
+    assert "请先配置 NapCat" in caplog.text

@@ -2,6 +2,7 @@ from pathlib import Path
 import io
 import json
 import subprocess
+import threading
 
 import httpx
 
@@ -62,6 +63,20 @@ def test_mcp_server_persists_valid_environment_variables(tmp_path: Path) -> None
 
     assert updated.environment == (("REGION", "cn"), ("SEARCH_API_KEY", "secret"))
     assert McpCenterService(tmp_path / "mcp.json").get(server.id).environment == updated.environment
+
+
+def test_mcp_subprocess_env_excludes_unrelated_parent_secrets_and_keeps_explicit_values(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Search", command="python", args=("server.py",), allowed_tools=())
+    monkeypatch.setenv("PATH", "parent-path")
+    monkeypatch.setenv("IRIS_UNRELATED_PARENT_SECRET", "must-not-leak")
+    server = service.set_environment(server.id, {"PATH": "service-path", "SEARCH_API_KEY": "service-secret"})
+
+    environment = service._subprocess_env(server)
+
+    assert environment["PATH"] == "service-path"
+    assert environment["SEARCH_API_KEY"] == "service-secret"
+    assert "IRIS_UNRELATED_PARENT_SECRET" not in environment
 
 
 def test_mcp_server_persists_a_bounded_response_timeout(tmp_path: Path) -> None:
@@ -192,6 +207,74 @@ def test_two_mcp_calls_reuse_one_initialized_process(tmp_path: Path, monkeypatch
 
     assert starts == 1
     assert result == {"content": [{"type": "text", "text": "<title>Example</title>"}]}
+
+
+def test_calls_to_the_same_mcp_server_are_serialized(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    server = service.create(name="Search", command="python", args=("server.py",), allowed_tools=("search",))
+    service.set_enabled(server.id, True)
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+    results = []
+
+    def call(item, name, arguments):
+        if arguments["request"] == 1:
+            first_entered.set()
+            release_first.wait(1)
+        else:
+            second_entered.set()
+        return {"request": arguments["request"]}
+
+    monkeypatch.setattr(service, "_call", call)
+    first = threading.Thread(target=lambda: results.append(service.call_tool(server.id, "search", {"request": 1})))
+    second = threading.Thread(target=lambda: results.append(service.call_tool(server.id, "search", {"request": 2})))
+    first.start()
+    assert first_entered.wait(1)
+    second.start()
+    try:
+        assert second_entered.wait(0.1) is False
+    finally:
+        release_first.set()
+        first.join(1)
+        second.join(1)
+
+    assert sorted(result["request"] for result in results) == [1, 2]
+
+
+def test_calls_to_different_mcp_servers_can_run_in_parallel(tmp_path: Path, monkeypatch) -> None:
+    service = McpCenterService(tmp_path / "mcp.json")
+    first_server = service.create(name="First", command="python", args=("first.py",), allowed_tools=("search",))
+    second_server = service.create(name="Second", command="python", args=("second.py",), allowed_tools=("search",))
+    service.set_enabled(first_server.id, True)
+    service.set_enabled(second_server.id, True)
+    both_entered = threading.Event()
+    state_lock = threading.Lock()
+    active = 0
+
+    def call(item, name, arguments):
+        nonlocal active
+        with state_lock:
+            active += 1
+            if active == 2:
+                both_entered.set()
+        both_entered.wait(1)
+        with state_lock:
+            active -= 1
+        return {"server": item.id}
+
+    monkeypatch.setattr(service, "_call", call)
+    threads = [
+        threading.Thread(target=service.call_tool, args=(first_server.id, "search", {})),
+        threading.Thread(target=service.call_tool, args=(second_server.id, "search", {})),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(2)
+
+    assert both_entered.is_set()
+    assert all(not thread.is_alive() for thread in threads)
 
 
 def test_disabling_or_deleting_server_closes_its_live_session(tmp_path: Path, monkeypatch) -> None:

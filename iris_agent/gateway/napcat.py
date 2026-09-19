@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+import socket
 import subprocess
 import threading
+from collections.abc import Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 class NapCatError(Exception):
@@ -26,11 +32,12 @@ class NapCatLauncher:
         "launcher-user.bat",
         "launcher-win10-user.bat",
     )
-    def __init__(self, state_file: str | Path):
+    def __init__(self, state_file: str | Path, running_probe: Callable[[], bool] | None = None):
         self.state_file = Path(state_file)
         self._lock = threading.RLock()
         self._process: subprocess.Popen | None = None
         self._path = self._load_path()
+        self._running_probe = running_probe or self._webui_is_listening
 
     def _load_path(self) -> str:
         try:
@@ -44,7 +51,31 @@ class NapCatLauncher:
         return self._path
 
     def _running(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        if self._process is not None and self._process.poll() is None:
+            return True
+        try:
+            return self._running_probe()
+        except Exception:
+            logger.debug("NapCat running probe failed", exc_info=True)
+            return False
+
+    def _webui_is_listening(self) -> bool:
+        if not self._path:
+            return False
+        config_file = Path(self._path).parent / "config" / "webui.json"
+        try:
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+            if config.get("disableWebUI", False):
+                return False
+            port = int(config.get("port", 6099))
+            host = str(config.get("host", "127.0.0.1"))
+            if host in {"::", "0.0.0.0", "localhost"}:
+                host = "127.0.0.1"
+            connection = socket.create_connection((host, port), timeout=0.25)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+        connection.close()
+        return True
 
     def status(self) -> dict[str, object]:
         with self._lock:
@@ -100,3 +131,17 @@ class NapCatLauncher:
             except OSError as exc:
                 raise NapCatError("napcat_launch_failed", f"NapCat 启动失败：{exc}") from exc
             return {"path": self._path, "configured": True, "running": True, "already_running": False}
+
+
+def start_napcat_if_enabled(
+    launcher: NapCatLauncher,
+    *,
+    enabled: bool,
+) -> dict[str, object] | None:
+    if not enabled:
+        return None
+    try:
+        return launcher.launch()
+    except NapCatError as exc:
+        logger.warning("NapCat 自动启动失败：%s", exc.message)
+        return None

@@ -97,14 +97,22 @@ def runtime_config(**overrides):
     return values
 
 
+# 索引跑在后台 ThreadPoolExecutor 里。全量套件跑到后期时线程、磁盘（临时目录刚建好，杀软在扫）
+# 压力都大，原来固定 3 秒的上限会偶发超时，表现为「随机失败」。放宽上限不削弱断言本身：
+# 仍然要求进入 ready/failed，仍然校验拆分器调用与分片内容。
+_INDEXING_TIMEOUT_SECONDS = 15
+
+
 def wait_for_terminal_status(service: RagKnowledgeService, document_id: str):
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + _INDEXING_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         document = service.get_document(document_id)
         if document is not None and document.status in {"ready", "failed"}:
             return document
         time.sleep(0.01)
-    raise AssertionError("knowledge indexing did not finish")
+    raise AssertionError(
+        f"knowledge indexing did not finish within {_INDEXING_TIMEOUT_SECONDS}s"
+    )
 
 
 def test_enqueue_upload_enforces_document_quota_before_writing_file(tmp_path):

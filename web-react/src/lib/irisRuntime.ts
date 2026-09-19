@@ -83,9 +83,14 @@ export type IrisApprovalResult = {
   ok?: boolean;
 };
 
+type ToolProgress = { phase?: string; source?: string; completed?: number; total?: number };
+type TrackedToolPart = ToolCallMessagePart & { irisProgress?: ToolProgress; irisDurationMs?: number; irisRunning?: boolean };
+
 export type IrisToolGroupItem = {
   callId: string;
   name: string;
+  progress?: ToolProgress;
+  durationMs?: number;
   args: unknown;
   argsText: string;
   result?: unknown;
@@ -155,7 +160,7 @@ function isApprovalResult(result: unknown): result is IrisApprovalResult {
 }
 
 /** Combines ordinary tool calls into one compact message part; approvals stay independent. */
-export function groupToolParts(parts: ToolCallMessagePart[], cancelled = false, previousResult?: IrisToolGroupResult): ToolCallMessagePart[] {
+export function groupToolParts(parts: TrackedToolPart[], cancelled = false, previousResult?: IrisToolGroupResult): ToolCallMessagePart[] {
   const approvals = parts.filter((part) => isApprovalResult(part.result));
   const ordinary = parts.filter((part) => !isApprovalResult(part.result));
   if (ordinary.length === 0) return approvals;
@@ -166,7 +171,9 @@ export function groupToolParts(parts: ToolCallMessagePart[], cancelled = false, 
       args: part.args,
       argsText: part.argsText ?? JSON.stringify(part.args ?? {}, null, 2),
       result: part.result,
-      state: part.isError ? "failed" : part.result === undefined ? (cancelled ? "cancelled" : "running") : "completed",
+      progress: part.irisProgress,
+      durationMs: part.irisDurationMs,
+      state: part.isError ? "failed" : (part.irisRunning || part.result === undefined) ? (cancelled ? "cancelled" : "running") : "completed",
     }));
   const result = previousResult
     ? { ...previousResult, items }
@@ -276,7 +283,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       const toolsets = deps.getToolsets?.();
       const skillId = deps.getSkillId?.();
 
-      const toolParts = new Map<string, ToolCallMessagePart>();
+      const toolParts = new Map<string, TrackedToolPart>();
       let renderedToolGroup: IrisToolGroupResult | undefined;
       let knowledgeCitations: IrisKnowledgeCitationsResult["items"] = [];
       let followUpSuggestions: string[] = [];
@@ -286,6 +293,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       let errorMessage = "";
       let awaitingFirstResponse = true;
       let modelMetrics: { first_token_ms: number | null; duration_ms: number } | undefined;
+      let serverMessageId: string | undefined;
       let taskId: string | undefined;
       let cancelRequested = false;
       let cancelPromise: Promise<void> | undefined;
@@ -400,11 +408,15 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           case "tool_progress": {
             const existing = toolParts.get(event.data.call_id);
             if (!existing) break;
+            if (event.data.phase) {
+              toolParts.set(event.data.call_id, { ...existing, irisProgress: event.data, irisRunning: true });
+              break;
+            }
             const previous = existing.result as IrisApprovalResult | undefined;
             const live = previous && previous.__irisKind === "approval" && previous.realResult && typeof previous.realResult === "object" ? previous.realResult as Record<string, unknown> : {};
             const output = `${typeof live.stdout === "string" ? live.stdout : ""}${event.data.output || ""}`;
             const terminal = { ...live, command: typeof live.command === "string" ? live.command : (existing.args as Record<string, unknown>).command, stdout: output, output, cwd: typeof live.cwd === "string" ? live.cwd : (existing.args as Record<string, unknown>).cwd };
-            toolParts.set(event.data.call_id, { ...existing, result: previous && previous.__irisKind === "approval" ? { ...previous, choice: "approved", realResult: terminal } : terminal });
+            toolParts.set(event.data.call_id, { ...existing, irisRunning: true, result: previous && previous.__irisKind === "approval" ? { ...previous, choice: "approved", realResult: terminal } : terminal });
             break;
           }
           case "tool_finished": {
@@ -421,7 +433,9 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
                 : (event.data.result as ToolCallMessagePart["result"]);
               toolParts.set(event.data.call_id, {
                 ...existing,
-                result: newResult,
+                result: event.data.ok ? newResult : (newResult ?? { error: event.data.error_message || "工具执行失败" }),
+                irisRunning: false,
+                irisDurationMs: event.data.duration_ms,
                 isError: !event.data.ok,
               });
             }
@@ -429,6 +443,7 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
           }
           case "message_completed":
             if (event.data.content && event.data.content.trim()) textAccum = event.data.content;
+            if (typeof event.data.message_id === "string") serverMessageId = event.data.message_id;
             awaitingFirstResponse = false;
             knowledgeCitations = Array.isArray(event.data.citations) ? event.data.citations as IrisKnowledgeCitationsResult["items"] : [];
             followUpSuggestions = Array.isArray(event.data.follow_up_suggestions)
@@ -519,7 +534,12 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
         status: errored
           ? { type: "incomplete", reason: "error", error: errorMessage || "生成失败，请稍后重试。" }
           : { type: "complete", reason: "stop" },
-        metadata: { custom: modelMetrics ? { modelMetrics } : {} },
+        metadata: {
+          custom: {
+            ...(modelMetrics ? { modelMetrics } : {}),
+            ...(serverMessageId ? { serverMessageId } : {}),
+          },
+        },
       };
     },
   };
@@ -577,6 +597,9 @@ export function toThreadMessages(history: Message[]): ThreadMessageLike[] {
         role: role as "user" | "assistant",
         content: m.role === "assistant" ? groupSourceParts(content) : content,
         id: m.id || `${m.role}-${i}`,
+        ...(m.role === "assistant" && m.id
+          ? { metadata: { custom: { serverMessageId: m.id } } }
+          : {}),
         ...(m.role === "assistant" && m.error
           ? { status: { type: "incomplete", reason: "error", error: m.error } }
           : {}),

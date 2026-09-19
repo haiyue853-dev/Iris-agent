@@ -1,6 +1,8 @@
 from iris_agent.core.agent import AgentLoop, AgentService
 from types import SimpleNamespace
 
+import pytest
+
 from iris_agent.core.models import Message, ProviderResponse, ToolCall
 from iris_agent.sessions.json_store import JsonSessionRepository
 from iris_agent.tools.base import Tool
@@ -27,7 +29,8 @@ def test_service_persists_tool_messages_before_completion(tmp_path):
     assert "message_id" in events[-1].data
 
 
-def test_turn_prompt_requires_direct_web_search_for_live_web_requests(tmp_path):
+def test_turn_prompt_routes_live_web_requests_to_web_search(tmp_path):
+    """提示改为「按检索路由判断」，但对外部/实时信息仍必须指向 web_search，并明令不得声称没有联网工具。"""
     repo = JsonSessionRepository(tmp_path)
     session = repo.create("test")
     service = AgentService(AgentLoop(Provider(), ToolRegistry()), repo, "system")
@@ -43,7 +46,69 @@ def test_turn_prompt_requires_direct_web_search_for_live_web_requests(tmp_path):
         [],
     )
 
-    assert "必须直接调用 web_search" in prompt
+    assert "按「检索路由」判断来源" in prompt
+    assert "就调用 web_search" in prompt
+    assert "声称自己没有联网工具" in prompt
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我搜一下 DeepSeek 最新进展",
+        "帮我上网查一下",
+        "帮我搜索一下下周的天气",
+        "查一下最近有什么AI新闻",
+        "搜一下今天的新闻",
+        "看看今天的热点",
+        "联网搜一下",
+    ],
+)
+def test_bare_search_phrasings_are_recognised_as_web_intent(text):
+    """回归：这些说法原先一个都不命中。
+
+    旧词表只有 7 个硬编码词（百度|微博|热搜|新闻|热点|联网|外部网站|实时），
+    「帮我搜一下X」「帮我上网查一下」这种最常用的表达完全落空，模型拿不到联网提示。
+    """
+    assert AgentService._is_live_web_request(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "最近三天提醒我交报告",
+        "帮我查找之前的笔记",
+        "找一下我之前保存的资料",
+        "你好",
+        "现在几点",
+    ],
+)
+def test_task_and_local_phrasings_are_not_web_intent(text):
+    """时间词归待办解析（parse_chinese_due_at），本地存档归 search_knowledge。
+
+    词表里若收「最近/今天」，像「最近三天提醒我交报告」这种待办就会被误判成要联网。
+    """
+    assert AgentService._is_live_web_request(text) is False
+
+
+def test_direct_lookup_path_is_stricter_than_the_hint():
+    """直连路径会完全绕开模型，所以要求明确检索动作词，且不碰本地存档与深加工请求。"""
+    assert AgentService._is_simple_live_web_lookup("搜一下今天的新闻") is True
+
+    # 指向本地存档：交给模型用 search_knowledge，不能抢答
+    assert AgentService._is_simple_live_web_lookup("搜索存档里的RAG资料") is False
+    # 深加工请求：留给模型自己拆解
+    assert AgentService._is_simple_live_web_lookup("帮我搜一下这个资料的原文并详细分析") is False
+
+
+def test_turn_prompt_leaves_plain_messages_without_retrieval_directives(tmp_path):
+    """没有检索意图的普通消息不该被塞进联网提示。"""
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(Provider(), ToolRegistry()), repo, "system")
+
+    prompt = service._turn_prompt(session.id, "帮我把这段代码改一下", [], "fast", None, "mix", False, [])
+
+    assert "联网检索要求" not in prompt
 
 
 def test_build_messages_excludes_messages_marked_hidden_from_model(tmp_path):

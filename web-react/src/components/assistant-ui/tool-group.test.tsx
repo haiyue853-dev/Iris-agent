@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { ToolGroup } from "./tool-group";
 
 describe("ToolGroup", () => {
+  it("shows extraction progress, partial failure and elapsed time", () => {
+    const { rerender } = render(<ToolGroup items={[
+      { callId: "extract", name: "web_extract", args: {}, argsText: "{}", state: "running", progress: { phase: "extracting", completed: 1, total: 2 } },
+    ]} />);
+    expect(screen.getByRole("button", { name: "正在提取网页 1/2" })).toBeVisible();
+    rerender(<ToolGroup items={[
+      { callId: "extract", name: "web_extract", args: {}, argsText: "{}", state: "completed", result: { successful: 1, failed: 1 }, durationMs: 1500 },
+    ]} />);
+    fireEvent.click(screen.getByRole("button", { name: "网页提取：1 个成功，1 个失败" }));
+    expect(screen.getByText("web_extract · 1.5 秒")).toBeVisible();
+  });
   it("renders one collapsed summary and expands all tool details together", () => {
     render(<ToolGroup items={[
       { callId: "1", name: "list_directory", args: { path: "." }, argsText: '{"path":"."}', result: { files: [] }, state: "completed" },

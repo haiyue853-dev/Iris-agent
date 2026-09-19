@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from inspect import signature, Parameter
+import logging
 from time import monotonic
 import threading
 from typing import Protocol
@@ -12,6 +13,8 @@ from iris_agent.core.models import AgentEvent
 from iris_agent.task_center.models import AgentTask
 from iris_agent.task_center.service import TERMINAL_STATUSES, TaskCenterService
 from iris_agent.task_queue.models import QueueJob
+
+_LOGGER = logging.getLogger(__name__)
 from iris_agent.task_queue.repository import QueueRepository
 
 
@@ -65,7 +68,11 @@ class TaskQueueService:
                 try:
                     self.task_center.fail(task.id)
                 except Exception:
-                    pass
+                    _LOGGER.warning(
+                        "队列任务落盘失败后，标记 task=%s 为失败也失败了（任务将停留在 started）",
+                        task.id,
+                        exc_info=True,
+                    )
                 raise
             self._condition.notify_all()
             return task
@@ -187,6 +194,9 @@ class TaskQueueService:
                     # A queued job has not been claimed until its active
                     # ledger state is durably saved.  Retry that I/O boundary
                     # later without failing or otherwise changing the task.
+                    # 这里会每 0.1s 重试一次，用 DEBUG 以免持续故障时把日志刷爆；
+                    # 需要排查时把 IRIS_LOG_LEVEL 设成 DEBUG 即可。
+                    _LOGGER.debug("领取下一个作业失败，稍后重试", exc_info=True)
                     self._condition.wait(timeout=0.1)
                     continue
                 if job is None:
@@ -197,11 +207,18 @@ class TaskQueueService:
             try:
                 self._run_job(job)
             except Exception:
+                # 队列任务崩掉若什么都不记，就只剩下「消息没回」这一个症状，无从定位。
+                _LOGGER.exception("执行队列任务失败（task=%s）", job.task_id)
                 try:
                     self._fail_if_unfinished(job.task_id)
-                except Exception:
+                except Exception as exc:
                     # Do not erase the active job when the terminal failure
                     # marker itself is not durable.  Startup can recover it.
+                    _LOGGER.warning(
+                        "标记队列任务失败也失败了，保留该 job 等待启动时恢复（task=%s）",
+                        job.task_id,
+                        exc_info=exc,
+                    )
                     remove_job = False
             finally:
                 with self._condition:

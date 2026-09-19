@@ -1,3 +1,4 @@
+from iris_agent.web_search.errors import SearchSourceError
 import httpx
 import pytest
 
@@ -70,7 +71,8 @@ def test_duckduckgo_source_returns_empty_on_error():
         raise httpx.ConnectError("boom")
     source = DuckDuckGoSearchSource(http_client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    assert source.search("查询", 5) == []
+    with pytest.raises(SearchSourceError) as failure:
+        source.search("查询", 5)
 
 
 def test_tavily_source_maps_complete_options_to_post_payload():
@@ -186,8 +188,10 @@ def test_tavily_source_returns_empty_on_network_error_and_401():
         http_client=httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(401))),
     )
 
-    assert network_source.search("查询", 5) == []
-    assert unauthorized_source.search("查询", 5) == []
+    with pytest.raises(SearchSourceError) as failure:
+        network_source.search("查询", 5)
+    with pytest.raises(SearchSourceError) as failure:
+        unauthorized_source.search("查询", 5)
 
 
 def test_tavily_source_returns_empty_on_invalid_json_or_result_shapes():
@@ -199,7 +203,8 @@ def test_tavily_source_returns_empty_on_invalid_json_or_result_shapes():
 
     for response in responses:
         client = httpx.Client(transport=httpx.MockTransport(lambda req, response=response: response))
-        assert TavilySearchSource(api_key="key", http_client=client).search("查询", 5) == []
+        with pytest.raises(SearchSourceError) as failure:
+            TavilySearchSource(api_key="key", http_client=client).search("查询", 5)
 
 
 def test_bing_and_duckduckgo_accept_search_options_for_compatibility():
@@ -270,7 +275,8 @@ def test_tavily_source_does_not_follow_redirects_even_with_redirecting_client():
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
     source = TavilySearchSource(api_key="secret", http_client=client)
 
-    assert source.search("查询", 5) == []
+    with pytest.raises(SearchSourceError) as failure:
+        source.search("查询", 5)
     assert len(requests) == 1
     assert b"secret" not in requests[0].content
 
@@ -319,7 +325,8 @@ def test_tavily_source_only_swallows_transport_and_json_errors():
         def post(self, *args, **kwargs):
             raise RuntimeError("programming error")
 
-    assert TavilySearchSource(api_key="key", http_client=BrokenJsonClient()).search("查询", 1) == []
+    with pytest.raises(SearchSourceError) as failure:
+        TavilySearchSource(api_key="key", http_client=BrokenJsonClient()).search("查询", 1)
     with pytest.raises(RuntimeError, match="programming error"):
         TavilySearchSource(api_key="key", http_client=ProgrammingErrorClient()).search("查询", 1)
 
@@ -338,7 +345,9 @@ def test_tavily_source_does_not_expose_api_key_on_failure(capsys):
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    assert source.search("查询", 1) == []
+    with pytest.raises(SearchSourceError) as failure:
+        source.search("查询", 1)
+    assert api_key not in str(failure.value)
     output = capsys.readouterr()
     assert api_key not in output.out
     assert api_key not in output.err

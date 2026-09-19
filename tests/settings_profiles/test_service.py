@@ -83,7 +83,11 @@ def test_connection_uses_normalized_values_ten_second_timeout_and_no_retries():
     result = subject.test_connection(ConnectionInput(" https://local/v1/ ", " model-x ", " sk-secret "))
 
     assert result == ConnectionResult(True, "connected", "连接成功")
-    assert client_calls == [{"base_url": "https://local/v1", "api_key": "sk-secret", "timeout": 10.0, "max_retries": 0}]
+    assert client_calls[0]["base_url"] == "https://local/v1"
+    assert client_calls[0]["api_key"] == "sk-secret"
+    assert client_calls[0]["timeout"] == 10.0
+    assert client_calls[0]["max_retries"] == 0
+    assert client_calls[0]["http_client"] is not None
     assert completions.calls == [{
         "model": "model-x", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 1,
     }]

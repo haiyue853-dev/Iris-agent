@@ -2,9 +2,9 @@ from iris_agent.api.schemas import ChatRequest
 
 
 def test_chat_request_accepts_named_toolsets():
-    request = ChatRequest(session_id="session_1", message="hello", toolsets=["safe", "research"])
+    request = ChatRequest(session_id="session_1", message="hello", toolsets=["safe", "research", "mcp"])
 
-    assert request.toolsets == ["safe", "research"]
+    assert request.toolsets == ["safe", "research", "mcp"]
 
 
 def test_chat_request_rejects_unknown_toolset():

@@ -5,7 +5,11 @@ __pycache__/
 .pytest-*.log
 /.tmp/
 /.tmp-*
+/tmp/
+/logs/
+.pytest-cache-local/
 /node_modules/
+**/node_modules/
 /web-react/npm-reinstall*.log
 .venv/
 .worktrees/

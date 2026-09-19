@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-SUPPORTED_SKILL_TOOLSETS = ("safe", "research", "coding", "knowledge", "skills", "delegation")
+SUPPORTED_SKILL_TOOLSETS = ("safe", "research", "coding", "knowledge", "skills", "delegation", "mcp")
 
 
 @dataclass(frozen=True, slots=True)

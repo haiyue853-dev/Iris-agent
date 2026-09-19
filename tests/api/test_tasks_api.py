@@ -3,6 +3,7 @@
 import json
 import asyncio
 import threading
+import time
 
 import pytest
 
@@ -176,7 +177,14 @@ def test_closing_chat_stream_marks_started_task_stopped(tmp_path):
 
     first = asyncio.run(consume_then_close())
     assert first["type"] == "task_started"
-    assert task_center.get_task(first["data"]["task_id"]).status == "stopped"
+
+    # 关流后的停止标记由后台推进。全量套件负载高时「关流后立刻断言」会偶发失败，
+    # 这里改成有上限的等待；断言本身不变，仍然必须是 stopped。
+    task_id = first["data"]["task_id"]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and task_center.get_task(task_id).status != "stopped":
+        time.sleep(0.01)
+    assert task_center.get_task(task_id).status == "stopped"
 
 
 def test_active_chat_task_can_be_cancelled_through_task_api(tmp_path):

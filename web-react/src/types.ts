@@ -265,9 +265,9 @@ export type AgentEvent =
   | { type: 'pipeline_stage'; data: { stage: 'planning' | 'retrieval' | 'rerank' | 'generation'; status: 'running' | 'completed' | 'failed'; detail?: { mode?: string; citations?: number; routes?: string[] } } }
   | { type: 'text_delta'; data: { content: string } }
   | { type: 'tool_started'; data: { call_id: string; name: string; arguments: Record<string, unknown> } }
-  | { type: 'tool_progress'; data: { call_id: string; name: string; output?: string } }
+  | { type: 'tool_progress'; data: { call_id: string; name: string; output?: string; phase?: string; source?: string; completed?: number; total?: number } }
   | { type: 'tool_approval_requested'; data: { call_id: string; name: string; arguments: Record<string, unknown>; context?: { server_name?: string; tool_name?: string } | null } }
-  | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string } }
+  | { type: 'tool_finished'; data: { call_id: string; name: string; ok: boolean; result?: unknown; error_message?: string; duration_ms?: number } }
   | { type: 'message_completed'; data: { content?: string; message_id?: string; metrics?: { first_token_ms: number | null; duration_ms: number; model?: string | null }; citations?: Array<{ index: number; document_id: string; chunk_id: string; title: string; content: string; location?: string | null; score: number; keyword_score?: number; vector_score?: number; reranker_score?: number | null }>; follow_up_suggestions?: string[] } }
   | { type: 'paused'; data: { reason?: string; call_id?: string } }
   | { type: 'error'; data: { code: string; message: string } };
@@ -348,7 +348,7 @@ export type SkillInfo = {
   version: number;
   enabled: boolean;
   source?: 'bundled' | 'user';
-  allowed_toolsets?: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation'>;
+  allowed_toolsets?: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation' | 'mcp'>;
 };
 
 // ---------- 记忆系统 ----------

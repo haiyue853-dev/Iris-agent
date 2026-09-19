@@ -85,14 +85,127 @@ def test_state_persists_across_instances(tmp_path):
     assert second.session_id("qq", "123") == expected
 
 
-def test_approval_request_is_refused(tmp_path):
+def test_approval_request_waits_for_qq_confirmation(tmp_path):
     agent = ApprovalAgent()
     service = _service(tmp_path, agent)
 
     reply = service.handle(InboundMessage("qq", "123", "触发审批"))
 
-    assert reply.text == "拒绝结果(False)"
+    assert "待确认操作【A-001】" in reply.text
+    assert "some_tool" in reply.text
+    assert "确认 A-001" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_qq_confirmation_resumes_the_pending_tool(tmp_path):
+    agent = ApprovalAgent()
+    service = _service(tmp_path, agent)
+    service.handle(InboundMessage("qq", "123", "触发审批"))
+
+    reply = service.handle(InboundMessage("qq", "123", "确认 A-001"))
+
+    assert reply.text == "拒绝结果(True)"
+    assert agent.runs[1] == ("resolve", agent.runs[0][1], "c1", True)
+
+
+def test_qq_cancellation_rejects_the_pending_tool(tmp_path):
+    agent = ApprovalAgent()
+    service = _service(tmp_path, agent)
+    service.handle(InboundMessage("qq", "123", "触发审批"))
+
+    reply = service.handle(InboundMessage("qq", "123", "取消 A-001"))
+
+    assert "已取消待确认操作【A-001】" in reply.text
     assert agent.runs[1] == ("resolve", agent.runs[0][1], "c1", False)
+
+
+def test_unrelated_message_does_not_bypass_a_pending_confirmation(tmp_path):
+    agent = ApprovalAgent()
+    service = _service(tmp_path, agent)
+    service.handle(InboundMessage("qq", "123", "触发审批"))
+
+    reply = service.handle(InboundMessage("qq", "123", "换个话题"))
+
+    assert "A-001" in reply.text
+    assert "确认" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_another_user_cannot_confirm_someone_elses_operation(tmp_path):
+    agent = ApprovalAgent()
+    service = _service(tmp_path, agent)
+    service.handle(InboundMessage("qq", "123", "触发审批"))
+
+    reply = service.handle(InboundMessage("qq", "456", "确认 A-001"))
+
+    assert "没有找到属于你的待确认操作" in reply.text
+    assert len(agent.runs) == 1
+
+
+class ApprovalAgentWithCall(ApprovalAgent):
+    """ApprovalAgent that reports the real tool name and arguments under review."""
+
+    def __init__(self, name: str, arguments: dict | None):
+        super().__init__()
+        self._name = name
+        self._arguments = arguments
+
+    def run(self, session_id: str, text: str):
+        self.runs.append(("run", session_id, text))
+        yield AgentEvent(
+            "tool_approval_requested",
+            {"call_id": "c1", "name": self._name, "arguments": self._arguments},
+        )
+
+
+def test_gateway_requires_confirmation_for_write_to_ordinary_path(tmp_path):
+    agent = ApprovalAgentWithCall("write_file", {"path": "notes/todo.md"})
+    service = _service(tmp_path, agent, workspace_root=tmp_path)
+
+    reply = service.handle(InboundMessage("qq", "123", "记一下"))
+
+    assert "notes/todo.md" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_gateway_requires_confirmation_for_write_that_changes_agent_config(tmp_path):
+    agent = ApprovalAgentWithCall("write_file", {"path": "agent.yaml"})
+    service = _service(tmp_path, agent, workspace_root=tmp_path)
+
+    reply = service.handle(InboundMessage("qq", "123", "改一下配置"))
+
+    assert "agent.yaml" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_gateway_requires_confirmation_for_write_that_changes_agent_code(tmp_path):
+    agent = ApprovalAgentWithCall("replace_in_file", {"path": "iris_agent/core/agent.py"})
+    service = _service(tmp_path, agent, workspace_root=tmp_path)
+
+    reply = service.handle(InboundMessage("qq", "123", "改代码"))
+
+    assert "iris_agent/core/agent.py" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_gateway_requires_confirmation_for_run_command(tmp_path):
+    agent = ApprovalAgentWithCall("run_command", {"command": "git status"})
+    service = _service(tmp_path, agent, workspace_root=tmp_path)
+
+    reply = service.handle(InboundMessage("qq", "123", "跑个命令"))
+
+    assert "git status" in reply.text
+    assert len(agent.runs) == 1
+
+
+def test_gateway_confirmation_does_not_depend_on_workspace_root(tmp_path):
+    agent = ApprovalAgentWithCall("write_file", {"path": "notes/todo.md"})
+    service = _service(tmp_path, agent)
+
+    reply = service.handle(InboundMessage("qq", "123", "记一下"))
+
+    assert "待确认操作【A-001】" in reply.text
+    assert len(agent.runs) == 1
 
 
 class ChunkedAgent(FakeAgent):
@@ -146,3 +259,63 @@ def test_no_file_marker_yields_empty_files(tmp_path):
 
     assert reply.files == []
     assert reply.text == "ok"
+
+
+class FakePersonalAssistant:
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.messages = []
+
+    def ingest(self, message):
+        self.messages.append(message)
+        return self.outcome
+
+
+def test_personal_assistant_receipt_is_prepended_to_agent_reply(tmp_path):
+    from iris_agent.personal_assistant.models import IngestOutcome
+
+    personal = FakePersonalAssistant(IngestOutcome(receipt="已存档：资料"))
+    service = _service(tmp_path, personal_assistant=personal)
+
+    reply = service.handle(InboundMessage("qq", "123", "资料", raw={"message_id": 1}))
+
+    assert reply.text == "已存档：资料\n\nok"
+    assert len(personal.messages) == 1
+
+
+def test_wecom_messages_also_use_personal_assistant_archive_pipeline(tmp_path):
+    from iris_agent.personal_assistant.models import IngestOutcome
+
+    personal = FakePersonalAssistant(IngestOutcome(receipt="已存档：企业微信资料"))
+    service = _service(tmp_path, personal_assistant=personal)
+
+    reply = service.handle(InboundMessage("wecom", "owner", "资料", raw={"message_id": "wx-1"}))
+
+    assert reply.text == "已存档：企业微信资料\n\nok"
+    assert personal.messages[0].platform == "wecom"
+
+
+def test_personal_assistant_can_handle_command_without_running_agent(tmp_path):
+    from iris_agent.personal_assistant.models import IngestOutcome
+
+    agent = FakeAgent()
+    personal = FakePersonalAssistant(IngestOutcome(reply_override="已完成【T-001】"))
+    service = _service(tmp_path, agent, personal_assistant=personal)
+
+    reply = service.handle(InboundMessage("qq", "123", "完成 T-001", raw={"message_id": 2}))
+
+    assert reply.text == "已完成【T-001】"
+    assert agent.runs == []
+
+
+def test_duplicate_personal_message_does_not_run_agent_again(tmp_path):
+    from iris_agent.personal_assistant.models import IngestOutcome
+
+    agent = FakeAgent()
+    personal = FakePersonalAssistant(IngestOutcome(duplicate=True, reply_override=""))
+    service = _service(tmp_path, agent, personal_assistant=personal)
+
+    reply = service.handle(InboundMessage("qq", "123", "重复", raw={"message_id": 3}))
+
+    assert reply.text == ""
+    assert agent.runs == []

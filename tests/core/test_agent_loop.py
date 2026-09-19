@@ -38,6 +38,23 @@ class StreamingProvider:
         yield ProviderResponse(content="第二段")
 
 
+def test_research_can_search_then_extract_and_search_again_within_budget():
+    provider = SchemaCapturingProvider(
+        ProviderResponse(tool_calls=[ToolCall("s1", "web_search", {"query": "first"})]),
+        ProviderResponse(tool_calls=[ToolCall("e1", "web_extract", {"urls": ["https://example.com"]})]),
+        ProviderResponse(tool_calls=[ToolCall("s2", "web_search", {"query": "verify"})]),
+        ProviderResponse(content="verified"),
+    )
+    registry = ToolRegistry()
+    registry.register(Tool("web_search", "", {"type": "object"}, lambda query: {"results": [query]}))
+    registry.register(Tool("web_extract", "", {"type": "object"}, lambda urls: {"pages": urls}))
+    events = list(AgentLoop(provider, registry, max_tool_rounds=3).run([Message(role="user", content="深入研究并交叉核实原文")]))
+    assert [event.data["name"] for event in events if event.type == "tool_finished"] == ["web_search", "web_extract", "web_search"]
+    assert all("web_search" in schemas for schemas in provider.tool_schemas[:3])
+    assert provider.tool_schemas[-1] == []
+    assert events[-1].data["content"] == "verified"
+
+
 def test_loop_executes_tool_then_returns_final_text():
     provider = FakeProvider(
         ProviderResponse(tool_calls=[ToolCall("call-1", "current_time", {"timezone": "UTC"})]),

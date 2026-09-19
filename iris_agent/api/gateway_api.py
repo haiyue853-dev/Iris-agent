@@ -20,13 +20,12 @@ class NapCatDirectoryRequest(BaseModel):
     directory: str
 
 
-def register_gateway_routes(app, qq_adapter: QQOneBotAdapter | None, qq_ws_path: str, napcat: NapCatLauncher | None = None) -> None:
+def register_gateway_routes(app, qq_adapter: QQOneBotAdapter | None, qq_ws_path: str, napcat: NapCatLauncher | None = None, wecom_aibot=None) -> None:
     router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
     @router.get("/channels")
     def list_channels():
-        return {
-            "channels": [{
+        channels = [{
                 "id": "qq",
                 "name": "QQ",
                 "enabled": qq_adapter is not None,
@@ -34,7 +33,16 @@ def register_gateway_routes(app, qq_adapter: QQOneBotAdapter | None, qq_ws_path:
                 "transport": "OneBot 11 反向 WebSocket",
                 "websocket_path": qq_ws_path,
             }]
-        }
+        if wecom_aibot is not None:
+            channels.append({
+                "id": "wecom-aibot",
+                "name": "企业微信智能机器人",
+                "enabled": True,
+                "connected": bool(wecom_aibot.connected),
+                "transport": "官方 WebSocket 长连接",
+                "status": wecom_aibot.status,
+            })
+        return {"channels": channels}
 
     @router.post("/qq/test")
     def send_qq_test_message(request: QQTestMessage):

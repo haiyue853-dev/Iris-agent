@@ -18,6 +18,12 @@ class CapabilityResolver:
             if toolset not in self.toolsets:
                 raise ValueError(f"unknown toolset: {toolset}")
             for name in self.toolsets[toolset]:
+                if name.endswith("*"):
+                    prefix = name[:-1]
+                    for candidate in source.names():
+                        if candidate.startswith(prefix) and candidate not in selected:
+                            selected.append(candidate)
+                    continue
                 if name in available and name not in selected:
                     selected.append(name)
         return source.subset(selected)

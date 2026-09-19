@@ -4,9 +4,12 @@ import shlex
 import subprocess
 import threading
 import time
+import os
+import fnmatch
 from queue import Empty, Queue
 
 from iris_agent.tools.base import Tool, ToolInvocationError
+from iris_agent.tools.context import remaining as remaining_time
 
 
 _command_lock = threading.RLock()
@@ -95,7 +98,9 @@ def _text_diff(before: str, after: str, path: str) -> str:
 
 
 def build_read_file_tool(workspace_root: Path, max_chars: int = 20_000) -> Tool:
-    def read_file(path: str):
+    def read_file(path: str, offset: int = 1, limit: int = 500, column: int = 0):
+        if offset < 1 or not 1 <= limit <= 2000 or column < 0:
+            raise ToolInvocationError('invalid_tool_arguments', '行号、行数或列偏移无效')
         target = _safe_path(workspace_root, path)
         if not target.is_file():
             raise ToolInvocationError("file_not_found", f"文件不存在: {path}")
@@ -103,9 +108,81 @@ def build_read_file_tool(workspace_root: Path, max_chars: int = 20_000) -> Tool:
             content = target.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
             raise ToolInvocationError("unsupported_encoding", "仅支持 UTF-8 文本文件") from exc
-        return {"path": path, "content": content[:max_chars], "truncated": len(content) > max_chars}
+        lines = content.splitlines(keepends=True)
+        selected = lines[offset - 1:offset - 1 + limit]
+        if selected:
+            if column > len(selected[0]):
+                raise ToolInvocationError('invalid_tool_arguments', '列偏移超出当前行')
+            selected[0] = selected[0][column:]
+        page = ''.join(selected)[:max_chars]
+        remaining = len(page)
+        next_line, next_column = offset, column
+        for line in selected:
+            if remaining < len(line):
+                next_column += remaining
+                break
+            remaining -= len(line)
+            next_line += 1
+            next_column = 0
+        more = next_line <= len(lines)
+        return {'path': path, 'content': page, 'truncated': more, 'offset': offset, 'total_lines': len(lines), 'next_offset': next_line if more else None, 'next_column': next_column if more else None}
 
-    return Tool("read_file", "读取工作区内的 UTF-8 文本文件", {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}, read_file)
+    return Tool("read_file", "按行读取工作区 UTF-8 文件；offset 从 1 开始。继续读取使用返回的 next_offset 和 next_column（传为 column）。", {"type": "object", "properties": {"path": {"type": "string"}, 'offset': {'type': 'integer', 'minimum': 1}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 2000}, 'column': {'type': 'integer', 'minimum': 0}}, "required": ["path"], 'additionalProperties': False}, read_file)
+
+
+def build_search_files_tool(workspace_root: Path) -> Tool:
+    def search_files(query: str, path: str = '.', target: str = 'content', file_pattern: str = '*', limit: int = 50, case_sensitive: bool = False):
+        if not query or target not in {'files', 'content'} or not 1 <= limit <= 200:
+            raise ToolInvocationError('invalid_tool_arguments', '搜索条件无效')
+        root = _safe_path(workspace_root, path)
+        if not root.is_dir():
+            raise ToolInvocationError('directory_not_found', '搜索目录不存在')
+        matches, scanned, skipped = [], 0, 0
+        needle = query if case_sensitive else query.casefold()
+        for directory, dirs, files in os.walk(root, followlinks=False):
+            remaining_time(float('inf'))
+            dirs[:] = sorted(item for item in dirs if not item.startswith('.') and item not in {'node_modules', '__pycache__', 'dist', 'venv', 'tmp'} and not (Path(directory) / item).is_symlink())
+            for filename in sorted(files):
+                remaining_time(float('inf'))
+                if scanned >= 10000:
+                    return {'matches': matches, 'truncated': True, 'scanned_files': scanned, 'skipped_files': skipped}
+                if filename.startswith('.') or not fnmatch.fnmatch(filename, file_pattern):
+                    continue
+                item = Path(directory) / filename
+                if item.is_symlink():
+                    continue
+                item = _safe_path(workspace_root, str(item))
+                relative = item.relative_to(workspace_root.resolve()).as_posix()
+                scanned += 1
+                if target == 'files':
+                    value = relative if case_sensitive else relative.casefold()
+                    if fnmatch.fnmatchcase(value, needle) or fnmatch.fnmatchcase(filename if case_sensitive else filename.casefold(), needle):
+                        matches.append({'path': relative})
+                else:
+                    try:
+                        if item.stat().st_size > 2_000_000:
+                            skipped += 1
+                            continue
+                        text = item.read_text(encoding='utf-8')
+                        if '\x00' in text:
+                            skipped += 1
+                            continue
+                        for number, line in enumerate(text.splitlines(), 1):
+                            position = (line if case_sensitive else line.casefold()).find(needle)
+                            if position >= 0:
+                                start = max(0, position - 100)
+                                matches.append({'path': relative, 'line': number, 'text': line[start:start + 500]})
+                            if len(matches) >= limit:
+                                break
+                    except (OSError, UnicodeError):
+                        skipped += 1
+                if len(matches) >= limit or scanned >= 10000:
+                    return {'matches': matches, 'truncated': True, 'scanned_files': scanned, 'skipped_files': skipped}
+        return {'matches': matches, 'truncated': False, 'scanned_files': scanned, 'skipped_files': skipped}
+
+    return Tool('search_files', '在工作区搜索文件名或文本，返回路径、行号和片段。内容查询按字面匹配；文件名查询支持 glob；跳过隐藏文件、依赖目录和超过 2 MB 的文件。', {
+        'type': 'object', 'properties': {'query': {'type': 'string', 'minLength': 1, 'maxLength': 500}, 'path': {'type': 'string'}, 'target': {'type': 'string', 'enum': ['content', 'files']}, 'file_pattern': {'type': 'string'}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 200}, 'case_sensitive': {'type': 'boolean'}}, 'required': ['query'], 'additionalProperties': False,
+    }, search_files)
 
 
 def build_list_directory_tool(workspace_root: Path) -> Tool:

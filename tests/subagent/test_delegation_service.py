@@ -47,6 +47,20 @@ def test_cancelled_delegation_reaches_terminal_state(tmp_path):
     assert repository.get(record.id).status == "cancelled"
 
 
+# 后台委派在独立线程里跑完才写回会话。原来只等 1 秒，全量套件跑到后期（线程/磁盘压力大）
+# 会偶发失败，而且失败会报在「消息内容」上，看不出真正原因是超时。这里放宽上限，并把
+# 「是否进入终态」显式断言出来，同时等消息真正写回。
+_BACKGROUND_DELEGATION_TIMEOUT_SECONDS = 15
+
+
+def _wait_until(predicate, timeout: float = _BACKGROUND_DELEGATION_TIMEOUT_SECONDS) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+
+
 def test_background_delegation_appends_its_result_to_the_source_session(tmp_path):
     sessions = JsonSessionRepository(tmp_path / "sessions")
     session = sessions.create("主会话")
@@ -56,9 +70,11 @@ def test_background_delegation_appends_its_result_to_the_source_session(tmp_path
 
     delegation_id = service.submit_background(SubagentRequest("整理资料"), session_id=session.id)
 
-    deadline = time.monotonic() + 1
-    while repository.get(delegation_id).status not in {"succeeded", "failed"} and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _wait_until(lambda: repository.get(delegation_id).status in {"succeeded", "failed"})
+    _wait_until(
+        lambda: sessions.get(session.id).messages[-1].content.startswith("子代理任务已完成")
+    )
 
+    assert repository.get(delegation_id).status in {"succeeded", "failed"}
     assert repository.get(delegation_id).session_id == session.id
     assert sessions.get(session.id).messages[-1].content == "子代理任务已完成：整理资料\n\n完成:整理资料"

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, StrictBool
 
-SkillToolset = Literal["safe", "research", "coding", "knowledge", "skills", "delegation"]
+SkillToolset = Literal["safe", "research", "coding", "knowledge", "skills", "delegation", "mcp"]
 
 
 class SkillInfoModel(BaseModel):

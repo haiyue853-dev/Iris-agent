@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from time import monotonic
+from io import BytesIO
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import httpcore
 from bs4 import BeautifulSoup
+from iris_agent.tools.context import remaining, report_progress
 
 _HEADERS = {
     "User-Agent": (
@@ -186,16 +189,18 @@ class PageFetcher:
             return self._extract_text(response.text)[: max_chars or self.max_page_chars]
         raise ValueError(f"网页抓取失败: {last_detail}")
 
-    def _get_following_safe_redirects(self, url: str, headers: dict[str, str]) -> httpx.Response:
+    def _get_following_safe_redirects(self, url: str, headers: dict[str, str], *, deadline: float | None = None) -> httpx.Response:
+        deadline = deadline or monotonic() + self.timeout
         current = url
         seen: set[str] = set()
         for redirect_count in range(_MAX_REDIRECTS + 1):
+            remaining(deadline)
             self._validate_url(current)
             if current in seen:
                 raise ValueError("网页抓取失败: 重定向循环")
             seen.add(current)
             with self._client.stream(
-                "GET", current, headers=headers, follow_redirects=False
+                "GET", current, headers=headers, follow_redirects=False, timeout=remaining(deadline)
             ) as response:
                 if response.status_code in _REDIRECT_STATUS:
                     location = response.headers.get("Location")
@@ -216,6 +221,7 @@ class PageFetcher:
                 chunks: list[bytes] = []
                 downloaded = 0
                 for chunk in response.iter_bytes():
+                    remaining(deadline)
                     downloaded += len(chunk)
                     if downloaded > self.max_download_bytes:
                         raise PageTooLargeError("网页内容超过下载大小限制")
@@ -224,10 +230,91 @@ class PageFetcher:
                     response.status_code,
                     headers=response.headers,
                     content=b"".join(chunks),
+                    request=response.request,
                 )
                 buffered.encoding = response.encoding
                 return buffered
         raise ValueError("网页抓取失败: 重定向过多")
+
+    def extract(self, url: str, *, deadline: float | None = None) -> dict:
+        """Fetch source content without an extra model call or silent text clipping."""
+        if not self.enabled:
+            raise ValueError("联网抓取已禁用")
+        started = monotonic()
+        deadline = min(deadline or started + self.timeout, started + self.timeout)
+        report_progress(phase="fetching", url=url)
+        response = None
+        for attempt in range(self.max_retries + 1):
+            remaining(deadline)
+            try:
+                response = self._get_following_safe_redirects(url, self._headers_for(attempt, url), deadline=deadline)
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt == self.max_retries:
+                    raise
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt < self.max_retries:
+                    continue
+            break
+        remaining(deadline)
+        if response is None:
+            raise ValueError("网页抓取失败")
+        if response.status_code in {403, 521} and self.browser_fetcher is not None:
+            return self._extract_browser(url, deadline, started)
+        response.raise_for_status()
+        final_url = str(response.url)
+        title = final_url
+        if response.content.startswith(b"%PDF") or "application/pdf" in response.headers.get("content-type", ""):
+            from pypdf import PdfReader
+            reader = PdfReader(BytesIO(response.content))
+            pages = []
+            for page in reader.pages:
+                remaining(deadline)
+                pages.append(page.extract_text() or "")
+            text = "\n\n".join(pages)
+            title = str((reader.metadata or {}).get("/Title") or final_url)
+            method = "pdf"
+        else:
+            title, text = self._extract_markdown(response.text, final_url)
+            method = "http"
+            # Only empty/short HTML pages need JavaScript rendering.
+            if len(text) < self.min_text_chars and self.browser_fetcher is not None and "<" in response.text:
+                return self._extract_browser(final_url, deadline, started)
+        remaining(deadline)
+        return {"url": url, "final_url": final_url, "title": title, "text": text,
+                "method": method, "duration_ms": round((monotonic() - started) * 1000), "ok": True}
+
+    def _extract_browser(self, url, deadline, started):
+        report_progress(phase="rendering", url=url)
+        text = self.browser_fetcher.fetch(url, timeout=remaining(deadline))
+        remaining(deadline)
+        return {"url": url, "final_url": url, "title": url, "text": text, "method": "browser",
+                "duration_ms": round((monotonic() - started) * 1000), "ok": True}
+
+    @staticmethod
+    def _extract_markdown(html: str, url: str) -> tuple[str, str]:
+        soup = BeautifulSoup(html, "html.parser")
+        title = soup.title.get_text(strip=True) if soup.title else url
+        for tag in soup(_REMOVED_TAGS):
+            tag.decompose()
+        root = next((node for selector in _BODY_SELECTORS if (node := soup.select_one(selector)) is not None), soup)
+        for tag in list(root.find_all("pre")):
+            tag.replace_with("\n\n```\n" + tag.get_text().rstrip() + "\n```\n\n")
+        for tag in list(root.find_all("code")):
+            tag.replace_with("`" + tag.get_text() + "`")
+        for tag in list(root.find_all("a", href=True)):
+            href = urljoin(url, tag["href"])
+            label = tag.get_text(" ", strip=True)
+            tag.replace_with(f"[{label}]({href})" if urlparse(href).scheme in {"http", "https"} else label)
+        for tag in list(root.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])):
+            tag.replace_with("\n\n" + "#" * int(tag.name[1]) + " " + tag.get_text(" ", strip=True) + "\n\n")
+        for tag in root.find_all("li"):
+            tag.insert_before("\n- ")
+            tag.insert_after("\n")
+        for tag in root.find_all(["p", "div", "section", "br", "tr"]):
+            tag.insert_before("\n")
+            tag.insert_after("\n")
+        return title, root.get_text().strip()
 
     @staticmethod
     def _headers_for(attempt: int, url: str) -> dict[str, str]:

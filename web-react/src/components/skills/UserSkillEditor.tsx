@@ -11,6 +11,7 @@ const TOOLSET_OPTIONS: Array<{ id: UserSkillDraft['allowed_toolsets'][number]; l
   { id: 'knowledge', label: '知识库' },
   { id: 'skills', label: '技能与记忆' },
   { id: 'delegation', label: '子代理' },
+  { id: 'mcp', label: 'MCP 工具' },
 ];
 
 interface UserSkillEditorProps {

@@ -41,8 +41,13 @@ agent:
     - 用户只要「1 条今天国内热点 / 新闻摘要」时：调用一次 web_search（topic=news、time_range=day）后，直接使用搜索结果的标题、摘要和链接作答；除非用户明确要求「详情、原文、核实、抓取网页」，否则禁止再调用 fetch_page。
     - 工具失败后，如果已有足以回答的搜索结果，直接说明来源和不确定性并回答；不要自动连续抓取多个网页。
 
-    ## 知识库
-    当你需要基于用户的知识库回答问题时，先用 search_knowledge 工具检索知识库，再基于检索结果回答；当用户同时要求「联网搜索/收集面经或面试题」和「保存到知识库」时，必须只用 collect_interview_knowledge 一次生成审核草稿，禁止调用子代理、search_knowledge、web_search、fetch_page 或 add_knowledge。其他入库请求使用 add_knowledge 生成审核草稿。
+    ## 检索路由（自己判断来源，不要靠关键词）
+    信息可能有三个来源。先判断用户要的是哪一个，再调用对应工具；不要凭记忆编造，也不要声称自己没有检索或联网能力。
+    - **外部 / 实时信息**（新闻、热点、价格、版本发布、别人的资料、网页内容）→ `web_search`，确有需要再 `fetch_page`。
+    - **用户自己保存的存档 / 笔记 / 资料**（「我之前保存的」「存档里的」「我的笔记」）→ `search_knowledge`。用户在 QQ 上发来的资料会自动归档进知识库，所以「我上次发给你的那份资料」也走 `search_knowledge`。
+    - **过往对话内容**（「我们之前聊过什么」「我上次说过的」）→ `recall`。
+    一个请求可能需要多个来源（例如「搜一下最新的面试题，跟我存的那份对比一下」），可以依次调用多个工具。
+    当用户同时要求「联网搜索/收集面经或面试题」和「保存到知识库」时，必须只用 collect_interview_knowledge 一次生成审核草稿，禁止调用子代理、search_knowledge、web_search、fetch_page 或 add_knowledge。其他入库请求使用 add_knowledge 生成审核草稿。
 
     ## QQ 平台文件读取
     当你在聊天平台（如 QQ）上需要读取或发送电脑文件时：你的工作区根目录就是项目根目录 D:\agent\iris-agent，用 read_file / list_directory 工具读相对路径（如 README.md）或该目录下的绝对路径均可。
@@ -51,6 +56,27 @@ agent:
 
 sessions:
   directory: data/sessions
+
+tts:
+  enabled: true
+  base_url: http://127.0.0.1:9880
+  root_directory: D:/AI/GPT-SoVITS-v2pro-20250604/GPT-SoVITS-v2pro-20250604
+  gpt_weights_path: D:/AI/gsd/tomori_retrain_v2pp/weights/tomori_clean_v2pp-e15.ckpt
+  sovits_weights_path: D:/AI/gsd/tomori_retrain_v2pp/weights/tomori_clean_v2pp_e6_s456.pth
+  reference_audio_path: D:/AI/gsd/tomori_refs_curated/tomori_stable_neutral.wav
+  reference_text: 話して伝えるの、苦手だから。
+  reference_language: ja
+  target_language: zh
+  cache_directory: data/tts
+  startup_timeout_seconds: 90
+  request_timeout_seconds: 300
+  max_text_chars: 4000
+  max_audio_bytes: 200000000
+  warmup_on_startup: true
+  emotion_enabled: false
+  emotion_audio_directory: D:/AI/gsd/tomori_refs_curated
+  emotion_index_file: data/tts/emotion_references_curated.json
+  emotion_aux_reference_count: 0
 
 reports:
   directory: data/reports
@@ -76,6 +102,7 @@ tools:
     - current_time
     - list_directory
     - read_file
+    - search_files
     - write_file
     - replace_in_file
     - run_command
@@ -231,13 +258,14 @@ curator:
 
 gateway:
   enabled: true
+  napcat_auto_start: false
   directory: data/gateway
   session_prefix: gateway
   qq:
-    enabled: true
+    enabled: false
     path: /gateway/qq/ws
     respond_groups: false
-    allowed_users: "1846247370"
+    allowed_users: "1905499552"
     allow_all: false
   wecom:
     enabled: false
@@ -247,6 +275,22 @@ gateway:
     token: ""
     aes_key: ""
     callback_path: /gateway/wecom/callback
+    aibot:
+      enabled: true
+      script_path: integrations/wecom-aibot/bridge.mjs
+      owner_file: data/gateway/wecom_aibot_owner.json
+      respond_groups: false
+      allowed_users: ""
+      allow_all: false
   push:
-    enabled: true
+    enabled: false
     qq_target: "1905499552"
+
+personal_assistant:
+  enabled: true
+  directory: data/personal_assistant
+  timezone: Asia/Shanghai
+  default_reminder_hour: 20
+  reminder_interval_days: 2
+  quiet_start_hour: 22
+  quiet_end_hour: 8

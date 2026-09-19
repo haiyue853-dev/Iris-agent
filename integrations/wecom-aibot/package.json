@@ -1,0 +1,12 @@
+{
+  "name": "iris-wecom-aibot-bridge",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test bridge.test.mjs"
+  },
+  "dependencies": {
+    "@wecom/aibot-node-sdk": "1.0.7"
+  }
+}

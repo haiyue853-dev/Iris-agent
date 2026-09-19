@@ -34,6 +34,29 @@ class SessionSettings:
 
 
 @dataclass(slots=True)
+class TtsSettings:
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:9880"
+    root_directory: Path = Path(".")
+    gpt_weights_path: Path = Path("")
+    sovits_weights_path: Path = Path("")
+    reference_audio_path: Path = Path("")
+    reference_text: str = ""
+    reference_language: str = "ja"
+    target_language: str = "zh"
+    cache_directory: Path = Path("data/tts")
+    startup_timeout_seconds: float = 90.0
+    request_timeout_seconds: float = 300.0
+    max_text_chars: int = 4000
+    max_audio_bytes: int = 200_000_000
+    warmup_on_startup: bool = False
+    emotion_enabled: bool = False
+    emotion_audio_directory: Path = Path("")
+    emotion_index_file: Path = Path("data/tts/emotion_references.json")
+    emotion_aux_reference_count: int = 2
+
+
+@dataclass(slots=True)
 class ReportSettings:
     directory: Path = Path("data/reports")
     attachments_directory: Path = Path("data/report_attachments")
@@ -58,7 +81,7 @@ class AttachmentSettings:
 
 @dataclass(slots=True)
 class ToolSettings:
-    enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file", "write_file", "replace_in_file", "run_command"])
+    enabled: list[str] = field(default_factory=lambda: ["current_time", "list_directory", "read_file", "search_files", "write_file", "replace_in_file", "run_command"])
     workspace_root: Path = Path("workspace")
     max_read_chars: int = 20_000
     command_timeout_seconds: int = 60
@@ -256,6 +279,18 @@ class QqGatewaySettings:
 
 
 @dataclass(slots=True)
+class WeComAIBotSettings:
+    enabled: bool = False
+    bot_id: str = field(default="", repr=False)
+    secret: str = field(default="", repr=False)
+    script_path: Path = Path("integrations/wecom-aibot/bridge.mjs")
+    owner_file: Path = Path("data/gateway/wecom_aibot_owner.json")
+    respond_groups: bool = False
+    allowed_users: list[str] = field(default_factory=list)
+    allow_all: bool = False
+
+
+@dataclass(slots=True)
 class WeComGatewaySettings:
     enabled: bool = False
     corp_id: str = ""
@@ -264,6 +299,7 @@ class WeComGatewaySettings:
     token: str = ""
     aes_key: str = ""
     callback_path: str = "/gateway/wecom/callback"
+    aibot: WeComAIBotSettings = field(default_factory=WeComAIBotSettings)
 
 
 @dataclass(slots=True)
@@ -275,6 +311,7 @@ class PushGatewaySettings:
 @dataclass(slots=True)
 class GatewaySettings:
     enabled: bool = False
+    napcat_auto_start: bool = False
     directory: Path = Path("data/gateway")
     session_prefix: str = "gateway"
     qq: QqGatewaySettings = field(default_factory=QqGatewaySettings)
@@ -283,10 +320,22 @@ class GatewaySettings:
 
 
 @dataclass(slots=True)
+class PersonalAssistantSettings:
+    enabled: bool = False
+    directory: Path = Path("data/personal_assistant")
+    timezone: str = "Asia/Shanghai"
+    default_reminder_hour: int = 20
+    reminder_interval_days: int = 2
+    quiet_start_hour: int = 22
+    quiet_end_hour: int = 8
+
+
+@dataclass(slots=True)
 class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     sessions: SessionSettings = field(default_factory=SessionSettings)
+    tts: TtsSettings = field(default_factory=TtsSettings)
     reports: ReportSettings = field(default_factory=ReportSettings)
     attachments: AttachmentSettings = field(default_factory=AttachmentSettings)
     tools: ToolSettings = field(default_factory=ToolSettings)
@@ -306,6 +355,7 @@ class Settings:
     curator: CuratorSettings = field(default_factory=CuratorSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
     gateway: GatewaySettings = field(default_factory=GatewaySettings)
+    personal_assistant: PersonalAssistantSettings = field(default_factory=PersonalAssistantSettings)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -440,6 +490,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     llm = _section(raw, "llm")
     agent = _section(raw, "agent")
     sessions = _section(raw, "sessions")
+    tts = _section(raw, "tts")
     reports = _section(raw, "reports")
     attachments = _section(raw, "attachments")
     tools = _section(raw, "tools")
@@ -459,6 +510,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
     curator = _section(raw, "curator")
     mcp = _section(raw, "mcp")
     gateway = _section(raw, "gateway")
+    personal_assistant = _section(raw, "personal_assistant")
     model = overrides.get("model") or os.getenv("LLM_MODEL") or llm.get("model", "deepseek-chat")
     base_url = overrides.get("base_url") or os.getenv("OPENAI_BASE_URL") or llm.get("base_url", "https://api.deepseek.com/v1")
     api_key = overrides.get("api_key") or os.getenv("OPENAI_API_KEY", "")
@@ -470,6 +522,27 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         ),
         agent=AgentSettings(system_prompt=str(agent.get("system_prompt", raw.get("system_prompt", AgentSettings().system_prompt))), max_tool_rounds=int(agent.get("max_tool_rounds", 8))),
         sessions=SessionSettings(directory=Path(sessions.get("directory", raw.get("session_path", "data/sessions")))),
+        tts=TtsSettings(
+            enabled=bool(tts.get("enabled", False)),
+            base_url=str(tts.get("base_url", "http://127.0.0.1:9880")).rstrip("/"),
+            root_directory=Path(tts.get("root_directory", ".")),
+            gpt_weights_path=Path(tts.get("gpt_weights_path", "")),
+            sovits_weights_path=Path(tts.get("sovits_weights_path", "")),
+            reference_audio_path=Path(tts.get("reference_audio_path", "")),
+            reference_text=str(tts.get("reference_text", "")),
+            reference_language=str(tts.get("reference_language", "ja")),
+            target_language=str(tts.get("target_language", "zh")),
+            cache_directory=Path(tts.get("cache_directory", "data/tts")),
+            startup_timeout_seconds=float(tts.get("startup_timeout_seconds", 90)),
+            request_timeout_seconds=float(tts.get("request_timeout_seconds", 300)),
+            max_text_chars=int(tts.get("max_text_chars", 4000)),
+            max_audio_bytes=int(tts.get("max_audio_bytes", 200_000_000)),
+            warmup_on_startup=bool(tts.get("warmup_on_startup", False)),
+            emotion_enabled=bool(tts.get("emotion_enabled", False)),
+            emotion_audio_directory=Path(tts.get("emotion_audio_directory", "")),
+            emotion_index_file=Path(tts.get("emotion_index_file", "data/tts/emotion_references.json")),
+            emotion_aux_reference_count=int(tts.get("emotion_aux_reference_count", 2)),
+        ),
         reports=ReportSettings(
             directory=Path(reports.get("directory", "data/reports")),
             attachments_directory=Path(reports.get("attachments_directory", "data/report_attachments")),
@@ -623,6 +696,7 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         mcp=McpSettings(settings_file=Path(mcp.get("settings_file", "data/mcp/servers.json"))),
         gateway=GatewaySettings(
             enabled=bool(gateway.get("enabled", False)),
+            napcat_auto_start=bool(gateway.get("napcat_auto_start", False)),
             directory=Path(gateway.get("directory", "data/gateway")),
             session_prefix=str(gateway.get("session_prefix", "gateway")),
             qq=QqGatewaySettings(
@@ -640,15 +714,48 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
                 token=str(_section(gateway, "wecom").get("token", "")),
                 aes_key=str(_section(gateway, "wecom").get("aes_key", "")),
                 callback_path=str(_section(gateway, "wecom").get("callback_path", "/gateway/wecom/callback")),
+                aibot=WeComAIBotSettings(
+                    enabled=bool(_section(_section(gateway, "wecom"), "aibot").get("enabled", False)),
+                    bot_id=os.getenv("IRIS_WECOM_BOT_ID", ""),
+                    secret=os.getenv("IRIS_WECOM_BOT_SECRET", ""),
+                    script_path=Path(_section(_section(gateway, "wecom"), "aibot").get("script_path", "integrations/wecom-aibot/bridge.mjs")),
+                    owner_file=Path(_section(_section(gateway, "wecom"), "aibot").get("owner_file", "data/gateway/wecom_aibot_owner.json")),
+                    respond_groups=bool(_section(_section(gateway, "wecom"), "aibot").get("respond_groups", False)),
+                    allowed_users=_split_csv(_section(_section(gateway, "wecom"), "aibot").get("allowed_users")),
+                    allow_all=bool(_section(_section(gateway, "wecom"), "aibot").get("allow_all", False)),
+                ),
             ),
             push=PushGatewaySettings(
                 enabled=bool(_section(gateway, "push").get("enabled", False)),
                 qq_target=str(_section(gateway, "push").get("qq_target", "")),
             ),
         ),
+        personal_assistant=PersonalAssistantSettings(
+            enabled=bool(personal_assistant.get("enabled", False)),
+            directory=Path(personal_assistant.get("directory", "data/personal_assistant")),
+            timezone=str(personal_assistant.get("timezone", "Asia/Shanghai")),
+            default_reminder_hour=int(personal_assistant.get("default_reminder_hour", 20)),
+            reminder_interval_days=int(personal_assistant.get("reminder_interval_days", 2)),
+            quiet_start_hour=int(personal_assistant.get("quiet_start_hour", 22)),
+            quiet_end_hour=int(personal_assistant.get("quiet_end_hour", 8)),
+        ),
     )
     if not settings.llm.model.strip() or settings.agent.max_tool_rounds < 1:
         raise ConfigurationError("模型名称不能为空，且 max_tool_rounds 必须大于 0")
+    if settings.tts.enabled:
+        parsed_tts_url = urlparse(settings.tts.base_url)
+        if parsed_tts_url.scheme not in {"http", "https"} or not parsed_tts_url.netloc:
+            raise ConfigurationError("tts.base_url 必须是 http 或 https URL")
+        if not settings.tts.reference_text.strip():
+            raise ConfigurationError("tts.reference_text 不能为空")
+        if (
+            settings.tts.startup_timeout_seconds <= 0
+            or settings.tts.request_timeout_seconds <= 0
+            or settings.tts.max_text_chars < 1
+            or settings.tts.max_audio_bytes < 44
+            or settings.tts.emotion_aux_reference_count < 0
+        ):
+            raise ConfigurationError("TTS 超时和大小限制必须大于 0")
     if (
         settings.reports.max_input_chars < 1
         or settings.reports.max_revision_chars < 1
@@ -671,6 +778,14 @@ def load_settings(config_path: str | Path = "agent.yaml", **overrides: Any) -> S
         settings.hot_radar.poll_interval_seconds < 1
     ):
         raise ConfigurationError("热点雷达轮询间隔必须大于 0")
+    if not settings.personal_assistant.timezone.strip():
+        raise ConfigurationError("personal_assistant.timezone 不能为空")
+    if not 0 <= settings.personal_assistant.default_reminder_hour <= 23:
+        raise ConfigurationError("personal_assistant.default_reminder_hour 必须在 0 到 23 之间")
+    if settings.personal_assistant.reminder_interval_days < 1:
+        raise ConfigurationError("personal_assistant.reminder_interval_days 必须大于 0")
+    if not 0 <= settings.personal_assistant.quiet_start_hour <= 23 or not 0 <= settings.personal_assistant.quiet_end_hour <= 23:
+        raise ConfigurationError("personal_assistant 静默时段小时必须在 0 到 23 之间")
     if settings.web_search.default_search_depth not in {"basic", "advanced"}:
         raise ConfigurationError("默认搜索深度必须是 basic 或 advanced")
     if not 1 <= settings.web_search.max_results <= 20:

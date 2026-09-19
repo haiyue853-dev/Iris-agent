@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 import type { SkillInfo } from "@/types";
 
 export type IrisChatContextValue = {
+  getSessionId?: () => string;
   resolveApproval: (callId: string, approved: boolean) => Promise<void>;
   regenerate: (userMessageId: string) => Promise<void>;
   isRegenerating: boolean;
@@ -27,6 +28,7 @@ export const IrisChatContext = createContext<IrisChatContextValue | null>(null);
 export function useIrisChat(): IrisChatContextValue {
   const ctx = useContext(IrisChatContext);
   return ctx ?? {
+    getSessionId: () => "",
     capabilityModeLocked: false,
     resolveApproval: async () => undefined,
     regenerate: async () => undefined,

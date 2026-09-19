@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import uuid
 import threading
 from dataclasses import dataclass, replace
@@ -9,6 +10,9 @@ from typing import Callable, Generic, Protocol, TypeVar
 from urllib.parse import urlsplit
 
 import openai
+import httpx
+
+_LOGGER = logging.getLogger(__name__)
 
 from .models import ApiProfile, ProfileCollection
 
@@ -117,12 +121,15 @@ class ProfileService(Generic[ProviderT]):
         elif api_key is None:
             api_key = ""
 
+        http_client = httpx.Client(trust_env=False)
+        client = None
         try:
             client = self._client_factory(
                 base_url=base_url,
                 api_key=api_key or "local-no-key",
                 timeout=10.0,
                 max_retries=0,
+                http_client=http_client,
             )
             client.chat.completions.create(
                 model=model,
@@ -138,15 +145,27 @@ class ProfileService(Generic[ProviderT]):
         except openai.APIConnectionError:
             result = ConnectionResult(False, "connection_failed", "连接失败")
         except openai.APIStatusError as error:
+            _LOGGER.warning("模型服务返回错误状态 status=%s", error.status_code)
             result = ConnectionResult(
                 False,
                 "model_unavailable" if error.status_code == 404 else "provider_error",
                 "模型不可用" if error.status_code == 404 else "服务商错误",
             )
-        except Exception:
+        except Exception as exc:
+            # 前端只该看到「服务商错误」，但真实原因必须落到日志里，否则没法判断是
+            # DNS、代理、证书还是 SDK 版本问题。
+            # 只记异常类型、不记消息与堆栈：连通性检查的报错消息里可能直接带着 API key
+            # （test_connection_maps_errors_to_stable_safe_results 就是守这条线的）。
+            _LOGGER.warning("模型连通性检查出现未分类错误：%s", type(exc).__name__)
             result = ConnectionResult(False, "provider_error", "服务商错误")
         else:
             result = ConnectionResult(True, "connected", "连接成功")
+        finally:
+            close_client = getattr(client, "close", None)
+            if callable(close_client):
+                close_client()
+            else:
+                http_client.close()
 
         if value.profile_id is not None:
             with self._lock:
@@ -234,11 +253,15 @@ class ProfileService(Generic[ProviderT]):
         target = self._find(previous, profile_id)
         try:
             old_provider = self._get_provider()
-        except Exception:
+        except Exception as exc:
+            # 异常链被 from None 抹掉了（不向前端泄露内部细节），所以原因必须落在日志里。
+            # 同 test_connection：只记类型，异常消息可能带凭据。
+            _LOGGER.warning("读取运行时 provider 失败（profile=%s）：%s", profile_id, type(exc).__name__)
             raise ProfileActivationError("Unable to read runtime provider") from None
         try:
             provider = self._provider_factory(target)
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning("构造 provider 失败（profile=%s）：%s", profile_id, type(exc).__name__)
             raise ProfileValidationError("Unable to construct provider") from None
         activated = replace(previous, active_id=target.id)
         try:
@@ -248,15 +271,22 @@ class ProfileService(Generic[ProviderT]):
             raise
         try:
             self._replace_provider(provider)
-        except Exception:
+        except Exception as exc:
             store_restored = runtime_restored = True
+            _LOGGER.warning(
+                "切换运行时 provider 失败，开始回滚（profile=%s）：%s",
+                profile_id,
+                type(exc).__name__,
+            )
             try:
                 self._store.save(previous)
             except Exception:
+                _LOGGER.warning("回滚失败：配置存储未能恢复（profile=%s）", profile_id)
                 store_restored = False
             try:
                 self._replace_provider(old_provider)
             except Exception:
+                _LOGGER.warning("回滚失败：运行时 provider 未能恢复（profile=%s）", profile_id)
                 runtime_restored = False
             self._disposer(provider)
             if not store_restored or not runtime_restored:
@@ -273,7 +303,7 @@ class ProfileService(Generic[ProviderT]):
             try:
                 close()
             except Exception:
-                pass
+                _LOGGER.debug("关闭 provider 时出错（已忽略）", exc_info=True)
 
     @staticmethod
     def _find(collection: ProfileCollection, profile_id: str) -> ApiProfile:

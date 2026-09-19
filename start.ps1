@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $frontendRoot = Join-Path $projectRoot 'web-react'
+$wecomBridgeRoot = Join-Path $projectRoot 'integrations\wecom-aibot'
 $envFile = Join-Path $projectRoot '.env'
 
 function Resolve-NpmCommand {
@@ -46,6 +47,13 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 }
 
 $npmCommand = Resolve-NpmCommand
+if (-not (Test-Path -LiteralPath (Join-Path $wecomBridgeRoot 'node_modules\@wecom\aibot-node-sdk'))) {
+    Write-Host 'Installing the official WeCom intelligent-robot SDK...' -ForegroundColor Yellow
+    & $npmCommand install --ignore-scripts --prefix $wecomBridgeRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to install the official WeCom intelligent-robot SDK.'
+    }
+}
 & $pythonExe --version
 & $npmCommand --version
 

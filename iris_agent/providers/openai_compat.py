@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -6,6 +7,8 @@ from typing import Any
 
 from iris_agent.core.errors import ProviderError
 from iris_agent.core.models import Message, ProviderResponse, ToolCall
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider:
@@ -52,6 +55,8 @@ class OpenAICompatibleProvider:
             "messages": [self._encode_message(message) for message in messages],
             "stream": True,
         }
+        if self._should_disable_thinking(messages):
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         if tools:
             kwargs["tools"] = tools
         yielded_content = [False]
@@ -86,13 +91,17 @@ class OpenAICompatibleProvider:
                     try:
                         close()
                     except Exception:
-                        pass
+                        _LOGGER.debug("关闭流式响应时出错（已忽略）", exc_info=True)
 
         pending = pool.submit(open_stream)
         first_chunk = True
         try:
             chunks = pending.result(timeout=max(0, min(first_deadline, deadline) - time.monotonic()))
             while True:
+                now = time.monotonic()
+                if now >= deadline or (first_chunk and now >= first_deadline):
+                    message = "模型首个响应超时，请稍后重试" if first_chunk else "模型流式响应超时，请稍后重试"
+                    raise ProviderError(message)
                 chunk_deadline = first_deadline if first_chunk else time.monotonic() + self.first_token_timeout_seconds
                 pending = pool.submit(next, chunks, end)
                 chunk = pending.result(timeout=max(0, min(chunk_deadline, deadline) - time.monotonic()))
@@ -108,6 +117,14 @@ class OpenAICompatibleProvider:
             # while it is executing or block timeout delivery on executor exit.
             pool.submit(close_stream)
             pool.shutdown(wait=False)
+
+    def _should_disable_thinking(self, messages: list[Message]) -> bool:
+        if "mimo" not in self.model.casefold():
+            return False
+        return any(
+            message.role == "user" and "[本轮模式] 快速模式" in message.model_content
+            for message in reversed(messages)
+        )
 
     def _stream_once(self, kwargs: dict[str, Any], pending_calls: dict[int, dict[str, str]], yielded_content: list[bool]) -> Iterator[ProviderResponse]:
         for chunk in self._bounded_chunks(kwargs):

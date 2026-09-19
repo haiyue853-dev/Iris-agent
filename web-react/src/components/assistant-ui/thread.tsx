@@ -8,6 +8,7 @@ import { Reasoning } from "@/components/assistant-ui/reasoning";
 import { Source } from "@/components/assistant-ui/sources";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
 import { StreamingCursor } from "@/components/assistant-ui/streaming-cursor";
+import { VoiceReadButton, hasSpeakableText } from "@/components/assistant-ui/voice-read-button";
 import { PromptPreviewControls } from "@/components/assistant-ui/prompt-preview-controls";
 import { ActiveSkillChip, SkillPicker } from "@/components/assistant-ui/skill-picker";
 import { CAPABILITY_MODE_KEY, CAPABILITY_MODE_LABELS, nextCapabilityMode, readCapabilityMode } from "@/lib/capability-mode";
@@ -343,6 +344,7 @@ const AssistantMessage: FC = () => {
         <MessageError />
       </div>
 
+      <MessageVoiceReadButton />
       <LatencyBadge />
 
       <div className="aui-assistant-message-footer mt-1 ml-2 flex">
@@ -351,6 +353,21 @@ const AssistantMessage: FC = () => {
       </div>
     </MessagePrimitive.Root>
   );
+};
+
+const MessageVoiceReadButton: FC = () => {
+  const serverMessageId = useAuiState((state) => state.message.metadata.custom.serverMessageId as string | undefined);
+  const status = useAuiState((state) => state.message.status?.type);
+  const hasSpeechText = useAuiState((state) => hasSpeakableText(
+    state.message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n"),
+  ));
+  const { getSessionId } = useIrisChat();
+  const sessionId = getSessionId?.() || "";
+  if (status !== "complete" || !hasSpeechText || !sessionId || !serverMessageId) return null;
+  return <VoiceReadButton sessionId={sessionId} messageId={serverMessageId} />;
 };
 
 const LatencyBadge: FC = () => {
@@ -394,6 +411,7 @@ const RegenerateButton: FC = () => {
 
   return (
     <TooltipIconButton
+      type="button"
       tooltip="重新生成"
       disabled={!userMessageId || isRegenerating}
       onClick={() => {

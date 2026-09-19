@@ -177,6 +177,8 @@ def test_build_application_registers_web_search_tools(tmp_path, monkeypatch):
     tool_names = [schema["function"]["name"] for schema in application.agent.loop.tools.schemas()]
     assert "web_search" in tool_names
     assert "fetch_page" in tool_names
+    assert "web_extract" in tool_names
+    assert "search_files" in tool_names
 
 
 def test_build_application_exposes_knowledge_service_and_tools(tmp_path, monkeypatch):
@@ -352,6 +354,7 @@ def test_build_application_passes_max_download_bytes_to_page_fetcher(tmp_path, m
     class FakePageFetcher:
         def __init__(self, **kwargs):
             captured.update(kwargs)
+            self.timeout = kwargs["timeout"]
 
         def fetch(self, url):
             return ""
@@ -599,6 +602,25 @@ def test_build_application_enables_qq_gateway(tmp_path, monkeypatch):
     assert application.wecom_adapter is None
 
 
+def test_build_application_wires_enabled_personal_assistant_into_qq_gateway(tmp_path, monkeypatch):
+    archive_root = tmp_path / "personal"
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "gateway:\n  qq:\n    enabled: true\n"
+        + "personal_assistant:\n  enabled: true\n  directory: " + str(archive_root).replace("\\", "/") + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    application = build_application(config)
+
+    assert application.personal_assistant is not None
+    assert application.gateway.personal_assistant is application.personal_assistant
+    assert application.personal_assistant.repository.root == archive_root
+    assert (archive_root / "raw").is_dir()
+
+
 def test_build_application_enables_wecom_gateway(tmp_path, monkeypatch):
     config = _write_config(tmp_path)
     config.write_text(
@@ -613,6 +635,25 @@ def test_build_application_enables_wecom_gateway(tmp_path, monkeypatch):
 
     assert application.wecom_adapter is not None
     assert application.qq_adapter is None
+
+
+def test_build_application_enables_official_wecom_aibot_bridge(tmp_path, monkeypatch):
+    config = _write_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "gateway:\n  wecom:\n    aibot:\n      enabled: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("IRIS_WECOM_BOT_ID", "bot-id")
+    monkeypatch.setenv("IRIS_WECOM_BOT_SECRET", "bot-secret")
+
+    application = build_application(config)
+
+    assert application.wecom_aibot is not None
+    assert application.wecom_aibot.bot_id == "bot-id"
+    assert application.wecom_aibot.secret == "bot-secret"
+    assert application.wecom_adapter is None
 
 
 def test_create_app_registers_gateway_endpoints_when_enabled(tmp_path, monkeypatch):

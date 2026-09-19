@@ -61,6 +61,8 @@ from iris_agent.gateway.qq import QQOneBotAdapter
 from iris_agent.gateway.napcat import NapCatLauncher
 from iris_agent.gateway.wecom import WeComAdapter, WeComCryptError
 from iris_agent.api.gateway_api import register_gateway_routes
+from iris_agent.api.tts_api import register_tts_routes
+from iris_agent.tts.service import TtsService
 from iris_agent.reports.errors import (
     ReportAttachmentError,
     ReportAttachmentExtractError,
@@ -215,12 +217,14 @@ def create_app(
     gateway: GatewayService | None = None,
     qq_adapter: QQOneBotAdapter | None = None,
     wecom_adapter: WeComAdapter | None = None,
+    wecom_aibot=None,
     qq_ws_path: str = "/gateway/qq/ws",
     wecom_callback_path: str = "/gateway/wecom/callback",
     chat_attachments: AttachmentService | None = None,
     settings_profiles: SettingsProfileService | None = None,
     delegation: DelegationService | None = None,
     napcat: NapCatLauncher | None = None,
+    tts: TtsService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Iris Agent API", version="0.1.0")
     chat_cancellations = ChatCancellationRegistry()
@@ -283,7 +287,9 @@ def create_app(
         register_curator_routes(app, curator)
     if chat_attachments is not None:
         register_attachment_routes(app, chat_attachments)
-    register_gateway_routes(app, qq_adapter, qq_ws_path, napcat)
+    if tts is not None:
+        register_tts_routes(app, tts)
+    register_gateway_routes(app, qq_adapter, qq_ws_path, napcat, wecom_aibot)
 
     if qq_adapter is not None:
         @app.websocket(qq_ws_path)

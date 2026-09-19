@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from iris_agent.tools.base import Tool, ToolInvocationError
 from iris_agent.web_search.fetcher import PageFetcher
+from iris_agent.web_search.extractor import PageExtractor
 from iris_agent.web_search.models import SearchOptions
 from iris_agent.web_search.search import WebSearchClient
 
@@ -67,11 +68,13 @@ def build_web_search_tool(client: WebSearchClient, default_search_depth: str = "
                 break
             else:
                 search_signature.bind(query, limit, options)
-        if results:
-            return {"results": [result.to_dict() for result in results]}
-        if client.last_error:
-            raise ToolInvocationError("web_search_failed", client.last_error)
-        return {"results": []}
+        if not results and client.last_error:
+            raise ToolInvocationError(getattr(client, "last_error_code", None) or "web_search_failed", client.last_error)
+        payload = {"results": [result.to_dict() for result in results]}
+        metadata = getattr(client, "last_metadata", None)
+        if metadata:
+            payload["metadata"] = metadata
+        return payload
 
     return Tool(
         "web_search",
@@ -124,10 +127,13 @@ def build_web_search_tool(client: WebSearchClient, default_search_depth: str = "
         },
         web_search,
         requires_approval=False,
+        timeout_seconds=getattr(client, "timeout", 15),
     )
 
 
 def _fetch_page_text(fetcher: PageFetcher, url: str, query_hint: str | None, *, summarize: bool) -> str:
+    if not summarize and callable(getattr(fetcher, "extract", None)):
+        return fetcher.extract(url)["text"]
     fetch = fetcher.fetch
     try:
         fetch_signature = signature(fetch)
@@ -153,7 +159,9 @@ def _extract_canonical_urls(text: str) -> list[str]:
 
 
 def build_fetch_page_tool(fetcher: PageFetcher) -> Tool:
-    def fetch_page(url: str, query_hint: str | None = None, content_mode: str = "summary"):
+    def fetch_page(url: str, query_hint: str | None = None, content_mode: str = "full"):
+        if content_mode == "full" and callable(getattr(fetcher, "extract", None)):
+            return fetcher.extract(url)
         text = _fetch_page_text(
             fetcher,
             url,
@@ -164,7 +172,7 @@ def build_fetch_page_tool(fetcher: PageFetcher) -> Tool:
 
     return Tool(
         "fetch_page",
-        "抓取指定网页并提取正文纯文本。默认返回摘要；用户要求完整页面、面试问题与答案或入库素材时，将 content_mode 设为 full。",
+        "抓取网页正文，默认 full 保留全文与链接，不额外调用模型。仅显式 summary 生成摘要。批量读取使用 web_extract。",
         {
             "type": "object",
             "properties": {
@@ -184,6 +192,20 @@ def build_fetch_page_tool(fetcher: PageFetcher) -> Tool:
         },
         fetch_page,
         requires_approval=False,
+        timeout_seconds=getattr(fetcher, "timeout", 15) + 1,
+    )
+
+
+def build_web_extract_tool(fetcher: PageFetcher) -> Tool:
+    extractor = PageExtractor(fetcher)
+    return Tool(
+        "web_extract", "并发提取 1 到 5 个网页或 PDF 的正文，保留来源、逐页错误和耗时；无需额外模型摘要。",
+        {"type": "object", "properties": {
+            "urls": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 4096},
+                     "minItems": 1, "maxItems": 5}}, "required": ["urls"], "additionalProperties": False},
+        extractor.extract_many,
+        # Allow the collector to return partial results before the outer guard expires.
+        timeout_seconds=extractor.timeout + 1,
     )
 
 

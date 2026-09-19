@@ -66,6 +66,34 @@ describe("Iris chat adapter", () => {
     expect(streamChat.mock.calls[0]?.[11]).toBe("web-research");
   });
 
+  it("keeps the completed backend message id in assistant metadata", async () => {
+    streamChat.mockImplementationOnce(async (...args: unknown[]) => {
+      const onEvent = args[3] as (event: unknown) => void;
+      onEvent({
+        type: "message_completed",
+        data: { message_id: "message_tomori", content: "你好，我是高松灯。", citations: [] },
+      });
+    });
+    const queue = createEventQueue();
+    const adapter = createIrisAdapter({
+      getSessionId: () => "session-1",
+      ensureSession: async () => "session-1",
+      enqueue: queue.push,
+      queue,
+      registerController: () => undefined,
+    });
+    const stream = adapter.run({
+      messages: [{ role: "user", content: [{ type: "text", text: "你好" }] }],
+      abortSignal: new AbortController().signal,
+    } as never) as AsyncGenerator<{ metadata?: { custom?: Record<string, unknown> } }>;
+
+    await stream.next();
+    await stream.next();
+    const completed = await stream.next();
+
+    expect(completed.value.metadata?.custom?.serverMessageId).toBe("message_tomori");
+  });
+
   it("forwards the source user message ID when regenerating an answer", async () => {
     streamChat.mockClear();
     const queue = createEventQueue();

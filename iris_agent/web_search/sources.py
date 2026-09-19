@@ -6,6 +6,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from iris_agent.web_search.models import SearchOptions, SearchResult
+from iris_agent.web_search.errors import SearchSourceError, classify_search_error
 
 _BING_URL = "https://www.bing.com/search"
 _DDG_URL = "https://html.duckduckgo.com/html/"
@@ -50,17 +51,18 @@ class BingSearchSource:
         if self._owns_client:
             self._client.close()
 
-    def search(self, query: str, limit: int, options: SearchOptions | None = None) -> list[SearchResult]:
+    def search(self, query: str, limit: int, options: SearchOptions | None = None, *, timeout: float | None = None) -> list[SearchResult]:
         query = _html_search_query(query, options)
         try:
             response = self._client.get(
                 _BING_URL,
                 params={"q": query, "count": limit},
                 headers={"User-Agent": _DESKTOP_UA, **_COMMON_HEADERS},
+                timeout=timeout or self.timeout,
             )
             response.raise_for_status()
-        except Exception:
-            return []
+        except httpx.HTTPError as exc:
+            raise classify_search_error(exc) from exc
         return self._parse(response.text, limit)
 
     def _parse(self, html: str, limit: int) -> list[SearchResult]:
@@ -103,17 +105,18 @@ class DuckDuckGoSearchSource:
         if self._owns_client:
             self._client.close()
 
-    def search(self, query: str, limit: int, options: SearchOptions | None = None) -> list[SearchResult]:
+    def search(self, query: str, limit: int, options: SearchOptions | None = None, *, timeout: float | None = None) -> list[SearchResult]:
         query = _html_search_query(query, options)
         try:
             response = self._client.get(
                 _DDG_URL,
                 params={"q": query},
                 headers={"User-Agent": _DESKTOP_UA, **_COMMON_HEADERS},
+                timeout=timeout or self.timeout,
             )
             response.raise_for_status()
-        except Exception:
-            return []
+        except httpx.HTTPError as exc:
+            raise classify_search_error(exc) from exc
         return self._parse(response.text, limit)
 
     def _parse(self, html: str, limit: int) -> list[SearchResult]:
@@ -144,6 +147,7 @@ class DuckDuckGoSearchSource:
 
 class TavilySearchSource:
     name = "tavily"
+    supports_options = frozenset({'topic', 'time_range', 'include_domains', 'exclude_domains', 'search_depth'})
 
     def __init__(
         self,
@@ -164,7 +168,10 @@ class TavilySearchSource:
         if self._owns_client:
             self._client.close()
 
-    def search(self, query: str, limit: int, options: SearchOptions | None = None) -> list[SearchResult]:
+    def is_available(self):
+        return bool(self.api_key.strip())
+
+    def search(self, query: str, limit: int, options: SearchOptions | None = None, *, timeout: float | None = None) -> list[SearchResult]:
         options = options or SearchOptions()
         payload: dict[str, object] = {
             "query": query,
@@ -185,16 +192,17 @@ class TavilySearchSource:
                 json=payload,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 follow_redirects=False,
+                timeout=timeout or self.timeout,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
-            return []
+        except httpx.HTTPError as exc:
+            raise classify_search_error(exc) from exc
         try:
             data = response.json()
-        except ValueError:
-            return []
+        except ValueError as exc:
+            raise SearchSourceError('search_invalid_response', '搜索源返回了无效数据') from exc
         if not isinstance(data, dict) or not isinstance(data.get("results"), list):
-            return []
+            raise SearchSourceError('search_invalid_response', '搜索源返回了无效数据')
 
         results: list[SearchResult] = []
         for item in data["results"]:

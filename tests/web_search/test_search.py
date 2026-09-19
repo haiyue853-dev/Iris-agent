@@ -249,14 +249,14 @@ def test_search_falls_back_to_second_source():
     assert results[0].title == "DDG 结果 X"
 
 
-def test_search_records_error_when_all_sources_empty():
+def test_search_distinguishes_empty_results_from_errors():
     def empty_handler(request):
         return httpx.Response(200, text="<html>无结果</html>")
     source = BingSearchSource(http_client=httpx.Client(transport=httpx.MockTransport(empty_handler)))
     client = WebSearchClient(sources=[source])
 
     assert client.search("查询") == []
-    assert client.last_error is not None
+    assert client.last_error is None
 
 
 class StubSearchSource:
@@ -277,9 +277,9 @@ def _result(url, *, title="title", snippet="snippet", score=None):
     return SearchResult(title=title, url=url, snippet=snippet, score=score)
 
 
-def test_search_passes_same_options_and_retries_empty_source():
+def test_search_passes_same_options_and_retries_transient_failure():
     options = SearchOptions(topic="news", time_range="week")
-    source = StubSearchSource("stub", [[], [_result("https://example.com/item")]])
+    source = StubSearchSource("stub", [httpx.ConnectError("temporary"), [_result("https://example.com/item")]])
     client = WebSearchClient(sources=[source], max_retries=2)
 
     results = client.search("query", options=options)
@@ -306,13 +306,13 @@ def test_search_falls_back_after_source_exception_without_leaking_details():
 
     assert client.search("query")[0].url == "https://safe.example/"
     assert client.last_error is None
-    assert len(first.calls) == 2
+    assert len(first.calls) == 1
 
     failing = WebSearchClient(
         sources=[StubSearchSource("unsafe-source", [RuntimeError(secret), RuntimeError(secret)])]
     )
     assert failing.search("query") == []
-    assert failing.last_error == "unsafe-source 无结果"
+    assert failing.last_error_code == "search_backend_error"
     assert secret not in failing.last_error
 
 
@@ -398,19 +398,19 @@ def test_search_supports_legacy_source_with_two_argument_search():
     source = LegacySource()
 
     results = WebSearchClient(sources=[source]).search(
-        "query", options=SearchOptions(topic="news")
+        "query", options=SearchOptions()
     )
 
     assert [result.url for result in results] == ["https://legacy.example/result"]
     assert source.calls == [("query", 5)]
 
 
-def test_search_default_max_retries_attempts_empty_source_twice():
+def test_search_default_does_not_retry_empty_source():
     source = StubSearchSource("stub", [[], []])
 
     assert WebSearchClient(sources=[source]).search("query") == []
 
-    assert len(source.calls) == 2
+    assert len(source.calls) == 1
 
 
 def test_search_normalizes_ipv6_hosts_and_ports():
@@ -495,19 +495,15 @@ def test_search_supports_keyword_only_options():
     assert source.options is options
 
 
-def test_search_stops_fallback_on_unsupported_filter_value_error():
+def test_search_falls_back_with_unchanged_filters_after_unsupported_source():
     secret = "api-key-must-not-leak"
-    tavily = StubSearchSource("Tavily", [[], []])
+    tavily = StubSearchSource("Tavily", [[]])
     bing = StubSearchSource("Bing", [ValueError(f"unsupported time_range {secret}")])
     ddg = StubSearchSource("DuckDuckGo", [[_result("https://ddg.example/result")]])
     client = WebSearchClient(sources=[tavily, bing, ddg])
-
-    assert client.search("query", options=SearchOptions(time_range="week")) == []
-
-    assert len(tavily.calls) == 2
-    assert len(bing.calls) == 1
-    assert ddg.calls == []
-    assert "Bing" in client.last_error
-    assert "不支持" in client.last_error
-    assert "时间范围" in client.last_error
-    assert secret not in client.last_error
+    options = SearchOptions(time_range="week")
+    assert client.search("query", options=options)[0].url == "https://ddg.example/result"
+    assert len(tavily.calls) == len(bing.calls) == len(ddg.calls) == 1
+    assert ddg.calls[0][2] is options
+    assert client.last_error is None
+    assert secret not in str(client.last_metadata)

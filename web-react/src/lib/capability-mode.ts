@@ -1,4 +1,4 @@
-export type Toolset = 'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation';
+export type Toolset = 'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation' | 'mcp';
 export type CapabilityMode = 'daily' | 'research' | 'collaboration';
 
 export const CAPABILITY_MODE_KEY = 'iris_chat_capability_mode';
@@ -11,9 +11,9 @@ export const CAPABILITY_MODE_LABELS: Record<CapabilityMode, string> = {
 };
 
 const TOOLSETS: Record<CapabilityMode, Toolset[]> = {
-  daily: ['safe', 'skills'],
-  research: ['safe', 'knowledge', 'skills'],
-  collaboration: ['safe', 'knowledge', 'skills', 'delegation'],
+  daily: ['safe', 'skills', 'mcp'],
+  research: ['safe', 'knowledge', 'skills', 'mcp'],
+  collaboration: ['safe', 'knowledge', 'skills', 'delegation', 'mcp'],
 };
 
 export function readCapabilityMode(): CapabilityMode {

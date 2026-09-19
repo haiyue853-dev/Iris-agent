@@ -29,7 +29,7 @@ class MutableMemory:
         return [SimpleNamespace(category="fact", content=self.value)]
 
 
-def test_session_runtime_snapshot_keeps_system_prefix_and_refreshes_tools(tmp_path):
+def test_runtime_snapshot_refreshes_memory_and_tools(tmp_path):
     provider = CapturingProvider()
     memory = MutableMemory()
     registry = ToolRegistry()
@@ -45,7 +45,8 @@ def test_session_runtime_snapshot_keeps_system_prefix_and_refreshes_tools(tmp_pa
 
     first_system = [message.content for message in provider.messages[0] if message.role == "system"]
     second_system = [message.content for message in provider.messages[1] if message.role == "system"]
-    assert first_system == second_system == ["system", "[记忆·fact] first"]
+    assert first_system == ["system", "[记忆·fact] first"]
+    assert second_system == ["system", "[记忆·fact] second"]
     assert [schema["function"]["name"] for schema in provider.tools[0]] == ["recall"]
     assert [schema["function"]["name"] for schema in provider.tools[1]] == ["recall", "later"]
     saved = repo.get(session.id)
@@ -53,6 +54,24 @@ def test_session_runtime_snapshot_keeps_system_prefix_and_refreshes_tools(tmp_pa
     user_messages = [message for message in saved.messages if message.role == "user"]
     assert "快速模式" in user_messages[0].prompt_content
     assert "思考模式" in user_messages[1].prompt_content
+
+
+def test_long_lived_session_sees_memory_written_after_it_started(tmp_path):
+    """QQ 网关把 (platform, user_id) 永久映射到同一个 session，会话中途写入的记忆必须生效。"""
+    provider = CapturingProvider()
+    memory = MutableMemory()
+    registry = ToolRegistry()
+    repo = JsonSessionRepository(tmp_path)
+    session = repo.create("test")
+    service = AgentService(AgentLoop(provider, registry), repo, "system", memory=memory)
+
+    list(service.run(session.id, "记住我喜欢乌龙茶", response_mode="fast"))
+    memory.value = "用户喜欢乌龙茶"
+    list(service.run(session.id, "我喜欢什么茶？", response_mode="fast"))
+
+    system_contents = [message.content for message in provider.messages[-1] if message.role == "system"]
+    assert system_contents == ["system", "[记忆·fact] 用户喜欢乌龙茶"]
+    assert repo.get(session.id).runtime_snapshot.epoch == 2
 
 
 def test_runtime_snapshot_survives_json_round_trip(tmp_path):

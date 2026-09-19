@@ -2,11 +2,15 @@
 
 from contextvars import copy_context
 from queue import Empty, Full, Queue
+import logging
 import threading
 from time import monotonic
 
 from iris_agent.core.models import AgentEvent
 from iris_agent.tools.base import ToolExecutionResult, ToolInvocationError
+from iris_agent.tools.context import execution_context
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ToolExecutor:
@@ -18,7 +22,7 @@ class ToolExecutor:
 
     def execute(self, call, registry, cancelled):
         started = monotonic()
-        deadline = started + self.timeout_seconds
+        deadline = started + registry.execution_timeout(call.name, self.timeout_seconds)
         acquired = False
         while not cancelled() and monotonic() < deadline:
             if self._slots.acquire(timeout=min(.05, max(0, deadline - monotonic()))):
@@ -50,9 +54,16 @@ class ToolExecutor:
             try:
                 cancel()
             except Exception:
-                pass
+                # 取消失败意味着这个执行槽可能一直被占着，必须留下记录。
+                _LOGGER.warning("取消工具执行失败，该执行可能仍在后台继续", exc_info=True)
 
         def work():
+            def report(item):
+                try:
+                    progress.put_nowait(item)
+                except Full:
+                    pass
+            token = execution_context.set((deadline, stopped, report))
             try:
                 if stopped.is_set():
                     return
@@ -86,6 +97,7 @@ class ToolExecutor:
             except Exception as exc:
                 state['result'] = ToolExecutionResult(False, error_code='tool_execution_error', error_message=str(exc))
             finally:
+                execution_context.reset(token)
                 done.set()
                 self._slots.release()
 

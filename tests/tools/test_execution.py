@@ -6,6 +6,19 @@ from iris_agent.tools.base import Tool
 from iris_agent.tools.registry import ToolRegistry
 
 
+def test_per_tool_timeout_bounds_a_blocking_handler():
+    from iris_agent.tools.execution import ToolExecutor
+    release = threading.Event()
+    registry = ToolRegistry()
+    registry.register(Tool('slow', '', {'type': 'object'}, lambda: release.wait(2), timeout_seconds=.04))
+    try:
+        events = list(ToolExecutor(timeout_seconds=1).execute(ToolCall('c', 'slow'), registry, lambda: False))
+        assert events[-1].data['error_code'] == 'tool_timeout'
+        assert events[-1].data['duration_ms'] < 500
+    finally:
+        release.set()
+
+
 def test_cancel_returns_without_waiting_for_blocked_tool():
     started, release, cancelled = threading.Event(), threading.Event(), threading.Event()
     registry = ToolRegistry()

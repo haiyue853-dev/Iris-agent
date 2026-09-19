@@ -180,8 +180,13 @@ export function AssistantChat({
 
   const regenerate = useCallback(async (userMessageId: string) => {
     const activeSessionId = sessionIdRef.current;
-    const sourceMessage = messages.find((message) => message.id === userMessageId && message.role === "user");
-    if (!activeSessionId || !sourceMessage || isRegenerating) return;
+    if (!activeSessionId || isRegenerating) return;
+    const targetIndex = messages.findIndex((message) => message.id === userMessageId);
+    const candidates = targetIndex >= 0 ? messages.slice(0, targetIndex + 1) : messages;
+    const sourceMessage = messages.find(
+      (message) => message.id === userMessageId && message.role === "user",
+    ) ?? [...candidates].reverse().find((message) => message.role === "user");
+    if (!sourceMessage) return;
 
     setIsRegenerating(true);
     try {
@@ -205,7 +210,7 @@ export function AssistantChat({
         knowledgeCollectionId || undefined,
         knowledgeQueryMode,
         useKnowledge,
-        userMessageId,
+        sourceMessage.id || userMessageId,
         localStorage.getItem("iris_chat_response_mode") === "thinking" ? "thinking" : "fast",
         toolsets,
         activeSkill?.id,
@@ -227,6 +232,7 @@ export function AssistantChat({
 
   const ctxValue = useMemo<IrisChatContextValue>(
     () => ({
+      getSessionId: () => sessionIdRef.current,
       capabilityModeLocked: false,
       regenerate,
       isRegenerating,

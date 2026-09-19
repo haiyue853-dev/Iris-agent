@@ -33,7 +33,7 @@ export type UserSkillDraft = {
   name: string;
   description: string;
   content: string;
-  allowed_toolsets: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation'>;
+  allowed_toolsets: Array<'safe' | 'research' | 'coding' | 'knowledge' | 'skills' | 'delegation' | 'mcp'>;
 };
 
 export type UserSkillContent = SkillInfo & {

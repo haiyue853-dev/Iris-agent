@@ -47,6 +47,34 @@ describe('AssistantChat composer', () => {
     expect(screen.getByRole('button', { name: '选择模型' })).toBeVisible();
   });
 
+  it('shows speech controls below completed assistant replies only', async () => {
+    render(<AssistantChat sessionId="session-1" messages={[
+      { id: 'user-1', role: 'user', content: '你好' },
+      { id: 'assistant-1', role: 'assistant', content: '你好，我是高松灯。' },
+    ]} />);
+
+    expect(await screen.findAllByRole('button', { name: '语音朗读' })).toHaveLength(1);
+  });
+
+  it('hides speech controls for an empty assistant placeholder', async () => {
+    render(<AssistantChat sessionId="session-1" messages={[
+      { id: 'user-1', role: 'user', content: '你好' },
+      { id: 'assistant-empty', role: 'assistant', content: '' },
+    ]} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('button', { name: '语音朗读' })).not.toBeInTheDocument();
+  });
+
+  it('hides speech controls when an assistant reply contains only fenced code', async () => {
+    render(<AssistantChat sessionId="session-1" messages={[
+      { id: 'assistant-code', role: 'assistant', content: '```ts\nconst value = 1;\n```' },
+    ]} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('button', { name: '语音朗读' })).not.toBeInTheDocument();
+  });
+
   it('selects one Skill as a visual chip without inserting its description into the draft', async () => {
     vi.mocked(fetchSkills).mockResolvedValue([
       { id: 'web-research', name: '网页研究', description: '抓取并整理完整网页内容', icon: 'sparkles', category: 'research', entry_view: 'chat', version: 1, enabled: true },

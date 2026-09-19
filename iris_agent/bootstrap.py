@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Callable
 
+import httpx
 from openai import OpenAI
 
 from iris_agent.config.settings import Settings, load_settings
@@ -14,6 +15,8 @@ from iris_agent.core.agent import AgentLoop, AgentService
 from iris_agent.hot_radar.service import HotRadarService
 from iris_agent.automation.service import AutomationService
 from iris_agent.notifications.service import NotificationService
+from iris_agent.personal_assistant.classifier import ProviderMessageClassifier, RuleBasedMessageClassifier
+from iris_agent.personal_assistant.service import PersonalAssistantService
 from iris_agent.knowledge.embedder import OllamaEmbedder
 from iris_agent.knowledge.extractor import OllamaGraphExtractor
 from iris_agent.knowledge.semantic_splitter import LocalSemanticSplitter
@@ -34,8 +37,10 @@ from iris_agent.gateway.service import GatewayService
 from iris_agent.gateway.qq import QQOneBotAdapter
 from iris_agent.gateway.napcat import NapCatLauncher
 from iris_agent.gateway.wecom import WeComAdapter
+from iris_agent.gateway.wecom_aibot import WeComAIBotBridge
 from iris_agent.mcp_center.service import McpCenterService
 from iris_agent.mcp_center.tools import McpToolRefresher, register_mcp_tools
+from iris_agent.memory.auto_capture import MemoryAutoCapture
 from iris_agent.memory.repository import MemoryRepository
 from iris_agent.memory.service import MemoryService
 from iris_agent.profile.extractor import ProfileExtractor
@@ -60,7 +65,7 @@ from iris_agent.subagent.delegation import DelegationRepository, DelegationServi
 from iris_agent.task_center.service import TaskCenterService
 from iris_agent.task_queue.repository import QueueRepository
 from iris_agent.task_queue.service import TaskQueueService
-from iris_agent.tools.builtin import build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_replace_in_file_tool, build_run_command_tool, build_write_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_delegate_tasks_tool, build_delegate_workflow_tool, build_request_subagent_collaboration_tool, build_web_search_tool, build_fetch_page_tool, build_collect_interview_knowledge_tool, build_add_knowledge_tool, build_search_knowledge_tool
+from iris_agent.tools.builtin import build_search_files_tool, build_web_extract_tool, build_current_time_tool, build_list_directory_tool, build_read_file_tool, build_replace_in_file_tool, build_run_command_tool, build_write_file_tool, build_remember_tool, build_recall_tool, build_use_skill_tool, build_save_skill_tool, build_delegate_task_tool, build_delegate_tasks_tool, build_delegate_workflow_tool, build_request_subagent_collaboration_tool, build_web_search_tool, build_fetch_page_tool, build_collect_interview_knowledge_tool, build_add_knowledge_tool, build_search_knowledge_tool
 from iris_agent.web_search.browser_fetcher import BrowserFetcher
 from iris_agent.web_search.fetcher import PageFetcher
 from iris_agent.web_search.search import WebSearchClient
@@ -68,6 +73,10 @@ from iris_agent.web_search.sources import BingSearchSource, DuckDuckGoSearchSour
 from iris_agent.web_search.summarizer import PageSummarizer
 from iris_agent.tools.registry import ToolRegistry
 from iris_agent.tools.capabilities import CapabilityResolver
+from iris_agent.tts.client import GptSovitsClient
+from iris_agent.tts.emotion import EmotionClassifier, EmotionReferenceLibrary, FfprobeDurationProbe, VoiceReference
+from iris_agent.tts.process import GptSovitsProcessManager
+from iris_agent.tts.service import TtsService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -114,10 +123,13 @@ class ApplicationServices:
     curator: CuratorService
     mcp: McpCenterService
     mcp_tools: McpToolRefresher
+    personal_assistant: PersonalAssistantService | None
     gateway: GatewayService
     qq_adapter: QQOneBotAdapter | None
     napcat: NapCatLauncher
     wecom_adapter: WeComAdapter | None
+    wecom_aibot: WeComAIBotBridge | None
+    tts: TtsService
     settings: Settings
     settings_profiles: SettingsProfileService
     chat_attachments: AttachmentService
@@ -135,6 +147,11 @@ class ApplicationServices:
             except Exception as exc:
                 if first_error is None:
                     first_error = exc
+                else:
+                    # 只有第一个错误会被抛出，其余的若不记录就彻底消失了。
+                    logging.getLogger(__name__).warning(
+                        "资源释放时出错（已有更早的错误将被引发）", exc_info=exc
+                    )
         if first_error is not None:
             raise first_error
 
@@ -148,7 +165,8 @@ def build_application(config_path: str | Path = "agent.yaml") -> ApplicationServ
             try:
                 closer()
             except Exception:
-                pass
+                # 启动失败时，回滚阶段再出错也必须留痕：这类资源泄漏最难靠现象发现。
+                logging.getLogger(__name__).exception("启动失败回滚时，资源释放出错")
         raise
 
 
@@ -164,7 +182,12 @@ def _build_application(
     )
 
     def make_provider(value: ApiProfile) -> OpenAICompatibleProvider:
-        client = OpenAI(api_key=value.api_key or "local-no-key", base_url=value.base_url, timeout=settings.llm.timeout_seconds)
+        client = OpenAI(
+            api_key=value.api_key or "local-no-key",
+            base_url=value.base_url,
+            timeout=settings.llm.timeout_seconds,
+            http_client=httpx.Client(trust_env=False),
+        )
         return OpenAICompatibleProvider(client, value.model, settings.llm.temperature)
 
     try:
@@ -173,7 +196,12 @@ def _build_application(
         provider = make_provider(active_profile)
     except ProfileStoreError:
         logging.getLogger(__name__).warning("Settings profile store unavailable; using configured LLM fallback")
-        client = OpenAI(api_key=settings.llm.api_key or "missing", base_url=settings.llm.base_url, timeout=settings.llm.timeout_seconds)
+        client = OpenAI(
+            api_key=settings.llm.api_key or "missing",
+            base_url=settings.llm.base_url,
+            timeout=settings.llm.timeout_seconds,
+            http_client=httpx.Client(trust_env=False),
+        )
         provider = OpenAICompatibleProvider(client, settings.llm.model, settings.llm.temperature)
     provider_handle = SwitchableProvider(provider)
     resource_closers.append(provider_handle.close)
@@ -182,6 +210,7 @@ def _build_application(
     factories = {
         "current_time": lambda: build_current_time_tool(),
         "list_directory": lambda: build_list_directory_tool(settings.tools.workspace_root),
+        "search_files": lambda: build_search_files_tool(settings.tools.workspace_root),
         "read_file": lambda: build_read_file_tool(settings.tools.workspace_root, settings.tools.max_read_chars),
         "write_file": lambda: build_write_file_tool(settings.tools.workspace_root),
         "replace_in_file": lambda: build_replace_in_file_tool(settings.tools.workspace_root),
@@ -196,6 +225,37 @@ def _build_application(
     register_mcp_tools(registry, mcp, cached_only=True)
     mcp_tools = McpToolRefresher(registry, mcp)
     sessions = JsonSessionRepository(settings.sessions.directory)
+    tts_client = GptSovitsClient(settings.tts)
+    tts_runtime = GptSovitsProcessManager(settings.tts, tts_client)
+    emotion_classifier = EmotionClassifier()
+    emotion_references = EmotionReferenceLibrary(
+        settings.tts.emotion_audio_directory,
+        settings.tts.emotion_index_file,
+        VoiceReference(
+            settings.tts.reference_audio_path,
+            settings.tts.reference_text,
+            "neutral",
+            True,
+        ),
+        emotion_classifier,
+        duration_probe=FfprobeDurationProbe(
+            settings.tts.root_directory / "runtime" / "ffprobe.exe"
+        ),
+    )
+    if settings.tts.enabled and settings.tts.emotion_enabled and emotion_references.needs_rebuild():
+        try:
+            emotion_references.rebuild()
+        except OSError:
+            logging.getLogger(__name__).exception("Unable to rebuild TTS emotion references")
+    tts = TtsService(
+        sessions,
+        settings.tts,
+        tts_runtime,
+        tts_client,
+        classifier=emotion_classifier,
+        references=emotion_references,
+    )
+    resource_closers.append(tts_runtime.close)
     memory = MemoryService(
         MemoryRepository(settings.memory.directory),
         max_entries=settings.memory.max_entries,
@@ -241,6 +301,8 @@ def _build_application(
         return None if selected is None else make_provider(selected)
 
     agent = AgentService(loop, sessions, settings.agent.system_prompt, memory=memory, profile_service=profile, compressor=compressor, knowledge=None, vision_enabled=settings.llm.supports_vision, model_profile_resolver=resolve_model_profile)
+    # 自动记忆：规则粗筛命中才走模型，去重策略（唯一答案覆盖 / 可共存并存）由模型判断。
+    agent.memory_capture = MemoryAutoCapture(provider, memory)
     report_repository = JsonDailyReportRepository(
         settings.reports.directory,
         max_versions=settings.reports.max_versions,
@@ -353,6 +415,7 @@ def _build_application(
         default_search_depth=settings.web_search.default_search_depth,
     ))
     registry.register(build_fetch_page_tool(page_fetcher))
+    registry.register(build_web_extract_tool(page_fetcher))
     registry.register(build_collect_interview_knowledge_tool(web_search_client, page_fetcher))
     runtime_config_path = settings.knowledge.files_directory.parent / "runtime.json"
     runtime_defaults = _rag_runtime_defaults(settings)
@@ -420,12 +483,13 @@ def _build_application(
         max_context_chars=settings.knowledge.max_context_chars,
     )
     agent.capability_resolver = CapabilityResolver(registry, {
-        "safe": ("current_time", "list_directory", "read_file", "recall", "read_attachment", "request_subagent_collaboration"),
-        "research": ("web_search", "fetch_page", "collect_interview_knowledge"),
+        "safe": ("current_time", "list_directory", "read_file", "search_files", "recall", "read_attachment", "request_subagent_collaboration"),
+        "research": ("web_search", "fetch_page", "web_extract", "collect_interview_knowledge"),
         "coding": ("write_file", "replace_in_file", "run_command"),
         "knowledge": ("search_knowledge", "add_knowledge"),
         "skills": ("use_skill", "save_skill", "remember"),
         "delegation": ("delegate_task", "delegate_tasks", "delegate_workflow"),
+        "mcp": ("mcp__*",),
     })
     agent.knowledge = knowledge
     agent.knowledge_orchestrator = knowledge_orchestrator
@@ -457,11 +521,28 @@ def _build_application(
     automation = AutomationService(settings.automation.directory, hot_radar, notifications)
     task_center = TaskCenterService(settings.task_center.directory)
     task_queue = TaskQueueService(agent, task_center, QueueRepository(settings.task_queue.directory))
+    personal_assistant = None
+    if settings.personal_assistant.enabled:
+        fallback_classifier = RuleBasedMessageClassifier(
+            default_reminder_hour=settings.personal_assistant.default_reminder_hour,
+        )
+        personal_assistant = PersonalAssistantService(
+            settings.personal_assistant.directory,
+            classifier=ProviderMessageClassifier(lambda: provider, fallback=fallback_classifier),
+            knowledge_sink=knowledge,
+            timezone_name=settings.personal_assistant.timezone,
+            default_reminder_hour=settings.personal_assistant.default_reminder_hour,
+            reminder_interval_days=settings.personal_assistant.reminder_interval_days,
+            quiet_start_hour=settings.personal_assistant.quiet_start_hour,
+            quiet_end_hour=settings.personal_assistant.quiet_end_hour,
+        )
     gateway = GatewayService(
         agent,
         sessions,
         session_prefix=settings.gateway.session_prefix,
         state_file=settings.gateway.directory / "sessions.json",
+        personal_assistant=personal_assistant,
+        workspace_root=settings.tools.workspace_root,
     )
     qq_adapter = (
         QQOneBotAdapter(
@@ -484,6 +565,20 @@ def _build_application(
             token=settings.gateway.wecom.token,
             aes_key=settings.gateway.wecom.aes_key,
         )
+    wecom_aibot = None
+    if settings.gateway.wecom.aibot.enabled:
+        aibot = settings.gateway.wecom.aibot
+        wecom_aibot = WeComAIBotBridge(
+            gateway,
+            bot_id=aibot.bot_id,
+            secret=aibot.secret,
+            script_path=aibot.script_path,
+            owner_file=aibot.owner_file,
+            respond_groups=aibot.respond_groups,
+            allowed_users=tuple(aibot.allowed_users),
+            allow_all=aibot.allow_all,
+        )
+        resource_closers.append(wecom_aibot.stop)
     if settings.gateway.push.enabled and qq_adapter is not None and settings.gateway.push.qq_target:
         qq_target = settings.gateway.push.qq_target
 
@@ -491,4 +586,7 @@ def _build_application(
             qq_adapter.push_text(qq_target, text)
 
         automation.push = _push
-    return ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, gateway, qq_adapter, napcat, wecom_adapter, settings, settings_profiles, chat_attachments, tuple(resource_closers))
+    application = ApplicationServices(agent, sessions, reports, attachments, skills, hot_radar, automation, notifications, task_center, task_queue, memory, session_search, subagent, profile, knowledge, curator, mcp, mcp_tools, personal_assistant, gateway, qq_adapter, napcat, wecom_adapter, wecom_aibot, tts, settings, settings_profiles, chat_attachments, tuple(resource_closers))
+    if settings.tts.enabled and settings.tts.warmup_on_startup:
+        tts_runtime.start_warmup()
+    return application

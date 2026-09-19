@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import socket
 import ipaddress
+from time import monotonic
+from iris_agent.tools.context import remaining
 
 from urllib.parse import urlparse
 
@@ -136,14 +138,16 @@ class BrowserFetcher:
         self.resolver = resolver
         self.max_download_bytes = max_download_bytes
 
-    def fetch(self, url: str) -> str:
+    def fetch(self, url: str, *, timeout: float | None = None) -> str:
         if not self.enabled:
             raise ValueError("浏览器抓取已禁用")
         host, addresses = resolve_url(url, self.resolver)
         chosen = next((address for address in addresses if address.version == 4), None)
         if chosen is None:
             raise UnsafeUrlError("浏览器抓取要求可固定的公网 IPv4 地址")
-        return self._fetch_via_browser(url, host, str(chosen))[: self.max_page_chars]
+        if timeout is None:
+            return self._fetch_via_browser(url, host, str(chosen))[: self.max_page_chars]
+        return self._fetch_via_browser(url, host, str(chosen), deadline=monotonic() + timeout)
 
     def _handle_route(
         self, route, request, blocked: list[UnsafeUrlError], expected_host: str, main_frame
@@ -172,11 +176,14 @@ class BrowserFetcher:
             return
         route.continue_()
 
-    def _fetch_via_browser(self, url: str, navigation_host: str, navigation_ip: str) -> str:
+    def _fetch_via_browser(self, url: str, navigation_host: str, navigation_ip: str, *, deadline: float | None = None) -> str:
         from playwright.sync_api import sync_playwright
 
+        full_content = deadline is not None
+        deadline = deadline or monotonic() + self.timeout
         with sync_playwright() as p:
             browser = p.chromium.launch(
+                timeout=max(1, int(remaining(deadline) * 1000)),
                 channel=self.channel,
                 headless=True,
                 args=[f"--host-resolver-rules=MAP {navigation_host} {navigation_ip}"],
@@ -207,8 +214,8 @@ class BrowserFetcher:
                 )
                 navigation_error = None
                 try:
-                    page.goto(url, timeout=int(self.timeout * 1000))
-                    page.wait_for_load_state("networkidle")
+                    page.goto(url, timeout=max(1, int(remaining(deadline) * 1000)))
+                    page.wait_for_load_state("domcontentloaded", timeout=max(1, int(remaining(deadline) * 1000)))
                 except Exception as exc:
                     navigation_error = exc
                 if blocked:
@@ -220,9 +227,14 @@ class BrowserFetcher:
                 final = urlparse(page.url)
                 if final.scheme not in ("http", "https") or final.hostname is None or final.hostname.lower() != navigation_host:
                     raise UnsafeUrlError("浏览器抓取禁止访问不同主机")
+                remaining(deadline)
                 result = page.locator("body").evaluate(
-                    '(el, max) => (el.innerText || "").slice(0, max)', self.max_page_chars
+                    '(el, max) => (el.outerHTML || "").slice(0, max)' if full_content else '(el, max) => (el.innerText || "").slice(0, max)',
+                    self.max_download_bytes if full_content else self.max_page_chars,
                 )
+                if full_content:
+                    from iris_agent.web_search.fetcher import PageFetcher
+                    _, result = PageFetcher._extract_markdown(result, url)
             except BaseException as exc:
                 primary_error = exc
 

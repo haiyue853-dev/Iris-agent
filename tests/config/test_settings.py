@@ -606,6 +606,7 @@ def test_gateway_settings_defaults(tmp_path):
     settings = load_settings(tmp_path / "missing.yaml")
 
     assert settings.gateway.enabled is False
+    assert settings.gateway.napcat_auto_start is False
     assert settings.gateway.directory == Path("data/gateway")
     assert settings.gateway.qq.enabled is False
     assert settings.gateway.qq.path == "/gateway/qq/ws"
@@ -615,6 +616,35 @@ def test_gateway_settings_defaults(tmp_path):
     assert settings.gateway.wecom.enabled is False
     assert settings.gateway.push.enabled is False
     assert settings.gateway.push.qq_target == ""
+    assert settings.personal_assistant.enabled is False
+    assert settings.personal_assistant.directory == Path("data/personal_assistant")
+    assert settings.personal_assistant.reminder_interval_days == 2
+    assert settings.personal_assistant.quiet_start_hour == 22
+    assert settings.personal_assistant.quiet_end_hour == 8
+
+
+def test_personal_assistant_settings_load_from_yaml(tmp_path):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "personal_assistant:\n"
+        "  enabled: true\n"
+        "  directory: custom/archive\n"
+        "  timezone: Asia/Shanghai\n"
+        "  default_reminder_hour: 19\n"
+        "  reminder_interval_days: 1\n"
+        "  quiet_start_hour: 23\n"
+        "  quiet_end_hour: 7\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(path).personal_assistant
+
+    assert settings.enabled is True
+    assert settings.directory == Path("custom/archive")
+    assert settings.default_reminder_hour == 19
+    assert settings.reminder_interval_days == 1
+    assert settings.quiet_start_hour == 23
+    assert settings.quiet_end_hour == 7
 
 
 def test_gateway_settings_load_from_yaml(tmp_path):
@@ -622,6 +652,7 @@ def test_gateway_settings_load_from_yaml(tmp_path):
     path.write_text(
         "gateway:\n"
         "  enabled: true\n"
+        "  napcat_auto_start: true\n"
         "  qq:\n"
         "    enabled: true\n"
         "    respond_groups: true\n"
@@ -640,6 +671,7 @@ def test_gateway_settings_load_from_yaml(tmp_path):
     gateway = load_settings(path).gateway
 
     assert gateway.enabled is True
+    assert gateway.napcat_auto_start is True
     assert gateway.qq.enabled is True
     assert gateway.qq.respond_groups is True
     assert gateway.qq.allowed_users == ["12345", "67890"]
@@ -649,3 +681,25 @@ def test_gateway_settings_load_from_yaml(tmp_path):
     assert gateway.wecom.agent_id == 1000002
     assert gateway.push.enabled is True
     assert gateway.push.qq_target == "123456789"
+
+
+def test_wecom_aibot_credentials_are_loaded_from_environment_only(tmp_path, monkeypatch):
+    path = tmp_path / "agent.yaml"
+    path.write_text(
+        "gateway:\n"
+        "  wecom:\n"
+        "    aibot:\n"
+        "      enabled: true\n"
+        "      respond_groups: false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IRIS_WECOM_BOT_ID", "env-bot-id")
+    monkeypatch.setenv("IRIS_WECOM_BOT_SECRET", "env-bot-secret")
+
+    aibot = load_settings(path).gateway.wecom.aibot
+
+    assert aibot.enabled is True
+    assert aibot.bot_id == "env-bot-id"
+    assert aibot.secret == "env-bot-secret"
+    assert aibot.respond_groups is False
+    assert "env-bot-secret" not in repr(aibot)

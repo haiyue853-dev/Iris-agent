@@ -25,10 +25,36 @@ class FakeQQAdapter:
         return True
 
 
+class FakeWeComAIBot:
+    def __init__(self, connected: bool):
+        self.connected = connected
+        self.status = "authenticated" if connected else "connecting"
+
+    def send_text(self, user_id: str, text: str) -> bool:
+        return self.connected
+
+
 def make_client(tmp_path, adapter=None):
     sessions = JsonSessionRepository(tmp_path)
     service = AgentService(AgentLoop(EchoProvider(), ToolRegistry()), sessions, "system")
     return TestClient(create_app(service, sessions, qq_adapter=adapter, qq_ws_path="/gateway/qq/ws"))
+
+
+def test_lists_official_wecom_long_connection_status(tmp_path):
+    sessions = JsonSessionRepository(tmp_path)
+    service = AgentService(AgentLoop(EchoProvider(), ToolRegistry()), sessions, "system")
+    client = TestClient(create_app(service, sessions, wecom_aibot=FakeWeComAIBot(connected=True)))
+
+    channels = client.get("/api/gateway/channels").json()["channels"]
+
+    assert channels[-1] == {
+        "id": "wecom-aibot",
+        "name": "企业微信智能机器人",
+        "enabled": True,
+        "connected": True,
+        "transport": "官方 WebSocket 长连接",
+        "status": "authenticated",
+    }
 
 
 def test_lists_qq_channel_connection_status(tmp_path):

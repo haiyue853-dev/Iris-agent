@@ -8,11 +8,21 @@ from pathlib import Path
 import tempfile
 import time
 import subprocess
+import threading
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from uuid import uuid4
 
 import httpx
+
+
+_WINDOWS_MCP_ENV_KEYS = (
+    "PATH", "PATHEXT", "SystemRoot", "WINDIR", "COMSPEC", "TEMP", "TMP",
+    "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+)
+_POSIX_MCP_ENV_KEYS = (
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "XDG_RUNTIME_DIR",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +57,12 @@ class McpCenterService:
     """Stores MCP intent only. Starting a configured process is a separate approved action."""
 
     def __init__(self, settings_file: Path):
+        self._servers_lock = threading.RLock()
+        self._events_lock = threading.RLock()
+        self._tools_lock = threading.RLock()
+        self._sessions_lock = threading.RLock()
+        self._server_locks_guard = threading.Lock()
+        self._server_locks: dict[str, threading.RLock] = {}
         self.settings_file = settings_file
         self._servers = self._load()
         self.events_file = settings_file.with_name("events.json")
@@ -56,20 +72,31 @@ class McpCenterService:
         self._sessions: dict[str, _McpProcessSession | _McpHttpSession] = {}
 
     def list(self) -> list[McpServer]:
-        return sorted(self._servers.values(), key=lambda item: item.name.casefold())
+        with self._servers_lock:
+            return sorted(self._servers.values(), key=lambda item: item.name.casefold())
+
+    def _server_lock(self, server_id: str) -> threading.RLock:
+        with self._server_locks_guard:
+            return self._server_locks.setdefault(server_id, threading.RLock())
 
     def is_connected(self, server_id: str) -> bool:
         """Whether this server currently has a live persistent stdio session."""
-        self.get(server_id)
-        session = self._sessions.get(server_id)
-        return isinstance(session, _McpHttpSession) or (isinstance(session, _McpProcessSession) and session.process.poll() is None)
+        with self._server_lock(server_id):
+            self.get(server_id)
+            with self._sessions_lock:
+                session = self._sessions.get(server_id)
+            return isinstance(session, _McpHttpSession) or (isinstance(session, _McpProcessSession) and session.process.poll() is None)
 
     def close(self) -> None:
-        for server_id in tuple(self._sessions):
-            self._close_session(server_id)
+        with self._sessions_lock:
+            server_ids = tuple(self._sessions)
+        for server_id in server_ids:
+            with self._server_lock(server_id):
+                self._close_session(server_id)
 
     def get(self, server_id: str) -> McpServer:
-        return self._servers[server_id]
+        with self._servers_lock:
+            return self._servers[server_id]
 
     def create(self, *, name: str, command: str = "", args: tuple[str, ...] = (), allowed_tools: tuple[str, ...] = (), transport: str = "stdio", url: str = "", headers: dict[str, str] | None = None) -> McpServer:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
@@ -85,92 +112,111 @@ class McpCenterService:
         if not isinstance(allowed_tools, tuple) or not all(isinstance(item, str) and item.strip() for item in allowed_tools):
             raise ValueError("allowed_tools are invalid")
         server = McpServer(str(uuid4()), name.strip(), command.strip(), args, tuple(dict.fromkeys(allowed_tools)), False, (), 10, transport, url.strip(), self._validate_headers(headers or {}))
-        self._servers[server.id] = server
-        self._save()
+        with self._servers_lock:
+            self._servers[server.id] = server
+            self._save()
         return server
 
     def set_enabled(self, server_id: str, enabled: bool) -> McpServer:
-        current = self.get(server_id)
-        updated = self._updated(current, enabled=bool(enabled))
-        self._servers[server_id] = updated
-        self._save()
-        if not enabled:
-            self._close_session(server_id)
-        return updated
+        with self._server_lock(server_id):
+            current = self.get(server_id)
+            updated = self._updated(current, enabled=bool(enabled))
+            with self._servers_lock:
+                self._servers[server_id] = updated
+                self._save()
+            if not enabled:
+                self._close_session(server_id)
+            return updated
 
     def set_allowed_tools(self, server_id: str, allowed_tools: tuple[str, ...]) -> McpServer:
         if not isinstance(allowed_tools, tuple) or not all(isinstance(item, str) and item.strip() for item in allowed_tools):
             raise ValueError("allowed_tools are invalid")
-        current = self.get(server_id)
-        updated = self._updated(current, allowed_tools=tuple(dict.fromkeys(allowed_tools)))
-        self._servers[server_id] = updated
-        self._save()
-        return updated
+        with self._server_lock(server_id):
+            current = self.get(server_id)
+            updated = self._updated(current, allowed_tools=tuple(dict.fromkeys(allowed_tools)))
+            with self._servers_lock:
+                self._servers[server_id] = updated
+                self._save()
+            return updated
 
     def set_environment(self, server_id: str, environment: dict[str, str]) -> McpServer:
         if not isinstance(environment, dict) or len(environment) > 50:
             raise ValueError("environment is invalid")
         if not all(isinstance(key, str) and key.replace("_", "a").isalnum() and key[:1].isalpha() and len(key) <= 100 and isinstance(value, str) and "\x00" not in value and len(value) <= 10_000 for key, value in environment.items()):
             raise ValueError("environment is invalid")
-        current = self.get(server_id)
-        updated = self._updated(current, environment=tuple(sorted(environment.items())))
-        self._servers[server_id] = updated
-        self._close_session(server_id)
-        self._save()
-        return updated
+        with self._server_lock(server_id):
+            current = self.get(server_id)
+            updated = self._updated(current, environment=tuple(sorted(environment.items())))
+            with self._servers_lock:
+                self._servers[server_id] = updated
+                self._save()
+            self._close_session(server_id)
+            return updated
 
     def set_timeout_seconds(self, server_id: str, timeout_seconds: int) -> McpServer:
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 120:
             raise ValueError("timeout_seconds is invalid")
-        current = self.get(server_id)
-        updated = self._updated(current, timeout_seconds=timeout_seconds)
-        self._servers[server_id] = updated
-        self._close_session(server_id)
-        self._save()
-        return updated
+        with self._server_lock(server_id):
+            current = self.get(server_id)
+            updated = self._updated(current, timeout_seconds=timeout_seconds)
+            with self._servers_lock:
+                self._servers[server_id] = updated
+                self._save()
+            self._close_session(server_id)
+            return updated
 
     def set_headers(self, server_id: str, headers: dict[str, str]) -> McpServer:
-        current = self.get(server_id)
-        updated = self._updated(current, headers=self._validate_headers(headers))
-        self._servers[server_id] = updated
-        self._close_session(server_id)
-        self._save()
-        return updated
+        with self._server_lock(server_id):
+            current = self.get(server_id)
+            updated = self._updated(current, headers=self._validate_headers(headers))
+            with self._servers_lock:
+                self._servers[server_id] = updated
+                self._save()
+            self._close_session(server_id)
+            return updated
 
     def delete(self, server_id: str) -> McpServer:
-        server = self.get(server_id)
-        del self._servers[server_id]
-        self._close_session(server_id)
-        self._save()
-        self._events = deque((event for event in self._events if event["server_id"] != server_id), maxlen=50)
-        self._save_events()
-        self._tools.pop(server_id, None)
-        self._save_tools()
-        return server
+        with self._server_lock(server_id):
+            server = self.get(server_id)
+            with self._servers_lock:
+                del self._servers[server_id]
+                self._save()
+            self._close_session(server_id)
+            with self._events_lock:
+                self._events = deque((event for event in self._events if event["server_id"] != server_id), maxlen=50)
+                self._save_events()
+            with self._tools_lock:
+                self._tools.pop(server_id, None)
+                self._save_tools()
+            return server
 
     def events(self, server_id: str) -> tuple[dict[str, object], ...]:
         self.get(server_id)
-        return tuple(event for event in reversed(self._events) if event["server_id"] == server_id)
+        with self._events_lock:
+            return tuple(event for event in reversed(self._events) if event["server_id"] == server_id)
 
     def cached_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         self.get(server_id)
-        return tuple(self._tools.get(server_id, ()))
+        with self._tools_lock:
+            return tuple(self._tools.get(server_id, ()))
 
     def discover_tools(self, server_id: str) -> tuple[dict[str, object], ...]:
         """Run only the MCP handshake and tools/list request, then terminate the child."""
-        server = self.get(server_id)
-        if not server.enabled:
-            raise ValueError("server is disabled")
-        started = time.perf_counter()
-        try:
-            tools = self._discover(server)
-        except ValueError as exc:
-            self._record_event(server.id, "discovery", False, started, failure_kind=self._failure_kind(exc))
-            raise
-        self._tools[server.id] = tools
-        self._save_tools()
-        self._record_event(server.id, "discovery", True, started)
-        return tools
+        with self._server_lock(server_id):
+            server = self.get(server_id)
+            if not server.enabled:
+                raise ValueError("server is disabled")
+            started = time.perf_counter()
+            try:
+                tools = self._discover(server)
+            except ValueError as exc:
+                self._record_event(server.id, "discovery", False, started, failure_kind=self._failure_kind(exc))
+                raise
+            with self._tools_lock:
+                self._tools[server.id] = tools
+                self._save_tools()
+            self._record_event(server.id, "discovery", True, started)
+            return tools
 
     def _discover(self, server: McpServer) -> tuple[dict[str, object], ...]:
         try:
@@ -206,8 +252,9 @@ class McpCenterService:
             event["tool_name"] = tool_name
         if failure_kind is not None:
             event["failure_kind"] = failure_kind
-        self._events.append(event)
-        self._save_events()
+        with self._events_lock:
+            self._events.append(event)
+            self._save_events()
 
     def enabled_tools(self, discovered_by_server: dict[str, tuple[dict[str, object], ...]] | None = None, *, cached_only: bool = False) -> tuple[tuple[McpServer, dict[str, object]], ...]:
         """Return discoverable tools from enabled servers, restricted to each allowlist."""
@@ -233,19 +280,20 @@ class McpCenterService:
         return tuple(discovered)
 
     def call_tool(self, server_id: str, name: str, arguments: dict[str, object]) -> object:
-        server = self.get(server_id)
-        if not server.enabled or name not in server.allowed_tools or not isinstance(arguments, dict):
-            raise ValueError("MCP tool is not allowed")
-        started = time.perf_counter()
-        try:
-            result = self._call(server, name, arguments)
-            if isinstance(result, dict) and result.get("isError") is True:
-                raise ValueError("MCP tool returned an error")
-        except ValueError as exc:
-            self._record_event(server.id, "tool_call", False, started, name, self._failure_kind(exc))
-            raise
-        self._record_event(server.id, "tool_call", True, started, name)
-        return result
+        with self._server_lock(server_id):
+            server = self.get(server_id)
+            if not server.enabled or name not in server.allowed_tools or not isinstance(arguments, dict):
+                raise ValueError("MCP tool is not allowed")
+            started = time.perf_counter()
+            try:
+                result = self._call(server, name, arguments)
+                if isinstance(result, dict) and result.get("isError") is True:
+                    raise ValueError("MCP tool returned an error")
+            except ValueError as exc:
+                self._record_event(server.id, "tool_call", False, started, name, self._failure_kind(exc))
+                raise
+            self._record_event(server.id, "tool_call", True, started, name)
+            return result
 
     def _call(self, server: McpServer, name: str, arguments: dict[str, object]) -> object:
         try:
@@ -273,7 +321,8 @@ class McpCenterService:
         return response
 
     def _session(self, server: McpServer) -> _McpProcessSession:
-        session = self._sessions.get(server.id)
+        with self._sessions_lock:
+            session = self._sessions.get(server.id)
         if session is not None and session.process.poll() is None:
             return session
         self._close_session(server.id)
@@ -295,11 +344,13 @@ class McpCenterService:
                 pass
             raise ValueError("unable to start MCP session") from exc
         session = _McpProcessSession(process)
-        self._sessions[server.id] = session
+        with self._sessions_lock:
+            self._sessions[server.id] = session
         return session
 
     def _close_session(self, server_id: str) -> None:
-        session = self._sessions.pop(server_id, None)
+        with self._sessions_lock:
+            session = self._sessions.pop(server_id, None)
         if session is None:
             return
         if isinstance(session, _McpHttpSession):
@@ -312,10 +363,12 @@ class McpCenterService:
             session.process.kill()
 
     def _http_request(self, server: McpServer, method: str, params: dict[str, object]) -> dict[str, object]:
-        session = self._sessions.get(server.id)
+        with self._sessions_lock:
+            session = self._sessions.get(server.id)
         if not isinstance(session, _McpHttpSession):
             session = _McpHttpSession(httpx.Client(timeout=server.timeout_seconds, headers={"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26", **dict(server.headers)}))
-            self._sessions[server.id] = session
+            with self._sessions_lock:
+                self._sessions[server.id] = session
             if method != "initialize":
                 self._http_request(server, "initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "iris-agent", "version": "0.1"}})
         request_id = session.next_request_id
@@ -387,7 +440,8 @@ class McpCenterService:
 
     @staticmethod
     def _subprocess_env(server: McpServer) -> dict[str, str]:
-        environment = os.environ.copy()
+        allowed = _WINDOWS_MCP_ENV_KEYS if os.name == "nt" else _POSIX_MCP_ENV_KEYS
+        environment = {key: value for key in allowed if (value := os.environ.get(key)) is not None}
         environment.update(dict(server.environment))
         if os.name == "nt" and server.command.casefold() in {"node", "node.exe"}:
             node_dir = Path(environment.get("ProgramFiles", r"C:\Program Files")) / "nodejs"

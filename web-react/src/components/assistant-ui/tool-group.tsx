@@ -13,7 +13,20 @@ function isTerminalResult(item: IrisToolGroupItem): item is IrisToolGroupItem & 
 }
 
 function progressLabel(items: IrisToolGroupItem[], running: number, failed: number, cancelled: number): string {
-  const fetches = items.filter((item) => item.name === "fetch_page");
+  const active = items.find((item) => item.state === "running" && item.progress?.phase);
+  if (active?.progress) {
+    const { phase, source, completed, total } = active.progress;
+    if (phase === "searching") return `正在搜索${source ? ` · ${source}` : ""}`;
+    if (phase === "rendering") return "正在渲染网页";
+    if (phase === "extracting") return `正在提取网页 ${completed ?? 0}/${total ?? 0}`;
+    if (phase === "fetching") return "正在读取网页";
+  }
+  const partial = items.find((item) => item.name === "web_extract" && item.result && typeof item.result === "object" && Number((item.result as Record<string, unknown>).failed) > 0);
+  if (!running && partial) {
+    const result = partial.result as Record<string, unknown>;
+    return `网页提取：${result.successful} 个成功，${result.failed} 个失败`;
+  }
+  const fetches = items.filter((item) => (item.name === "fetch_page" || item.name === "web_extract"));
   if (fetches.some((item) => item.state === "running")) {
     const completed = fetches.filter((item) => item.state === "completed").length;
     return `正在读取网页 ${completed}/${fetches.length}`;
@@ -31,14 +44,16 @@ function progressLabel(items: IrisToolGroupItem[], running: number, failed: numb
   if (failed) return `${failed} 个工具执行失败`;
 
   const searches = items.filter((item) => item.name === "web_search" && item.state === "completed");
-  if (searches.length === 1 && Array.isArray(searches[0].result)) {
-    return `找到 ${searches[0].result.length} 个结果`;
+  if (searches.length === 1) {
+    const result = searches[0].result;
+    const entries = Array.isArray(result) ? result : result && typeof result === "object" ? (result as Record<string, unknown>).results : undefined;
+    if (Array.isArray(entries)) return `找到 ${entries.length} 个结果`;
   }
 
   // Only web/fetch tools need the LLM to "think" after they finish. For
   // everything else, the existing "已执行 N 个工具" wording is more accurate
   // and keeps the existing tests stable.
-  const needsAnalysis = items.some((item) => item.name === "fetch_page" || item.name === "web_search");
+  const needsAnalysis = items.some((item) => (item.name === "fetch_page" || item.name === "web_extract") || item.name === "web_search");
   if (items.length > 0 && items.every((item) => item.state === "completed") && needsAnalysis) {
     return `已读取 ${items.length} 个工具结果，正在分析…`;
   }
@@ -84,7 +99,7 @@ export function ToolGroup({ items }: { items: IrisToolGroupItem[] }) {
             <details className="iris-tool-item" key={item.callId}>
               <summary>
                 {item.state === "running" ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : item.state === "failed" || item.state === "cancelled" ? <XCircleIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
-                <span>{item.name}{item.state === "cancelled" ? " · 已停止" : ""}</span>
+                <span>{item.name}{item.state === "cancelled" ? " · 已停止" : ""}{item.progress?.source ? ` · ${item.progress.source}` : ""}{item.durationMs !== undefined ? ` · ${(item.durationMs / 1000).toFixed(1)} 秒` : ""}</span>
               </summary>
               <div className="iris-tool-item-detail">
                 <p>参数</p>
