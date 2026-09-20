@@ -8,16 +8,19 @@ import {
 import {
   createIrisAdapter,
   createEventQueue,
+  findRegenerationSource,
   toThreadMessages,
   type IrisAdapterController,
 } from "@/lib/irisRuntime";
 import type { AgentEvent, Message } from "@/types";
 import { createSession, formatChatError, setSessionModelProfile, streamChat } from "@/api/chat";
+import { deleteAttachment, uploadAttachment } from "@/api/attachments";
 import { getDelegation } from "@/api/delegations";
 import { fetchSettingsProfiles } from "@/api/settings";
 import { fetchSkills } from "@/api/skills";
 import { readCapabilityMode, readOnlineSearchEnabled, toolsetsForMode, withOnlineSearch } from "@/lib/capability-mode";
 import type { Session, SkillInfo } from "@/types";
+import { createIrisAttachmentAdapter } from "@/lib/irisAttachmentAdapter";
 
 type AssistantChatProps = {
   sessionId: string;
@@ -55,6 +58,7 @@ export function AssistantChat({
   sessionIdRef.current = sessionId;
 
   const controllerRef = useRef<IrisAdapterController | null>(null);
+  const sessionCreationRef = useRef<Promise<string> | null>(null);
   const queue = useMemo(() => createEventQueue(), []);
   const [modelProfiles, setModelProfiles] = useState<Array<{ id: string; name: string; model: string }>>([]);
   const [activeModelProfileId, setActiveModelProfileId] = useState<string | null>(null);
@@ -110,6 +114,22 @@ export function AssistantChat({
     [queue, onEvent],
   );
 
+  const ensureSession = useCallback(async (name: string, initialMessage?: string) => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (!sessionCreationRef.current) {
+      sessionCreationRef.current = createSession(name.slice(0, 30) || "新会话", selectedModelProfileId)
+        .then((session) => {
+          sessionIdRef.current = session.id;
+          onSessionAvailable?.(session, initialMessage);
+          return session.id;
+        })
+        .finally(() => {
+          sessionCreationRef.current = null;
+        });
+    }
+    return sessionCreationRef.current;
+  }, [onSessionAvailable, selectedModelProfileId]);
+
   const adapter = useMemo(
     () =>
       createIrisAdapter({
@@ -126,13 +146,7 @@ export function AssistantChat({
           : toolsetsForMode(readCapabilityMode(), readOnlineSearchEnabled()),
         getSkillId: () => activeSkillRef.current?.id,
         onSkillUsed: handleSkillUsed,
-        ensureSession: async (text: string) => {
-          if (sessionIdRef.current) return sessionIdRef.current;
-          const session = await createSession(text.slice(0, 30) || "新会话", selectedModelProfileId);
-          sessionIdRef.current = session.id;
-          onSessionAvailable?.(session, text);
-          return session.id;
-        },
+        ensureSession: (text: string) => ensureSession(text, text),
         enqueue,
         queue,
         registerController: (controller) => {
@@ -154,11 +168,18 @@ export function AssistantChat({
       useKnowledge,
       handleSkillUsed,
       selectedModelProfileId,
+      ensureSession,
     ],
   );
 
   const initialMessages = useMemo(() => toThreadMessages(messages), [messages]);
-  const options = useMemo(() => ({ initialMessages }), [initialMessages]);
+  const attachmentAdapter = useMemo(() => createIrisAttachmentAdapter({
+    ensureSession,
+    getSessionId: () => sessionIdRef.current,
+    upload: uploadAttachment,
+    remove: deleteAttachment,
+  }), [ensureSession]);
+  const options = useMemo(() => ({ initialMessages, adapters: { attachments: attachmentAdapter } }), [attachmentAdapter, initialMessages]);
 
   const runtime = useLocalRuntime(adapter, options);
 
@@ -178,14 +199,15 @@ export function AssistantChat({
     return () => { disposed = true; window.clearInterval(timer); };
   }, [onSessionRefreshed, queuedDelegationIds, runtime]);
 
-  const regenerate = useCallback(async (userMessageId: string) => {
+  const regenerate = useCallback(async (assistantMessageId: string) => {
     const activeSessionId = sessionIdRef.current;
     if (!activeSessionId || isRegenerating) return;
-    const targetIndex = messages.findIndex((message) => message.id === userMessageId);
-    const candidates = targetIndex >= 0 ? messages.slice(0, targetIndex + 1) : messages;
-    const sourceMessage = messages.find(
-      (message) => message.id === userMessageId && message.role === "user",
-    ) ?? [...candidates].reverse().find((message) => message.role === "user");
+    let history = messages;
+    let sourceMessage = findRegenerationSource(history, assistantMessageId);
+    if (!sourceMessage && onSessionRefreshed) {
+      history = await onSessionRefreshed(activeSessionId) ?? history;
+      sourceMessage = findRegenerationSource(history, assistantMessageId);
+    }
     if (!sourceMessage) return;
 
     setIsRegenerating(true);
@@ -210,7 +232,7 @@ export function AssistantChat({
         knowledgeCollectionId || undefined,
         knowledgeQueryMode,
         useKnowledge,
-        sourceMessage.id || userMessageId,
+        assistantMessageId,
         localStorage.getItem("iris_chat_response_mode") === "thinking" ? "thinking" : "fast",
         toolsets,
         activeSkill?.id,
@@ -220,9 +242,9 @@ export function AssistantChat({
       const refreshedMessages = await onSessionRefreshed?.(activeSessionId);
       if (refreshedMessages) runtime.thread.reset(toThreadMessages(refreshedMessages));
     } catch (error) {
-      const history = messages.slice(0, messages.indexOf(sourceMessage) + 1);
+      const errorHistory = history.slice(0, history.indexOf(sourceMessage) + 1);
       runtime.thread.reset(toThreadMessages([
-        ...history,
+        ...errorHistory,
         { role: "assistant", content: "", error: formatChatError(error) },
       ]));
     } finally {

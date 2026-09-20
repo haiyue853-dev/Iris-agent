@@ -227,6 +227,20 @@ function extractText(messages: readonly { role: string; content: unknown }[]): s
   return "";
 }
 
+function extractAttachmentIds(messages: readonly { role: string; attachments?: readonly { id?: string }[] }[]): string[] {
+  const lastUser = [...messages].reverse().find((message) => message.role === "user");
+  return lastUser?.attachments?.map((attachment) => attachment.id).filter((id): id is string => Boolean(id)) ?? [];
+}
+
+export function findRegenerationSource(history: Message[], assistantMessageId: string): Message | undefined {
+  const assistantIndex = history.findIndex((message) => message.id === assistantMessageId && message.role === "assistant");
+  if (assistantIndex < 0) return undefined;
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    if (history[index]?.role === "user") return history[index];
+  }
+  return undefined;
+}
+
 function regenerationMessageId(messages: readonly { id?: string; role: string }[], runConfig: unknown): string | undefined {
   if (!(runConfig as { custom?: { irisRegenerate?: boolean } } | undefined)?.custom?.irisRegenerate) return undefined;
   return [...messages].reverse().find((message) => message.role === "user")?.id;
@@ -268,12 +282,14 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal, runConfig }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
       const text = extractText(messages as unknown as { role: string; content: unknown }[]);
-      if (!text.trim()) return;
+      const attachmentIds = extractAttachmentIds(messages);
+      if (!text.trim() && attachmentIds.length === 0) return;
       const regenerateFromMessageId = regenerationMessageId(messages, runConfig);
 
       let sessionId: string;
       try {
-        sessionId = await deps.ensureSession(text);
+        const attachmentName = [...messages].reverse().find((message) => message.role === "user")?.attachments?.[0]?.name;
+        sessionId = await deps.ensureSession(text || attachmentName || "新会话");
       } catch (error) {
         const message = formatChatError(error);
         yield { content: [], status: { type: "incomplete", reason: "error", error: message } };
@@ -477,7 +493,20 @@ export function createIrisAdapter(deps: IrisAdapterDeps): ChatModelAdapter {
       });
 
       // Original stream: yields up to `tool_approval_requested`, then ends.
-      const streamPromise = streamChat(sessionId, text, transportAbort.signal, enqueueEvent, [], deps.getKnowledgeCollectionId?.(), deps.getKnowledgeQueryMode?.() || "mix", deps.getUseKnowledge?.() || false, regenerateFromMessageId, deps.getResponseMode?.() || "fast", toolsets, skillId).then(() => {
+      const streamPromise = streamChat(
+        sessionId,
+        text,
+        transportAbort.signal,
+        enqueueEvent,
+        attachmentIds,
+        deps.getKnowledgeCollectionId?.(),
+        deps.getKnowledgeQueryMode?.() || "mix",
+        deps.getUseKnowledge?.() || false,
+        regenerateFromMessageId,
+        deps.getResponseMode?.() || "fast",
+        toolsets,
+        skillId,
+      ).then(() => {
         if (!streamHasTerminalEvent && !abortSignal.aborted && !transportAbort.signal.aborted) {
           enqueueEvent({ type: "error", data: { code: "stream_incomplete", message: "响应中断，未收到完整回复，请重试。" } });
         }
@@ -597,6 +626,18 @@ export function toThreadMessages(history: Message[]): ThreadMessageLike[] {
         role: role as "user" | "assistant",
         content: m.role === "assistant" ? groupSourceParts(content) : content,
         id: m.id || `${m.role}-${i}`,
+        ...(m.role === "user" && m.attachments?.length
+          ? {
+              attachments: m.attachments.map((attachment) => ({
+                id: attachment.id || `attachment-${i}`,
+                type: attachment.media_type.startsWith("image/") ? "image" : "document",
+                name: attachment.original_name,
+                contentType: attachment.media_type,
+                status: { type: "complete" as const },
+                content: [],
+              })),
+            }
+          : {}),
         ...(m.role === "assistant" && m.id
           ? { metadata: { custom: { serverMessageId: m.id } } }
           : {}),

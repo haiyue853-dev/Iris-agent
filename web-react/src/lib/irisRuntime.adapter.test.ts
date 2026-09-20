@@ -14,7 +14,7 @@ vi.mock("../api/chat", async (importOriginal) => ({
 }));
 vi.mock("../api/tasks", () => ({ cancelTask: vi.fn() }));
 
-import { createEventQueue, createIrisAdapter } from "./irisRuntime";
+import { createEventQueue, createIrisAdapter, findRegenerationSource } from "./irisRuntime";
 
 describe("Iris chat adapter", () => {
   it("does not treat assistant-ui's local parent ID as a backend regeneration ID", async () => {
@@ -38,10 +38,34 @@ describe("Iris chat adapter", () => {
     expect((first.value as { content: unknown[] }).content).toEqual([{ type: "reasoning", text: "正在思考…" }]);
 
     const request = streamChat.mock.calls[0];
-    expect(request).toEqual([
+    expect(request.slice(0, 12)).toEqual([
       "session-1", "你好", expect.any(AbortSignal), expect.any(Function), [], undefined, "mix", false, undefined, "fast", ["safe", "research"], undefined,
     ]);
-    expect(request).toHaveLength(12);
+  });
+
+  it("sends uploaded attachment ids and allows an attachment-only message", async () => {
+    streamChat.mockClear();
+    const queue = createEventQueue();
+    const adapter = createIrisAdapter({
+      getSessionId: () => "session-1",
+      ensureSession: async () => "session-1",
+      enqueue: queue.push,
+      queue,
+      registerController: () => undefined,
+    });
+    const stream = adapter.run({
+      messages: [{
+        role: "user",
+        content: [],
+        attachments: [{ id: "attachment-1", type: "document", name: "notes.txt", status: { type: "complete" }, content: [] }],
+      }],
+      abortSignal: new AbortController().signal,
+    } as never) as AsyncGenerator<unknown>;
+
+    await stream.next();
+
+    expect(streamChat.mock.calls[0]?.[1]).toBe("");
+    expect(streamChat.mock.calls[0]?.[4]).toEqual(["attachment-1"]);
   });
 
   it("sends the selected Skill ID without changing the visible user text", async () => {
@@ -221,6 +245,20 @@ describe("Iris chat adapter", () => {
 
     expect(stopped).not.toBeNull();
     expect(transportSignal.aborted).toBe(true);
+  });
+});
+
+describe("regeneration source lookup", () => {
+  it("uses the selected backend assistant id instead of a UI parent id", () => {
+    const history = [
+      { id: "user-1", role: "user", content: "第一问" },
+      { id: "tool-1", role: "tool", content: "{}" },
+      { id: "assistant-1", role: "assistant", content: "第一答" },
+      { id: "user-2", role: "user", content: "第二问" },
+      { id: "assistant-2", role: "assistant", content: "第二答" },
+    ];
+
+    expect(findRegenerationSource(history as never, "assistant-1")).toMatchObject({ id: "user-1", content: "第一问" });
   });
 });
 

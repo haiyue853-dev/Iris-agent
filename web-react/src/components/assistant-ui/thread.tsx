@@ -406,16 +406,16 @@ const AssistantActionBar: FC = () => {
 };
 
 const RegenerateButton: FC = () => {
-  const userMessageId = useAuiState((state) => state.message.parentId);
+  const assistantMessageId = useAuiState((state) => state.message.metadata.custom.serverMessageId as string | undefined);
   const { regenerate, isRegenerating } = useIrisChat();
 
   return (
     <TooltipIconButton
       type="button"
       tooltip="重新生成"
-      disabled={!userMessageId || isRegenerating}
+      disabled={!assistantMessageId || isRegenerating}
       onClick={() => {
-        if (userMessageId) void regenerate(userMessageId);
+        if (assistantMessageId) void regenerate(assistantMessageId);
       }}
     >
       <RefreshCwIcon className={isRegenerating ? "animate-spin" : undefined} />

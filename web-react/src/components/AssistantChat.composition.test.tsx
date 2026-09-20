@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantChat } from './AssistantChat';
 import { createSession, streamChat } from '../api/chat';
 import { optimizePrompt } from '../api/prompt';
 import { fetchSkills } from '../api/skills';
+import { uploadAttachment } from '../api/attachments';
 
 vi.mock('../api/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/chat')>(),
@@ -15,6 +16,11 @@ vi.mock('../api/chat', async (importOriginal) => ({
 vi.mock('../api/prompt', () => ({ optimizePrompt: vi.fn() }));
 vi.mock('../api/skills', () => ({ fetchSkills: vi.fn() }));
 vi.mock('../api/settings', () => ({ fetchSettingsProfiles: vi.fn(async () => ({ profiles: [], active_id: null })) }));
+vi.mock('../api/attachments', () => ({
+  uploadAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
+  attachmentDownloadUrl: vi.fn(() => 'http://localhost/attachment'),
+}));
 
 if (typeof HTMLElement.prototype.scrollTo === 'undefined') {
   HTMLElement.prototype.scrollTo = () => {};
@@ -45,6 +51,28 @@ describe('AssistantChat composer', () => {
     expect(screen.getByRole('button', { name: '联网搜索' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: '优化提示词' })).toBeVisible();
     expect(screen.getByRole('button', { name: '选择模型' })).toBeVisible();
+  });
+
+  it('uploads dropped files and sends their backend attachment ids', async () => {
+    vi.mocked(createSession).mockResolvedValue({ id: 'session-upload', name: 'notes.txt', created_at: 1, updated_at: 1 });
+    vi.mocked(uploadAttachment).mockResolvedValue({
+      id: 'attachment-1', original_name: 'notes.txt', media_type: 'text/plain', size_bytes: 4,
+      created_at: '2026-09-20T00:00:00Z', extraction_status: 'ready', text_truncated: false, sources: [],
+    });
+    vi.mocked(streamChat).mockImplementationOnce(async (_id, _text, _signal, onEvent) => {
+      onEvent({ type: 'message_completed', data: { message_id: 'assistant-upload', content: '已读取' } });
+    });
+    const { container } = render(<AssistantChat sessionId="" messages={[]} />);
+    const dropzone = container.querySelector('.aui-composer-attachment-dropzone');
+    const file = new File(['memo'], 'notes.txt', { type: 'text/plain' });
+
+    fireEvent.drop(dropzone!, { dataTransfer: { files: [file] } });
+
+    await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith('session-upload', file));
+    expect(await screen.findByText('notes.txt')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(streamChat).toHaveBeenCalled());
+    expect(vi.mocked(streamChat).mock.calls[0]?.[4]).toEqual(['attachment-1']);
   });
 
   it('shows speech controls below completed assistant replies only', async () => {
@@ -175,8 +203,29 @@ describe('AssistantChat composer', () => {
     fireEvent.click(await screen.findByRole('button', { name: '重新生成' }));
 
     await waitFor(() => expect(streamChat).toHaveBeenCalled());
-    expect(vi.mocked(streamChat).mock.calls[0]?.[8]).toBe('user-1');
+    expect(vi.mocked(streamChat).mock.calls[0]?.[8]).toBe('assistant-1');
     await waitFor(() => expect(onSessionRefreshed).toHaveBeenCalledWith('session-1'));
+  });
+
+  it('regenerates the selected historical answer rather than the latest turn', async () => {
+    vi.mocked(streamChat).mockImplementationOnce(async (_id, _text, _signal, onEvent) => {
+      onEvent({ type: 'message_completed', data: { content: '第一答（新）' } });
+    });
+    const messages = [
+      { id: 'user-1', role: 'user' as const, content: '第一问' },
+      { id: 'assistant-1', role: 'assistant' as const, content: '第一答' },
+      { id: 'user-2', role: 'user' as const, content: '第二问' },
+      { id: 'assistant-2', role: 'assistant' as const, content: '第二答' },
+    ];
+    render(<AssistantChat sessionId="session-1" messages={messages} onSessionRefreshed={vi.fn().mockResolvedValue(messages)} />);
+
+    const firstAnswer = (await screen.findByText('第一答')).closest('[data-role="assistant"]');
+    fireEvent.mouseEnter(firstAnswer!);
+    fireEvent.click(await within(firstAnswer as HTMLElement).findByRole('button', { name: '重新生成' }));
+
+    await waitFor(() => expect(streamChat).toHaveBeenCalled());
+    expect(vi.mocked(streamChat).mock.calls[0]?.[1]).toBe('第一问');
+    expect(vi.mocked(streamChat).mock.calls[0]?.[8]).toBe('assistant-1');
   });
 
   it('shows an actionable model error when regeneration fails', async () => {
